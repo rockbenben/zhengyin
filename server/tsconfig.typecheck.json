@@ -1,0 +1,14 @@
+{
+  // 只为**类型检查**用的配置，不产出任何东西。
+  //
+  // tsconfig.json 那份要 emit 到 dist，所以它 `exclude` 掉了测试文件——
+  // 副作用是 server 的测试**任何地方都不做类型检查**：往 judge.test.ts 里塞一句
+  // `const x: number = "字符串"`，`npm run build` 绿、`npm test` 也绿（实测过）。
+  //
+  // web 那边没这个问题：web/tsconfig.json 的 include 是整个 src，
+  // 而 build 脚本里就有 `tsc --noEmit`，所以它的测试是被检查的。
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src"],
+  "exclude": []
+}

@@ -1,0 +1,524 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   套印 —— 手写样式层。
+   调色板由 theme.ts 的 applyPalette() 写进 CSS variables，跟 antd 的 token 同源。
+   这里只放 antd token 覆盖不到的东西：套印带、发音部位尺、音位格、版面装置。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --measure: 64ch;          /* 正文测量宽 */
+  --gutter: clamp(18px, 4vw, 40px);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--black);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 键盘焦点必须看得见。凸版世界里用实线框，不用光晕 */
+:where(a, button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+/* ── 版面装置 ─────────────────────────────────────────────────────────── */
+
+/* 套准标记：印刷版上用来对齐两块版的十字加圆。这里是真的在标记「这一页由两版印成」 */
+.reg-mark { position: relative; width: 20px; height: 20px; flex: none; opacity: .65; }
+.reg-mark::before,
+.reg-mark::after { content: ""; position: absolute; background: var(--black); }
+.reg-mark::before { left: 9px; top: 0; width: 1px; height: 20px; }
+.reg-mark::after { top: 9px; left: 0; height: 1px; width: 20px; }
+.reg-mark i {
+  position: absolute; inset: 3.5px; border: 1px solid var(--blue);
+  border-radius: 50%; transform: translate(1.5px, 1.5px);
+}
+
+/* 小标签：等宽、疏排、大写。数据与结构标注都用它 */
+.slug {
+  font: 11px/1.5 var(--font-mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ipa { font-family: var(--font-ipa); }
+
+/* 词条大字 */
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -.022em;
+  line-height: .96;
+  margin: 0;
+  /* 词条页的大字就是**用户输进来的那个词**，而这一档最大 76px。
+     多词短语在空格处折行没事，一个长单词（pneumonoultramicroscopic… 45 个字母）
+     实测在 390px 视口下量出 872px，把整页撑成横向滚动。
+     **必须是 anywhere 不是 break-word**：break-word 只在"放不下了"才断，
+     而它不参与 min-content 计算——网格轨道（1fr = minmax(auto,1fr)）照样按
+     整词宽度撑开，于是计算样式显示已生效、页面却还是横滚。anywhere 会把断点
+     算进 min-content，轨道才收得回来。短词一个也不受影响。 */
+  overflow-wrap: anywhere;
+}
+
+.measure { max-width: var(--measure); }
+
+/* ── 套印带：这个工具的签名元素 ───────────────────────────────────────── */
+
+.op {
+  border-top: 2px solid var(--black);
+  border-bottom: 1px solid var(--rule);
+  padding: 26px 0 22px;
+}
+.op-seq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px clamp(12px, 3vw, 28px);
+  align-items: flex-start;
+  padding-top: 10px;
+}
+
+.op-seg { position: relative; min-width: 48px; }
+
+/* 黑版在下、蓝版叠上去。套准正确时蓝完全藏在黑后面，读作一个字 */
+.op-glyph {
+  display: block;
+  position: relative;
+  font-family: var(--font-ipa);
+  font-size: clamp(26px, 4.4vw, 38px);
+  line-height: 1.15;
+  color: var(--black);
+  white-space: nowrap;
+}
+.op-glyph::after {
+  content: attr(data-blue);
+  position: absolute; left: 0; top: 0;
+  color: var(--blue);
+  mix-blend-mode: multiply;
+  transform: translate(0, 0);
+  animation: op-register .55s cubic-bezier(.2, .9, .3, 1) both;
+}
+@keyframes op-register {
+  from { transform: translate(14px, 6px); opacity: 0; }
+  to   { transform: translate(0, 0); opacity: 1; }
+}
+
+/* 错：蓝版滑开，停在错位处 */
+.op-seg[data-state="sub"] .op-glyph::after { animation-name: op-slip; transform: translate(14px, 6px); }
+@keyframes op-slip {
+  from { transform: translate(28px, 12px); opacity: 0; }
+  to   { transform: translate(14px, 6px); opacity: 1; }
+}
+.op-seg[data-state="sub"]::before {
+  content: ""; position: absolute;
+  left: -7px; right: -7px; top: -9px; bottom: -5px;
+  border: 1px solid var(--blue);
+  pointer-events: none;
+}
+
+/* 漏：只有黑版，没有蓝版。
+   字本身要读得出来——"漏了哪个音"是信息，不是装饰。淡到读不出来的话，
+   这一格就只剩一个"你错了"的感觉，说不出错在哪。缺席那层意思交给底下那道虚线
+   和小注去表达（slot 那个色的对比度只有 1.96:1，只配画线，不配写字）。 */
+.op-seg[data-state="del"] .op-glyph { color: var(--quiet); }
+.op-seg[data-state="del"] .op-glyph::after { content: none; }
+.op-seg[data-state="del"] .op-glyph::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 2px;
+  border-bottom: 1px dashed var(--slot);
+}
+
+/* 多：一个没有黑底的孤立蓝字 */
+.op-seg[data-state="ins"] .op-glyph { color: transparent; }
+.op-seg[data-state="ins"] .op-glyph::after { color: var(--blue); mix-blend-mode: normal; }
+
+/* 模型自己拿不准：降到弱文字色 + 虚线框，绝不冒充成确凿的错。
+   同样不能用 slot——它拿不准的那个音仍然是你要看的信息 */
+.op-seg[data-unsure="1"] .op-glyph::after { color: var(--quiet); }
+.op-seg[data-unsure="1"]::before { border-color: var(--slot); border-style: dashed; }
+
+.op-tick {
+  display: block; margin-top: 10px;
+  font: 10.5px/1.5 var(--font-mono);
+  letter-spacing: .05em;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+.op-seg[data-state="sub"] .op-tick { color: var(--blue); font-weight: 700; }
+/* 拿不准的那格：**用 quiet，不用 slot**。
+   理由上面十二行已经写过一遍了（"它拿不准的那个音仍然是你要看的信息"），
+   而且字形那一行照做了——偏偏它正下方这行小注用了 slot，
+   而这行写的正是「你发成了什么」，就是那句话说的"你要看的信息"。
+   slot 的对比度 1.96:1，theme.ts 那行注释写着"只用于线，不用于文字"。
+   降一档靠的是**不加粗、不用蓝**（对比 sub 是蓝＋700），不是让它读不出来。 */
+.op-seg[data-unsure="1"] .op-tick { color: var(--quiet); font-weight: 400; }
+
+/* 只给屏幕阅读器。视觉上拿掉、语义上留着 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* 深色纸上印白墨：multiply 会把蓝版吃掉，改用 screen */
+@media (prefers-color-scheme: dark) {
+  .op-glyph::after { mix-blend-mode: screen; }
+}
+:root[data-theme="dark"] .op-glyph::after { mix-blend-mode: screen; }
+:root[data-theme="light"] .op-glyph::after { mix-blend-mode: multiply; }
+
+/* ── 发音部位尺 ───────────────────────────────────────────────────────── */
+
+.ruler { padding: 4px 0 2px; }
+.ruler-track {
+  position: relative;
+  height: 3px;
+  background: var(--rule);
+  margin: 26px 0 8px;
+}
+.ruler-tick {
+  position: absolute; top: -5px; width: 1px; height: 13px;
+  background: var(--rule); transform: translateX(-50%);
+}
+.ruler-pin {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 13px; height: 13px; border-radius: 50%;
+}
+.ruler-pin[data-plate="black"] { background: var(--black); }
+.ruler-pin[data-plate="blue"] { background: var(--paper); border: 3px solid var(--blue); }
+.ruler-label {
+  position: absolute; top: 18px; transform: translateX(-50%);
+  font: 10.5px/1.4 var(--font-mono); letter-spacing: .04em;
+  white-space: nowrap;
+}
+.ruler-label[data-plate="black"] { color: var(--black); }
+.ruler-label[data-plate="blue"] { color: var(--blue); top: -30px; }
+
+/* 元音四边形 */
+.quad { position: relative; width: 100%; max-width: 260px; aspect-ratio: 5 / 4; }
+.quad svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* ── 音位格（统计页） ─────────────────────────────────────────────────── */
+
+.grid-wrap { overflow-x: auto; }
+.grid-table { border-collapse: collapse; width: 100%; min-width: 620px; }
+.grid-table th,
+.grid-table td { border: 1px solid var(--rule); padding: 0; }
+.grid-table thead th,
+.grid-table tbody th {
+  font: 11px/1.35 var(--font-mono);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--quiet);
+  background: var(--paper-deep);
+  font-weight: 500;
+}
+.grid-table thead th { padding: 9px 4px; vertical-align: bottom; }
+.grid-table tbody th { padding: 8px 10px; text-align: left; white-space: nowrap; }
+.grid-table td { text-align: center; height: 44px; position: relative; }
+.grid-cell {
+  display: block; padding: 12px 2px;
+  font: 18px/1 var(--font-ipa);
+  color: var(--black);
+}
+/* 没错过的音：压弱，但仍要读得出来——整张表的意义就是让你认出每一格是什么音 */
+.grid-table td[data-heat="0"] .grid-cell { color: var(--quiet); opacity: .55; }
+.grid-table td[data-heat="1"] { background: color-mix(in srgb, var(--blue) 12%, transparent); }
+.grid-table td[data-heat="2"] { background: color-mix(in srgb, var(--blue) 30%, transparent); }
+.grid-table td[data-heat="3"] { background: color-mix(in srgb, var(--blue) 55%, transparent); }
+.grid-table td[data-heat="4"] { background: var(--blue); }
+.grid-table td[data-heat="4"] .grid-cell { color: var(--paper); }
+.grid-count {
+  position: absolute; top: 3px; right: 5px;
+  font: 700 9.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--blue);
+}
+.grid-table td[data-heat="4"] .grid-count { color: var(--paper); }
+/* 整列命中时在列底压一道实线，把"错误集中在这个部位"这件事说出来 */
+.grid-table th[data-column-hit="1"] { position: relative; color: var(--blue); }
+.grid-table th[data-column-hit="1"]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--blue);
+}
+
+/* ── 笔记正文（react-markdown 输出） ─────────────────────────────────── */
+/* 笔记是要读的文章，按文章排。开头那个跟标题重复的 H1 由 NoteBody 去掉了，
+   所以这里的层级从 h2 起算。 */
+
+.note-md { max-width: var(--measure); }
+.note-md > :first-child { margin-top: 0; }
+.note-md > :last-child { margin-bottom: 0; }
+
+/* h2 是笔记里的主要分节（原理 / 自检法 / 对比训练）。
+   原来给它加了整宽的 border-top，可它外面还套着一条左侧竖线，两条线在拐角处打架，
+   看着像排版错位。改成在标题前面压一小段短线，既分节又不跟外框冲突。 */
+.note-md h2 {
+  font: 600 16px/1.4 var(--font-body);
+  margin: 2em 0 .6em;
+  padding-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-wrap: balance;
+}
+.note-md h2::before {
+  content: "";
+  width: 14px; height: 2px; flex: none;
+  background: var(--blue);
+}
+.note-md h3, .note-md h4 {
+  font: 600 14.5px/1.45 var(--font-body);
+  margin: 1.5em 0 .45em;
+  text-wrap: balance;
+}
+/* 正文里万一还有 H1（不是重题的那种），压到跟 h2 一档，别再比外层标题大 */
+.note-md h1 { font: 600 18px/1.35 var(--font-body); margin: 1.6em 0 .6em; }
+
+.note-md p, .note-md li { font-size: 14.5px; line-height: 1.9; }
+.note-md p { margin: 0 0 .95em; }
+.note-md ul, .note-md ol { padding-left: 1.35em; margin: 0 0 .95em; }
+.note-md li { margin-bottom: .3em; }
+.note-md li::marker { color: var(--quiet); }
+.note-md strong { font-weight: 600; }
+
+.note-md code {
+  font: 13px/1.5 var(--font-mono);
+  background: var(--blue-soft);
+  padding: 1px 5px;
+}
+
+/* 破坏性动作的链接。红是留给它的（调色板：`red: 只给破坏性操作`），
+   但**不该一直亮着**：删词条很少做，却在表格右边排成一列红字，是整页最重的一块颜色。
+   平时压成弱文字，指过去/键盘落上去才变红——该在的时候在，不用的时候不喊。 */
+.danger-link {
+  /* 它是个 <button>（不是链接——删词条不是导航，而且没有 href 的 <a> 聚不了焦）。
+     外观还是一行字，所以按钮那身默认皮全部脱掉。 */
+  background: none;
+  border: 0;
+  /* 内边距撑手指、负外边距抵掉版面影响：光看是两个字，摸得着的是 40×30。
+     不加的话实测 28×22，低于触摸目标的下限（WCAG 2.5.8 要 24×24），
+     而它删的是词条连同复习进度——最不该点偏的那一个。 */
+  padding: 4px 6px;
+  margin: -4px -6px;
+  font: inherit;
+  color: var(--quiet);
+  cursor: pointer;
+  transition: color .12s ease;
+}
+.danger-link:hover,
+.danger-link:focus-visible { color: var(--red); }
+
+/* 侧栏「复习」后面那个到期数。
+   **不用 antd 的 Badge**：它取 colorError，而这套调色板自己写着
+   `red: 只给破坏性操作`。待办数不是错误，也不是破坏性操作。
+   用蓝版的淡网点做底、蓝字——跟「去复习」那个链接同色，数字和动作对得上。 */
+.due-count {
+  display: inline-block;
+  margin-left: 8px;
+  min-width: 18px;
+  padding: 0 5px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  border-radius: 9px;
+  font: 600 11.5px/18px var(--font-mono);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 笔记里的表格几乎全是**对照表**：minimal pairs、错法 vs 正确、词尾连缀一览。
+   它们是笔记里信息密度最高的部分，值得排版排到位。
+   （在挂上 remark-gfm 之前，这些表整块糊成一行管道符——见 NoteBody.tsx 的注释。）
+
+   横向滚动放在**表自己身上**：对照表列多的时候，窄窗口下不能让整个页面横着滚。 */
+.note-md .table-wrap { overflow-x: auto; margin: 1.1em 0; }
+.note-md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+.note-md th, .note-md td {
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+  line-height: 1.7;
+}
+/* 表头用刊头那套小字，跟正文拉开层级，又不抢眼 */
+.note-md th {
+  font: 600 12px/1.5 var(--font-body);
+  letter-spacing: .06em;
+  color: var(--quiet);
+  border-bottom: 1.5px solid var(--black);
+  white-space: nowrap;
+}
+/* 音标那一列几乎都在表里，别让它跟正文混成一片 */
+.note-md td code { background: none; padding: 0; }
+
+/* 笔记里的引用块几乎都是那句"这是方言习惯，不是生理缺陷"——安慰的话，
+   给它一个安静的样子，别做成警告框 */
+.note-md blockquote {
+  margin: 1.1em 0;
+  padding: 12px 16px;
+  background: var(--paper-deep);
+  border-left: 3px solid var(--rule);
+  color: var(--quiet);
+}
+.note-md blockquote p { margin: 0; }
+.note-md blockquote strong { color: var(--black); }
+
+/* minimal pair 的对照表。窄屏要能横滚，不能把整页撑歪——
+   横滚容器套在 table 外层，由 .note-md table 的父级提供 */
+.note-md :is(table) { display: block; overflow-x: auto; max-width: 100%; }
+.note-md table {
+  border-collapse: collapse;
+  margin: 0 0 1.1em;
+  font-variant-numeric: tabular-nums;
+}
+.note-md th, .note-md td {
+  border: 1px solid var(--rule);
+  padding: 7px 13px;
+  font-size: 13.5px;
+  text-align: left;
+}
+.note-md th { background: var(--paper-deep); font-weight: 500; color: var(--quiet); }
+.note-md hr { border: 0; border-top: 1px solid var(--rule); margin: 1.8em 0; }
+
+/* ── 侧栏 ─────────────────────────────────────────────────────────────── */
+
+.nav-brand {
+  display: flex; align-items: center; gap: 11px;
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid var(--rule);
+}
+.nav-brand b {
+  font: 600 14px/1.3 var(--font-body);
+  letter-spacing: .02em;
+}
+.nav-brand small {
+  display: block;
+  font: 10px/1.4 var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+.nav-foot {
+  padding: 14px 20px;
+  border-top: 1px solid var(--rule);
+  font: 10.5px/1.7 var(--font-mono);
+  letter-spacing: .04em;
+  color: var(--quiet);
+}
+.nav-foot span { display: block; }
+.nav-foot b { color: var(--black); font-weight: 500; }
+
+/* 侧栏内容要能把页脚推到底。antd 的直接子节点是 .ant-layout-sider-children，
+   flex 加在 Sider 元素本身不起作用。 */
+.ant-layout-sider-children { display: flex; flex-direction: column; }
+
+/* 「跳到正文」。平时**不占位也不可见**，但仍在 tab 序里——Tab 一下就现身。
+   不用 display:none / visibility:hidden：那两个会把它从 tab 序里摘掉，等于没做。
+   落到 #main 上（Content 带 tabIndex="-1"，好让焦点真的停在那儿，
+   不然浏览器只滚动、焦点还留在链接上，下一次 Tab 又回到导航）。 */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 10px 16px;
+  background: var(--paper);
+  border: 1px solid var(--blue);
+  color: var(--blue);
+}
+.skip-link:focus { left: 8px; top: 8px; }
+#main:focus { outline: none; }   /* 跳过去之后不给正文画一圈框，那不是个控件 */
+
+/* ── 窄屏（<lg）：侧栏收起后的重开按钮 ──────────────────────────────────
+   antd 把它绝对定位在内容之上（默认 top:68px）。实测 390px 下八个页面的标题
+   或副标题**全**被盖掉一角，所以这一档要给它让出一条横带。
+   断点跟 Sider 的 breakpoint="lg" 对齐（antd 的 lg = min-width:992px），
+   错开的话会出现"带子在、按钮不在"或者反过来。 */
+.page { padding: var(--gutter); padding-bottom: 72px; }
+@media (max-width: 991.98px) { .page { padding-top: 74px; } }
+
+/* antd 那个默认样式是个圆角深色块，落在这套纸上像外来件。按钮本体在 layout.tsx，
+   这里只把 antd 的壳擦掉——它用 :where() 包过，普通类选择器就能盖住。 */
+.ant-layout-sider-zero-width-trigger,
+.ant-layout-sider-zero-width-trigger:hover {
+  background: transparent;
+  border-radius: 0;
+}
+.nav-open {
+  width: 44px; height: 44px;          /* 44 是触摸目标的下限 */
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 17px/1 var(--font-body);
+  color: var(--black);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  cursor: pointer;
+}
+.nav-open:hover { color: var(--blue); border-color: var(--blue); }
+
+/* ── 单选圆点要跟它标记的那一行齐 ─────────────────────────────────────────
+   这个应用里**每一个** Radio 的标签都是「一行加粗标题 + 一段说明」（备用模型两项、
+   录音降噪两项），而 antd 给 `.ant-radio` 上了 `align-self: center`——
+   于是圆点落在整段说明的正中间，跟它标记的那个标题差着一两行，看着像标错了对象。
+   在 <Radio> 上写 `alignItems: 'flex-start'` 没用：那是父级的 align-items，
+   而子元素的 align-self 压过它（那条内联样式因此一直是死的，已删）。
+   3px 是让 16px 的圆点在第一行文字（行高约 22px）里居中。 */
+.ant-radio-wrapper { align-items: flex-start; }
+.ant-radio-wrapper .ant-radio { align-self: flex-start; margin-top: 3px; }
+
+/* 密码框那只眼睛（词典 key 的「显示 / 隐藏」）。antd 给的是一个 14×14 的图标，
+   而它是**手机上唯一能核对自己粘对没粘对**的控件。同 .danger-link 那条：
+   内边距撑手指、负外边距抵掉版面影响。 */
+.ant-input-password-icon {
+  padding: 5px;
+  margin: -5px;
+}
+
+/* 选中项左侧压一条蓝色版口线，替掉 antd 默认的整块高亮 */
+.ant-menu-inline .ant-menu-item { padding-left: 20px !important; position: relative; }
+.ant-menu-inline .ant-menu-item-selected::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 3px; background: var(--blue);
+}
+
+/* ── 词条页头 ─────────────────────────────────────────────────────────── */
+
+/* 套准标记跟**眉标**那一行齐，不跟这一列的底齐。
+   原来是 align-items:end，于是它落在右边那一整块的最下面一行——
+   而那一行是什么，取决于这一页有没有 meta：没有的（音素、词条、复习）它贴着大标题
+   的基线，看着是标题的一部分；有的（查词、笔记、设置、统计）它整个掉到标题下面，
+   紧挨着那行最小号的灰字，读起来像给那句话打的一个点。
+   同一个记号在七个页面上有两种身份，那就不成其为记号了。
+   现在一律跟眉标（.slug）对齐——它标的本来就是**这一页**。
+   -3px 是让 20px 的标记在 11px/1.5 那行眉标里视觉居中。 */
+.word-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 0 20px;
+  align-items: start;
+}
+.word-head .reg-mark { margin-top: -3px; }
+@media (max-width: 640px) {
+  .word-head { grid-template-columns: 1fr; }
+  .word-head .reg-mark { display: none; }
+}
+.word-head .display { font-size: clamp(44px, 8vw, 76px); }
+
+/* 词条表装的也是用户输进来的词。一个断不开的长词会把整张表撑到 501px，
+   而 390px 视口下**整页**跟着横向滚动（实测）。
+
+   这里不去跟 antd 比 overflow-wrap 的特异性——试过 `.ant-table-tbody
+   .ant-table-cell { overflow-wrap: anywhere }`，td 的计算值仍是 antd 那条
+   break-word。改用仓库自己那条规矩：**宽内容在自己的容器里滚，页面不滚**
+   （统计页那张部位矩阵早就是这么做的，见 .grid-wrap）。
+   正常数据下表格本来就放得下，不会多出一条滚动条。 */
+.ant-table-content { overflow-x: auto; }

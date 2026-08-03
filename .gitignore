@@ -1,0 +1,36 @@
+# ── 装出来的、构建出来的 ──
+node_modules/
+dist/
+# 边车的虚拟环境。uv.lock **要进版本库**——它才是"环境可重建"的凭据，
+# 被忽略的只是解压出来的 .venv。（__pycache__ 由 asr-service/.gitignore 管）
+asr-service/.venv/
+
+# ── 你的数据：丢了就没有，也绝不该跟着仓库跑 ──
+
+# 词条、每一次录音的判定、下载的音频和模型。
+# 里面只有词条和音标是可再生的（重新 POST /api/entries 就回来）。
+data/
+data/index.db.backup
+
+# 复习进度。**每台机器自己的**：它记的是"哪个词排在第几档、下次什么时候考"，
+# 而这些档位只对本机 data/index.db 里的词条有意义。
+# 以前它进过版本库，于是 clone 下来的人一启动就看到
+#   [review] 清掉 5 张指向不存在词条的复习卡：click light night love thin
+# ——别人的进度，指向他空库里根本没有的词条，他什么都没做工作区就脏了。
+# 文件不存在是**静默**处理的（review.ts 的 readRaw），不带它反而是干净的开局。
+review-state.json
+review-state.json.*
+
+# 发音档案。里面是这台机器的统计（每次评测后重写），发出去的话新用户读到的是
+# 别人的数据——而 CLAUDE.md 让 AI「每次纠音前先读这里」。
+# 进版本库的是 发音档案.template.md，第一次启动时照它铺一份（server/src/index.ts）。
+发音档案.md
+
+# API key。样板见 .env.example
+.env
+
+# ── 只在本地的记录 / 工具状态 ──
+.decisions/
+.claude/
+.superpowers/
+*.bak

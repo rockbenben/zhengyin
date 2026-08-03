@@ -1,0 +1,28 @@
+# 启动脚本的换行符必须钉死。不钉的话，clone 出来是什么换行取决于对方的
+# core.autocrlf——也就是说**必然会对一部分人是坏的**，而且坏法很难猜到原因：
+#
+#   · .cmd 拿到 LF     → cmd.exe 逐行解析时会吃掉每行开头一两个字符。
+#                        实测症状：`chcp 65001` 变成 `'5001' 不是内部或外部命令`、
+#                        `REM` 变成 `'M'`、`Windows` 变成 `'indows'`。
+#                        服务照样能起来（call npm 那几行侥幸没被切坏），
+#                        但满屏报错，普通用户只会以为坏了。
+#   · .sh/.command 拿到 CRLF → 行尾那个 \r 会被算进 shebang，bash 报
+#                        `bad interpreter: /bin/bash^M`，一行都跑不了。
+#
+# 这类问题只在"换一台机器、换一个平台重新 clone"时才现形，本机永远看不见。
+*.cmd      text eol=crlf
+*.bat      text eol=crlf
+*.command  text eol=lf
+*.sh       text eol=lf
+
+# 二进制一律钉死，别让任何换行符转换碰它们。
+# git 其实会自己嗅探内容、把它们当二进制处理——但**这个文件存在的意义就是不靠嗅探**：
+# 上面那段说得很清楚，这类问题「只在换一台机器、换一个平台重新 clone 时才现形，
+# 本机永远看不见」。靠自动判定，等于把结果交给对方的 git 版本和配置。
+#
+# .png 是那几个应用图标（web/public/icon-*.png、favicon.png），进了版本库就得钉。
+*.mp3      binary
+*.wav      binary
+*.tar.gz   binary
+*.zip      binary
+*.png      binary

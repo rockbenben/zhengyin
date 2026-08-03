@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    /* 失效的 import / 变量必须在构建时报出来：静默积累的话 review 也看不见 */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
+}

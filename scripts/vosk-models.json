@@ -1,0 +1,20 @@
+{
+  "_comment": "本地语音识别模型清单。scripts/fetch-model.mjs（下载打包）和 server/src/models.ts（选择/托管）都读这一份，不各写一份——这个项目被『两处编码同一份知识然后悄悄漂移』坑过好几次。选哪个存在 .env 的 VOSK_MODEL。",
+  "default": "large",
+  "models": [
+    {
+      "id": "large",
+      "name": "vosk-model-en-us-0.22-lgraph",
+      "sizeMb": 125,
+      "label": "大模型 · 125MB",
+      "note": "声学模型换代，判别力明显强于小模型。lgraph 变体专为运行时动态词表设计，正是本工具的用法。首次加载慢一些，浏览器内存占用也更高。"
+    },
+    {
+      "id": "small",
+      "name": "vosk-model-small-en-us-0.15",
+      "sizeMb": 39,
+      "label": "小模型 · 39MB",
+      "note": "下载快、内存占用低。判别力有限，对 l/n 这类中文母语者的难点常常两边都认。大模型跑不动时退回它。"
+    }
+  ]
+}

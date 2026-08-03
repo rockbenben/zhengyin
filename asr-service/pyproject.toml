@@ -1,0 +1,32 @@
+[project]
+name = "pronunciation-asr-service"
+version = "0.1.0"
+description = "本地音素识别边车：音频进，eSpeak IPA 串出"
+# 只有下界。上界曾经是 `<3.14`，理由是「torch 还没 3.14 的轮子」——2026-08-05 复核时
+# 那个理由已经不成立（torch 从 2.9.0 起就发 cp314，项目用的 whl/cpu 索引里三个平台都有），
+# 而一个不再成立的上界只会把装了新 Python 的人挡在外面、逼 uv 多下一个解释器。
+# 实际用哪个版本由 .python-version 决定（3.11），这里只说「允许到哪」。
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "transformers>=4.44",
+    "torch>=2.4",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+    # 只用它下模型（snapshot_download），推理还是 transformers。
+    # 加它的理由是实测吞吐：ModelScope 15–59 MB/s，huggingface.co 0.69–1.35、
+    # hf-mirror 0.09–3.06。1.2GB 的差别是二十来秒 vs 二十多分钟。
+    # 代价很小：装出来 45 个包变 50 个。
+    "modelscope>=1.18",
+]
+
+# torch 走 CPU 轮子：单词推理实测 0.12–0.29s，够快；CUDA 版本要多下 ~2.5GB 还得对
+# CUDA 版本，不值。想用 GPU 的话把下面这段删掉，按 pytorch.org 的指引单独装 torch。
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

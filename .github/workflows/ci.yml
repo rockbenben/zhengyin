@@ -1,0 +1,82 @@
+# 跑测试和构建。**矩阵里那两个维度都不是凑数的**，各自防一类真出过的问题。
+#
+# ── 为什么必须有 windows ──
+#
+# `.gitattributes` 只钉了启动脚本的换行（.cmd 必须 CRLF、.sh 必须 LF），
+# **没管 .md**——所以笔记的换行跟着克隆方的 `core.autocrlf` 走。
+# Git for Windows 默认 autocrlf=true，于是别人在 Windows 上 clone 到的 notes/*.md
+# 是 CRLF，而开发机工作区里是 LF。
+#
+# 这不是假设：发布前把仓库 clone 一份跑测试，本机全绿、克隆里红一条——
+# splitSections 只切 `\n`，CRLF 下标题正则一个都匹配不上，17 篇笔记全抽不出小节，
+# 界面上「该怎么发」整块消失。**Linux runner 复现不了这个条件**（那边永远是 LF），
+# 只有 windows 会。
+#
+# ── 为什么 node 是 20.19.0 / 22 / 24 ──
+#
+# **20.19.0 是这三项里唯一不能撤的。** 它是 `engines.node` 的下限，
+# 而下限这件事上 better-sqlite3 骗过两次，两次方向还不一样：
+#
+#   13.x    声明 >=22          Node 22.12 上 new Database() 直接段错误（exit=139），
+#                              崩之前一行输出都没有
+#   12.10+  声明 20.x || 22.x  不再发 Node 20 的预编译包，装到 Node 20 上转 node-gyp，
+#                              在没有 MSVC 的机器上倒进一屏英文
+#
+# 第二行**任何元数据扫描都查不出来**——"有没有预编译包"根本不在 engines 里，
+# 而 engines 里写的是允许。只有在真的 Node 20 上装一遍才看得见，也就是这一行矩阵。
+# 所以 server 那边钉的是 `~12.9.0`（不是 `^`，^ 会装到 12.11）。
+#
+# 22 和 24 是当前的两条 LTS。都写大版本、不钉小版本：
+# setup-node 会解析成该线最新的一个，而"哪个小版本又出事了"正是要暴露的东西。
+#
+# 不跑 Current（26）：它几个月后就会被顶掉，而 better-sqlite3 是原生模块，
+# 新线上未必有预编译包，编不出来的红跟这个仓库没关系。真正要防的"新版本弃用旧写法"
+# 那类问题，靠的是 spawnShell.test.ts 那种扫源码的断言，不是靠多跑一个 runner。
+#
+# ── 没做什么 ──
+#
+# 不装 uv、不跑 Python 边车：模型 1.2GB，而边车没有测试。
+# 逐音素评测那条路在单测里是打桩的，装了也测不到额外的东西。
+# `wav.real.test.ts` 要 ffmpeg 和 data/audio，CI 里两样都没有——它自己会跳过，
+# 那是写在文件头里的有意设计，不是漏跑。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false          # 一个平台红了，另一个的结果照样要看得到
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # 头一个必须是 engines 声明的下限（nodeFloor.test.ts 盯着）。
+        # 20.19.0 尤其不能撤：better-sqlite3 12.10 起停发 Node 20 的预编译包，
+        # 而 engines 里照旧写着 20.x——只有在真的 Node 20 上装一遍才看得出来。
+        node: ['20.19.0', '22', '24']
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 换行是这套矩阵的重点，所以先把实际拿到的换行打出来——
+      # 哪天 checkout 的默认行为变了，日志里看得见，不用猜。
+      - name: 确认这个平台拿到的换行
+        shell: bash
+        run: |
+          f=$(ls notes/*.md | head -1)
+          cr=$(tr -cd '\r' < "$f" | wc -c)
+          echo "$f: CR $cr 个 → $([ "$cr" -gt 0 ] && echo CRLF || echo LF)"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm test          # 里面含类型检查（web + server）
+      - run: npm run build

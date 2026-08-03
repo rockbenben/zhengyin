@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>正音</title>
+    <!-- 让浏览器能把它「安装」成一个独立应用：自己的图标、自己的窗口、没有地址栏。
+         这是市面上让本地 web 工具像应用一样用的标准做法，不需要 Electron 那套打包。
+         localhost 算安全上下文，所以装完麦克风照常能用。
+         图案是这个应用的签名元素——套印：黑版一个 ə，蓝版同一个 ə 往右下错开一点，
+         正是评测里「没套准＝发错了」那个意思。
+         **色值不在这儿抄第二份**：纸和黑在 src/theme.ts 的 LIGHT_BASE，蓝版是
+         src/lib/ink.ts 按色相算出来的（默认那款「群青」，inkFor(DEFAULT_HUE,false).ink）。
+         这里原来抄了一行「纸 #faf9f5、黑 #1c1a17、蓝 #2f4bd8」，三个值错了两个，
+         而图标正是照着它画的——注释里的色值没人对账，抄一遍就是给自己埋一个假事实。
+
+         **它们就是四个静态文件，没有生成脚本。** 曾经有过一个（跑 Python + Pillow
+         画字形），三轮审查下来它一直在出新问题——路径过 shell 被改写、临时文件把
+         共享目录放上 sys.path、拿私用区字符判豆腐块被图标字体骗过、入口守卫在
+         符号链接下整个空转……而它的全部职责只是「改图标时跑一次」。
+         那笔账算不过来，删了。要改图标就重新画一版，四个尺寸：192、512、
+         512（maskable，字画小一点，安全区是中间 80%）、32（favicon）。
+         web/src/lib/icons.test.ts 盯着尺寸和这里的引用对不对得上。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="theme-color" content="#faf9f5" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="正音" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

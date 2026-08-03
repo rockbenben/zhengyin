@@ -1,0 +1,56 @@
+{
+  "name": "zhengyin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "中文母语者的美式发音纠正工具：逐音素告诉你第几个音发成了什么，全部跑在本机",
+  "keywords": [
+    "pronunciation",
+    "ipa",
+    "phoneme",
+    "american-english",
+    "chinese-learners",
+    "speech-recognition",
+    "wav2vec2",
+    "local-first",
+    "发音",
+    "音标"
+  ],
+  "license": "MIT",
+  "author": "rockbenben",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rockbenben/zhengyin.git"
+  },
+  "homepage": "https://github.com/rockbenben/zhengyin#readme",
+  "bugs": {
+    "url": "https://github.com/rockbenben/zhengyin/issues"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "preinstall": "node scripts/check-node.mjs",
+    "go": "npm install && npm run build && npm start",
+    "dev": "concurrently -n server,web,asr -c cyan,green,magenta \"npm run dev -w server\" \"npm run dev -w web\" \"npm:asr\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "concurrently -n server,asr -c cyan,magenta \"node server/dist/index.js\" \"npm:asr\"",
+    "test": "npm run typecheck && vitest run",
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "preasr": "node scripts/check-uv.mjs",
+    "asr": "node scripts/asr.mjs",
+    "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p server/tsconfig.typecheck.json"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "adm-zip": "^0.6.0",
+    "concurrently": "^9.2.4",
+    "jsdom": "^29.1.1",
+    "tar": "^7.5.22",
+    "vitest": "^4.1.10"
+  }
+}
