@@ -308,18 +308,30 @@ describe('ReviewStore', () => {
 
   // backedUp 只该给"同一次损坏"去重。做成整个进程一次性的闸门，第二次损坏（比如用户手工
   // 编辑留下语法错误，同时还加了新卡）就不会再备份，那份内容直接被内存快照覆盖掉。
+  //
+  // **时钟必须冻住。** 备份名是 `.corrupt-<Date.now()>`，两次损坏落进同一毫秒就会同名，
+  // 而 copyFileSync 覆盖写——第二份把第一份盖掉，这条断言就该红。原来不冻时钟，
+  // 两次调用之间隔多久全看机器：本机慢，一直是绿的；CI 上只有 ubuntu × node 24
+  // 那一格够快，撞进同一毫秒才红了一次。**一条只在最快的机器上才生效的断言，
+  // 等于把这个 bug 放跑了。** 冻住之后碰撞必然发生，哪台机器都拦得住。
   it('backs up again when the file is corrupted a second time in the same process', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rv-'));
     const file = join(dir, 'review-state.json');
     writeFileSync(file, '{"a": {"rung": 0, "due": "2026-08-01', 'utf8');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T00:00:00.000Z'));
     try {
       const s = new ReviewStore(file);
       s.addCard('x', '2026-07-29');                       // 修好
       writeFileSync(file, '{"x":{"rung":0,"due":"2026-07-30","lastReviewed":null},', 'utf8');  // 再坏
       s.addCard('y', '2026-07-29');
-      expect(readdirSync(dir).filter((n) => n.includes('.corrupt-'))).toHaveLength(2);
+      const baks = readdirSync(dir).filter((n) => n.includes('.corrupt-')).sort();
+      expect(baks).toHaveLength(2);
+      // 光数文件个数不够：同名覆盖时也可能因为别的原因凑够两个。两份内容必须不同。
+      expect(readFileSync(join(dir, baks[0]), 'utf8')).not.toBe(readFileSync(join(dir, baks[1]), 'utf8'));
     } finally {
+      vi.useRealTimers();
       warn.mockRestore();
     }
   });

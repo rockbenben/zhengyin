@@ -175,7 +175,14 @@ function readRaw(file: string): RawRead {
 // 抛出去：那会直接导致服务起不来。
 function backupCorrupt(file: string, required: boolean): void {
   if (!existsSync(file)) return;
-  const bak = `${file}.corrupt-${Date.now()}`;
+  // **撞名要加序号。** 同一毫秒里连着坏两次时 `Date.now()` 会给出同一个名字，
+  // 而 copyFileSync 是覆盖写——第二份把第一份盖掉，备份就白做了。
+  // 时间戳保留：文件名是给人看的，他要靠它认出这是哪一次的副本。
+  // （CI 上只有 ubuntu × node 24 这一格红过，因为它是矩阵里最快的，
+  //   两次调用落进了同一毫秒；慢一点的机器纯靠运气躲开。）
+  const stamp = Date.now();
+  let bak = `${file}.corrupt-${stamp}`;
+  for (let i = 2; existsSync(bak); i++) bak = `${file}.corrupt-${stamp}-${i}`;
   try {
     copyFileSync(file, bak);
     console.warn(`[review] 原文件已备份到 ${bak}，可从中手工找回进度`);
