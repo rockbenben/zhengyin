@@ -85,7 +85,7 @@ export default function PhonemePage() {
       <Space direction="vertical" size={26} style={{ width: '100%' }}>
         {/* 怎么发 —— 这一页的主体。落到可执行的身体动作上（articulation.ts 的 HOW_TO） */}
         {phone.howTo ? (
-          <Typography.Text style={{ fontSize: 17, lineHeight: 1.9, maxWidth: '58ch', display: 'block' }}>
+          <Typography.Text className="measure" style={{ fontSize: 17, lineHeight: 1.9 }}>
             {phone.howTo}
           </Typography.Text>
         ) : (
@@ -150,7 +150,7 @@ export default function PhonemePage() {
           <span className="slug">讲这个音的笔记</span>
           <div style={{ marginTop: 10 }}>
             {notes.length === 0 ? (
-              <Typography.Text type="secondary" style={{ maxWidth: '58ch', display: 'block' }}>
+              <Typography.Text type="secondary" className="measure">
                 还没有。上面「怎么发」是这个音客观的发音方式，对所有人都一样；
                 {'笔记是'}<strong>你自己</strong>在这个音上的问题，带自检法和对比训练——
                 {'等你念到明显不对的时候，问一下 AI，它会写一篇。'}

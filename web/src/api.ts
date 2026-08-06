@@ -70,7 +70,10 @@ export const api = {
   listNotes: () => j<{ groups: T.NoteGroups }>(fetch('/api/notes')),
   getNote: (id: string) => j<T.NoteDetail>(fetch(`/api/notes/${encodeURIComponent(id)}`)),
 
-  reviewDue: () => j<{ cards: T.ReviewCard[] }>(fetch('/api/review/due')),
+  // upcoming = 队列里还没到期的：几张、最早哪天。空队列和「今天轮不到」要说不同的话
+  reviewDue: () => j<{ cards: T.ReviewCard[]; upcoming: { count: number; next: string | null } }>(
+    fetch('/api/review/due'),
+  ),
   star: (text: string, on: boolean) => jx<{ starred: boolean }>(
     fetch(`/api/review/${encodeURIComponent(text)}/star`, { method: on ? 'PUT' : 'DELETE' }),
   ),
@@ -155,4 +158,17 @@ export const api = {
   ),
 
   confusions: (word: string) => j<{ contrasts: T.Contrast[] }>(fetch(`/api/confusions/${encodeURIComponent(word)}`)),
+
+  // 整机唯一的「当前用户」，服务端持有。切换是全站范围的事——网页切了，AI 那头
+  // 读到的也跟着变，所以调用方切完要整页刷新，不是这三个方法自己的事。
+  // 用 jx 不用 j：切错名字（404「没有叫「X」的用户」）、建重名（400「已经有「X」了」）
+  // 是这两个端点最现实的出错路径，服务端写的中文就是给界面直接展示的，j() 会把它
+  // 换成 `API 404` 这种不中文的占位文案——跟 addEntry 是同一个理由。
+  user: () => j<T.UserInfo>(fetch('/api/user')),
+  switchUser: (name: string) => jx<T.UserInfo>(fetch('/api/user', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+  })),
+  createUser: (name: string) => jx<T.UserInfo>(fetch('/api/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+  })),
 };

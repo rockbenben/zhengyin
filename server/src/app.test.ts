@@ -8,8 +8,9 @@ import { NoteStore } from './notes.js';
 import { analyzeText } from './service.js';
 import { ReviewStore } from './review.js';
 import { CONFIDENT } from './analysis/espeak.js';
+import { invalidUserName } from './users.js';
 
-function testDeps(): AppDeps {
+export function testDeps(): AppDeps {
   const notesDir = mkdtempSync(join(tmpdir(), 'notes-'));
   writeFileSync(join(notesDir, 'kl.md'), `---
 id: kl-cluster
@@ -76,6 +77,12 @@ severity: confirmed
     // （见 server/tsconfig.typecheck.json 那段注释）
     hasUv: true,
     profileFile: join(mkdtempSync(join(tmpdir(), 'profile-')), '发音档案.md'),
+    users: {
+      current: () => '默认',
+      list: () => ['默认'],
+      switchTo: vi.fn().mockReturnValue('ok' as const),
+      create: vi.fn().mockReturnValue('ok' as const),
+    },
   };
 }
 
@@ -162,13 +169,36 @@ describe('entries api', () => {
     });
     const list = await (await app.request('/api/entries')).json();
     expect(list.entries).toHaveLength(1);
-    // click 含 /l/ 和 /kl/ 连缀，命中 l-vs-n 和 kl-cluster 两篇
-    expect(list.entries[0].noteCount).toBe(2);
+    // 列表那一列数的是**点进去真会摆出来的**那几篇，不是全部命中。
+    // 还没在 click 上错过任何音，所以是 0——两篇沾了音的都收在折叠里。
+    // 这里钉的是那条不变量：列表上的数字 === 词条页摆在外面的篇数。
+    // 原来数全部命中，于是列上写「2 篇」、点进去一篇都没有；而笔记越攒越多差越大。
     const one = await app.request('/api/entries/click');
     expect(one.status).toBe(200);
+    const detail = await one.clone().json();
+    expect(detail.notes.length, 'click 该沾上 l-vs-n 和 kl-cluster 两篇').toBe(2);
+    expect(list.entries[0].noteCount).toBe(detail.notes.filter((n: { relevant: boolean }) => n.relevant).length);
+    expect(list.entries[0].noteCount).toBe(0);
     const del = await app.request('/api/entries/click', { method: 'DELETE' });
     expect((await del.json()).ok).toBe(true);
     expect((await app.request('/api/entries/click')).status).toBe(404);
+  });
+
+  // 上面那条只证了"没错过就是 0"。这条证它不是**永远**是 0——
+  // 少了它，把 noteCount 写死成 0 也能全绿。
+  it('讲这个词的笔记（words:）不用先错一次就算数，列表和词条页仍然同一个数', async () => {
+    const app = createApp(testDeps());
+    await app.request('/api/entries', {
+      method: 'POST', body: JSON.stringify({ text: 'machine' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    const list = await (await app.request('/api/entries')).json();
+    const row = list.entries.find((e: { text: string }) => e.text === 'machine');
+    const detail = await (await app.request('/api/entries/machine')).json();
+    const shown = detail.notes.filter((n: { relevant: boolean }) => n.relevant);
+    expect(shown.map((n: { id: string }) => n.id), '讲 machine 的那篇该摆在外面').toContain('ine-spelling');
+    expect(row.noteCount, '列表上的数字必须等于点进去真会摆出来的篇数').toBe(shown.length);
+    expect(row.noteCount).toBeGreaterThan(0);
   });
 
   it('POST falls back to tts when mw fails', async () => {
@@ -2578,5 +2608,55 @@ describe('导出 / 导入备份', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '这不是 json',
     });
     expect(r.status).toBe(400);
+  });
+});
+
+describe('多用户 API', () => {
+  it('GET /api/user 报当前用户和列表', async () => {
+    const res = await createApp(testDeps()).request('/api/user');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ current: '默认', users: ['默认'] });
+  });
+
+  it('POST /api/user：不存在的用户 404，不自动新建', async () => {
+    const deps = testDeps();
+    (deps.users.switchTo as ReturnType<typeof vi.fn>).mockReturnValue('not-found');
+    const res = await createApp(deps).request('/api/user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '没这人' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /api/user：非法名 400，报的是 invalidUserName 的真实理由；缺 name 400', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    const bad = await app.request('/api/user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '../x' }),
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: invalidUserName('../x') });
+    // 判据只在 invalidUserName 一处：名字已经被拦下，根本不该走到 switchTo
+    expect(deps.users.switchTo).not.toHaveBeenCalled();
+    const missing = await app.request('/api/user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    expect(missing.status).toBe(400);
+  });
+
+  it('POST /api/users：新建成功回列表；重名 400', async () => {
+    const deps = testDeps();
+    const ok = await createApp(deps).request('/api/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '张三' }),
+    });
+    expect(ok.status).toBe(200);
+    (deps.users.create as ReturnType<typeof vi.fn>).mockReturnValue('exists');
+    const dup = await createApp(deps).request('/api/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '张三' }),
+    });
+    expect(dup.status).toBe(400);
   });
 });

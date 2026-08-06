@@ -21,8 +21,8 @@ export default function CaptureSetting() {
   return (
     <Card title="录音采集">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0, maxWidth: '60ch' }}>
-          {'浏览器降噪是给通话调的，它压制"类噪声"——而 /s/ /θ/ /ʃ/ /f/ 这些擦音'}
+        <Typography.Paragraph type="secondary" className="measure" style={{ marginBottom: 0 }}>
+          {'浏览器降噪是给通话调的，它压制「类噪声」——而 /s/ /θ/ /ʃ/ /f/ 这些擦音'}
           <strong>本身就是噪声</strong>{'，可能被一起削掉，偏偏那是评测最要分清的一批。'}
           {'哪个更好要看你的环境，用同一个词各录一次比比。'}
         </Typography.Paragraph>

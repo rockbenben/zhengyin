@@ -3,9 +3,11 @@ import { Layout, Menu, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { Link, Outlet, useLocation } from 'react-router';
 import { api } from './api';
+import { UserSwitcher } from './components/UserSwitcher';
 import { applyPalette, makeTheme, paletteFor } from './theme';
 import { isDarkPaper, loadHue, loadPaper, savePaper, saveHue, type PaperPref } from './lib/ink';
-import { APP_NAME, APP_TAGLINE } from './lib/brand';
+import { GithubOutlined } from '@ant-design/icons';
+import { APP_NAME, APP_TAGLINE, REPO_URL } from './lib/brand';
 
 /** 设置页靠它换墨。用 Outlet context 而不是另起一个全局 store——只有一个消费者 */
 export interface InkContext {
@@ -150,12 +152,28 @@ export default function AppLayout() {
           </div>
           <Menu mode="inline" items={items} selectedKeys={[selected]} style={{ borderInlineEnd: 0, paddingTop: 8 }} />
           <div style={{ flex: 1 }} />
-          {attempts !== null && (
-            <div className="nav-foot">
-              <span>已评测 <b>{attempts}</b> 次</span>
-              <span>笔记是唯一的知识来源</span>
-            </div>
-          )}
+          {/* 版口：印刷版边上那条记录印次和出处的窄带。
+              这里只放**这台机器上的事实**——练了多少次、源码在哪。
+
+              原来第二行是「笔记是唯一的知识来源」。那句是 README 里
+              「笔记驱动一切」那条**架构主张**，是代码在跟自己说话：
+              站在侧栏的人既做不了什么，也判断不了它是真是假。
+              整块页脚不再挂在 attempts 上：取统计失败时，
+              连「源码在哪」也跟着消失没有道理。 */}
+          <div className="nav-foot">
+            {/* 谁在机上、印了几次、哪儿出的——版口记的就是这三样 */}
+            <UserSwitcher />
+            {attempts !== null && <span>已评测 <b>{attempts}</b> 次</span>}
+            <a
+              className="nav-repo"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <GithubOutlined aria-hidden="true" />
+              源码
+            </a>
+          </div>
         </Layout.Sider>
 
         {/* 内边距挪去 CSS：窄屏那一档要给上面那个按钮让出一条横带，

@@ -51,7 +51,7 @@ function HowTo({ ipa, text }: { ipa: string; text: string }) {
   return (
     <div style={{ marginTop: 18, borderTop: '1px solid var(--rule)', paddingTop: 14 }}>
       <span className="slug">{phonemic(ipa)} 怎么发</span>
-      <Typography.Paragraph style={{ margin: '6px 0 0', maxWidth: '58ch', lineHeight: 1.9 }}>
+      <Typography.Paragraph className="measure" style={{ margin: '6px 0 0', lineHeight: 1.9 }}>
         {text}
       </Typography.Paragraph>
     </div>
@@ -107,7 +107,7 @@ export default function PlaceRuler({ targetIpa, heardIpa }: { targetIpa: string;
           )}
         </div>
         <Manner t={t} h={h} manners={data.manners} />
-        {note && <Typography.Paragraph style={{ margin: '14px 0 0', maxWidth: '58ch' }}>{note}</Typography.Paragraph>}
+        {note && <Typography.Paragraph className="measure" style={{ margin: '14px 0 0' }}>{note}</Typography.Paragraph>}
         {t.howTo && <HowTo ipa={t.ipa} text={t.howTo} />}
       </div>
     );
@@ -142,7 +142,7 @@ export default function PlaceRuler({ targetIpa, heardIpa }: { targetIpa: string;
               fontFamily="var(--font-ipa)">{h.ipa}</text>
           </svg>
         </div>
-        {note && <Typography.Paragraph style={{ margin: '12px 0 0', maxWidth: '58ch' }}>{note}</Typography.Paragraph>}
+        {note && <Typography.Paragraph className="measure" style={{ margin: '12px 0 0' }}>{note}</Typography.Paragraph>}
         {t.howTo && <HowTo ipa={t.ipa} text={t.howTo} />}
       </div>
     );

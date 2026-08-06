@@ -7,11 +7,20 @@ import { Typography } from 'antd';
  * 界面上此前【从没说过】这件事：新来的人看到的是"讲过 0 个词条"和一张空表，
  * 既不知道整个回路长什么样，也不知道自己该先做什么。
  *
- * 只在库还很小的时候显示（用熟了就是干扰），不做成可关闭的提示——
- * 它会随着词条变多自己消失，不需要用户操作。
+ * 只给还没上手的人看（用熟了就是干扰），不做成可关闭的提示——
+ * 自己会消失，不需要用户操作。
+ *
+ * ── 判据换过一次：从「查过几个词」换成「录过音没有」 ──
+ *
+ * 原来是词条数 > 6 就收起来。那量的是**你查过多少词**，而不是**你知不知道这东西怎么用**，
+ * 两头都不准：查了三个词、录了二十次的人一直看得到它；而查了二十个词、
+ * 一次没录过的人反倒看不到了——可他缺的正好是第 2 步。
+ *
+ * 换成「录过一次音就收起来」。这四步的核心是第 2 步（点录音 → 它说你第几个音
+ * 发成了什么），录过一次就等于整条路走通了一遍，再摆着就是复读。
  */
-export default function HowItWorks({ count }: { count: number }) {
-  if (count > 6) return null;
+export default function HowItWorks({ attempts }: { attempts: number }) {
+  if (attempts > 0) return null;
 
   // ⚠️ 中文文案一律裹在 {'...'} 里，**不要让它跨行**。
   // JSX 会把「换行 + 缩进」折成一个空格，中文之间多一个空格在排版上就是一个豁口——
@@ -41,7 +50,9 @@ export default function HowItWorks({ count }: { count: number }) {
   return (
     <section style={{ borderLeft: '3px solid var(--black)', paddingLeft: 20 }}>
       <span className="slug">怎么用</span>
-      <ol style={{ margin: '10px 0 0', paddingLeft: 20, display: 'grid', gap: 8 }}>
+      {/* 跟下面那段共用一个行宽。原来这张单子不设上限、一行跑到 64 个汉字，
+          而紧挨着的段落是 35 个——同一个方框里两种行宽，看着像排版坏了。 */}
+      <ol className="measure" style={{ margin: '10px 0 0', paddingLeft: 20, display: 'grid', gap: 8 }}>
         {steps.map(([title, body]) => (
           <li key={title} style={{ fontSize: 14, lineHeight: 1.8 }}>
             <strong>{title}</strong>　{body}
@@ -68,7 +79,7 @@ export default function HowItWorks({ count }: { count: number }) {
 
           「能读写文件」这条**必须说**：浏览器里的聊天框写不进这个文件夹，
           笔记就不会自己出现。只说「问 AI」等于给一半人许一个会静默落空的诺。 */}
-      <Typography.Paragraph type="secondary" style={{ margin: '14px 0 0', fontSize: 13, maxWidth: '60ch' }}>
+      <Typography.Paragraph type="secondary" className="measure" style={{ margin: '14px 0 0', fontSize: 13 }}>
         <strong>上面四步全在本机跑，不用 AI</strong>
         {'——查词、真人发音、逐音素评测、复习，装完就能用。AI 多加一层：'}
         {'「这个音为什么难、你为什么会错」那种讲解。把念不准的词发给它，它写成一篇'}

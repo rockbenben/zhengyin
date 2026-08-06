@@ -92,12 +92,23 @@ export interface EntryDetail {
 
 // GET /api/notes 里 groups[severity] 数组每一项
 // server/src/app.ts app.get('/api/notes', ...)
+/** 素材库把笔记摆在哪一格。判据在 server/src/shelf.ts，前端只照着分段 */
+export type Shelf = 'consonant' | 'vowel' | 'structure' | 'word';
+
 export interface NoteListItem {
   id: string;
   title: string;
   severity: Severity;
   triggers: string[];
   exampleCount: number;
+  /** 这篇管的是什么：音素笔记是 IPA，结构笔记是原始标签，讲词的是那几个词 */
+  covers: string[];
+  /** 素材库里的位次。watch/info 两组拼起来之后按它排回服务端定的顺序 */
+  order: number;
+  shelf: Shelf;
+  /** 辅音架上的部位（唇→喉）。其余为 null */
+  place: string | null;
+  placeLabel: string | null;
 }
 
 // GET /api/notes -> { groups: NoteGroups }
@@ -324,7 +335,14 @@ export interface ArticulationTable {
 export interface PhonemeList {
   places: Array<{ id: string; label: string }>;
   manners: Record<string, string>;
-  phones: Array<Articulation & { exampleCount: number; noteCount: number }>;
+  /** 元音格子的两根轴。跟 places/manners 一样由服务端定（articulation.ts） */
+  vowelRows: Array<{ id: string; label: string }>;
+  vowelCols: Array<{ id: string; label: string }>;
+  phones: Array<Articulation & {
+    exampleCount: number; noteCount: number;
+    /** 元音落在哪一格；辅音没有这两个字段（它们有 place/manner） */
+    row?: string; col?: string;
+  }>;
 }
 
 /** GET /api/phonemes/:ipa：一个音素的文档 */
@@ -337,3 +355,6 @@ export interface PhonemeDetail {
   /** 真正讲这个音的笔记（只认 triggers） */
   notes: Array<{ id: string; title: string; severity: Severity }>;
 }
+
+/** GET/POST /api/user、POST /api/users 的响应：整机唯一的「当前用户」+ 全部用户名单 */
+export interface UserInfo { current: string; users: string[] }

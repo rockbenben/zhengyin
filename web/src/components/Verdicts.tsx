@@ -37,7 +37,7 @@ export default function Verdicts({ target, verdicts, diff, why }: {
         message="这个词没有可比的对立音"
         description={
           <>
-            {why}，只能退到弱办法——而它靠的是拿你的录音跟"只差一个音的另一个词"比。
+            {why}，只能退到弱办法——而它靠的是拿你的录音跟「只差一个音的另一个词」比。
             {'现在的笔记里没有哪条说过这个词里的音容易跟什么混，所以配不出这样一对词。'}
             {'给相关的音写一篇笔记，这里就会自动出现对比。'}
           </>
@@ -66,7 +66,7 @@ export default function Verdicts({ target, verdicts, diff, why }: {
       message="这次是弱办法：只能在两个词里挑一个"
       description={
         <>
-          {why}。这条路只能回答"在这两个词里你更像哪个"，<strong>说不出你实际发的是什么音</strong>。
+          {why}。这条路只能回答「在这两个词里你更像哪个」，<strong>说不出你实际发的是什么音</strong>。
         </>
       }
     />

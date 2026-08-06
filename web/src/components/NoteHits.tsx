@@ -80,7 +80,13 @@ export default function NoteHits({ notes, heading = true, emptyHint = true }: Pr
   // 就在这个词里）。前端不再拿 severity 凑合——severity 是全局的，
   // 于是每个含 /n/ 的词都会把 l-vs-n 摆在外面，哪怕那个词里没有 /l/。
   const mine = notes.filter((n) => n.relevant);
-  const rest = notes.filter((n) => !mine.includes(n));
+  // 折叠里按「你在**别的词**上栽过没有」排：severity 是全局判据
+  // （跨 ≥2 个词、≥3 次才算 confirmed），所以排在最前的正是
+  // 「这个音你在别处反复错，只是还没在这个词上错过」——真要展开翻的人要的就是它。
+  // 不动分档：没在这个词上错过的本来就该收起来，这里只管收起来之后谁在上面。
+  const RANK: Record<Severity, number> = { confirmed: 0, watch: 1, info: 2 };
+  const rest = notes.filter((n) => !mine.includes(n))
+    .sort((a, b) => RANK[a.severity] - RANK[b.severity]);
 
   const row = (note: Props['notes'][number]) => (
     <article

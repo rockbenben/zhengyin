@@ -19,6 +19,14 @@ export const APP_TAGLINE = '美式发音';
 export const STOP_HINT = '要停下来：关掉这个窗口，或者按 Ctrl+C';
 
 /**
+ * 源码在哪。侧栏页脚那个 GitHub 链接用它。
+ *
+ * 跟 `package.json` 的 `repository.url` 是同一个仓库，`brand.test.ts` 比对着——
+ * 改了仓库地址忘了改这里，界面上那个链接会静默指向一个不存在的地方。
+ */
+export const REPO_URL = 'https://github.com/rockbenben/zhengyin';
+
+/**
  * 在**这台机器上**打开这个应用的地址。
  *
  * 端口从当前页面取——`.env` 里 `PORT=30041` 改过之后这里跟着变；取不到才退回默认。

@@ -7,8 +7,9 @@ import { api } from '../api';
  *
  * ── 为什么需要 ──
  *
- * 发布之后，一个人的数据散在三处：`notes/`（跟着 git 走）、`发音档案.md` 和
- * `review-state.json`（本机、已 gitignore）、`data/index.db`（词条和每一次录音的判定）。
+ * 发布之后，一个人的数据散在三处：`notes/`（跟着 git 走，全用户共享）、
+ * `data/users/<当前用户>/` 下的 `发音档案.md` 和 `review-state.json`、
+ * 以及同一目录下的 `index.db`（词条和每一次录音的判定）。后两类都本机、已 gitignore。
  * 换台电脑没有任何一键搬家的办法，而后两样**丢了就没有**——
  * 那是几十次录音攒出来的判定，不是重下一遍音频能补回来的。
  *
@@ -71,8 +72,9 @@ export default function BackupSetting() {
   return (
     <Card title="搬家" size="small">
       <Space direction="vertical" size={14} style={{ width: '100%' }}>
-        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          导出<strong>查过哪些词</strong>和<strong>每一次录音的判定</strong>，外加复习进度。
+        <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
+          导出<strong>当前用户</strong>查过哪些词和每一次录音的判定，外加复习进度。
+          {'想搬另一个人的，先在左边切过去再导。'}
           {'换电脑时导进去就接着练。音频和音标不在里面——那些重查一次词典就有，'}
           {'带上只会把文件撑到几十 MB。'}
         </Typography.Text>

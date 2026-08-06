@@ -35,7 +35,7 @@ export default function Notice({ tone = 'note', label, title, children }: {
         </div>
       )}
       {children && (
-        <div style={{ fontSize: 14, lineHeight: 1.85, marginTop: title ? 6 : 4, maxWidth: '58ch' }}>
+        <div className="measure" style={{ fontSize: 14, lineHeight: 1.85, marginTop: title ? 6 : 4 }}>
           {children}
         </div>
       )}

@@ -38,7 +38,7 @@ export default function PageResult({ slug, title, children, extra }: {
       {/* 这个 class 是给测试用的钩子：断言"说明文字讲清了下一步"必须**避开按钮**，
           拿整页 textContent 断言会被按钮上的字骗过（变异测试里真活下来过一次）。 */}
       {children && (
-        <p className="result-body" style={{ margin: '18px 0 0', fontSize: 14.5, lineHeight: 1.9, maxWidth: '58ch' }}>
+        <p className="result-body measure" style={{ margin: '18px 0 0', fontSize: 14.5, lineHeight: 1.9 }}>
           {children}
         </p>
       )}

@@ -26,13 +26,18 @@ const stub = vi.hoisted(() => ({
   graded: [] as Array<{ text: string; grade: string }>,
   result: null as PronounceResult | null,
   starred: false,
+  /** 队列空不空，由用例定 */
+  empty: false,
+  /** 队列里还没到期的：几张、最早哪天 */
+  upcoming: { count: 0, next: null as string | null },
 }));
 
 vi.mock('../api', () => ({
   isOffline: () => false,
   api: {
     reviewDue: () => Promise.resolve({
-      cards: [{ text: 'thin', rung: 0, due: '2026-08-01', starred: stub.starred }],
+      cards: stub.empty ? [] : [{ text: 'thin', rung: 0, due: '2026-08-01', starred: stub.starred }],
+      upcoming: stub.upcoming,
     }),
     getEntry: (t: string) => Promise.resolve({
       text: t, createdAt: '', words: [{ word: t, found: true, arpabet: [], ipa: 'θɪn', tags: [], phoneIpa: [], phoneTags: [], syllables: [], syllableStress: [] }],
@@ -76,7 +81,10 @@ const UNSURE: PronounceResult = {
   heardIpa: ['f', 'ɪ', 'n'], align: [op('sub', false), op('match', true), op('match', true)],
 } as unknown as PronounceResult;
 
-beforeEach(() => { stub.graded = []; stub.result = null; stub.starred = false; });
+beforeEach(() => {
+  stub.graded = []; stub.result = null; stub.starred = false;
+  stub.empty = false; stub.upcoming = { count: 0, next: null };
+});
 
 async function drawAndRecord(result: PronounceResult) {
   stub.result = result;
@@ -197,5 +205,45 @@ describe('手动加进来的卡，说法跟星标按钮一致', () => {
     const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
     await waitFor(() => expect(container.textContent).toContain('thin'));
     expect(container.textContent).toContain('之前念错过');
+  });
+});
+
+/**
+ * 空队列不是只有一种。
+ *
+ * 这一页原来只分「刚复习完 N 张」和「其余」，于是**队列里有卡、只是今天还没到期**
+ * 时落进后一档，屏幕上说的是「复习队列只收有证据的词……去首页录一次音」——
+ * 而新卡默认第二天到期（review.ts 的 addCard），刚在单词页点完「加入复习」的人
+ * 正是从那儿走过来的：他加了四个词，页面却说得像一个都没有。
+ *
+ * 那不是措辞粗糙，是句假话。这里守三档各自说各自的话。
+ */
+describe('空队列分三档说话', () => {
+  it('队列里有没到期的卡时，说清还剩几个、什么时候到期，不说「去录一次音」', async () => {
+    stub.empty = true;
+    stub.upcoming = { count: 4, next: '2999-01-01' };
+    const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+    await waitFor(() => expect(container.textContent).toMatch(/没有要复习/));
+    expect(container.textContent).toContain('4');
+    expect(
+      container.textContent,
+      '队列里明明有四个词，不能再说「只收有证据的词、去首页录一次音」',
+    ).not.toMatch(/只收|录一次音/);
+  });
+
+  it('真的一张都没有时，才说清什么会让队列有东西', async () => {
+    stub.empty = true;
+    stub.upcoming = { count: 0, next: null };
+    const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+    await waitFor(() => expect(container.textContent).toMatch(/没有要复习/));
+    expect(container.textContent).toMatch(/有证据/);
+  });
+
+  it('服务端没给 upcoming（旧响应）也不崩，按「没有待办」渲染', async () => {
+    stub.empty = true;
+    stub.upcoming = undefined as unknown as { count: number; next: string | null };
+    const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+    await waitFor(() => expect(container.textContent).toMatch(/没有要复习/));
+    expect(container.textContent).toMatch(/有证据/);
   });
 });

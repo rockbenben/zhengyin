@@ -10,7 +10,7 @@ import { syllabify } from './analysis/syllables.js';
 import { phonemeSubs, alignPhonemes, renameTargets, renameHeard, type PhonemeSub, type AlignOp } from './analysis/diff.js';
 import { collapseStress, normalizeEspeakIpa, normalizeEspeakPhones, CONFIDENT } from './analysis/espeak.js';
 import { guidanceSections } from './analysis/guidance.js';
-import { articulationTable, PLACES, MANNERS } from './analysis/articulation.js';
+import { articulationTable, PLACES, MANNERS, VOWEL_ROWS, VOWEL_COLS, vowelCell } from './analysis/articulation.js';
 import { confusionContrasts } from './analysis/confusions.js';
 import type { NoteStore, Note } from './notes.js';
 import type { fetchMwAudio, verifyMwKey } from './audio/mw.js';
@@ -20,8 +20,10 @@ import * as store from './db.js';
 import { syncProfile, worthANote, severityOf, notesCovering } from './profile.js';
 import { judge } from './judge.js';
 import { reanalyzeEntries } from './reanalyze.js';
+import { shelfOf, compareShelf, coversOf } from './shelf.js';
 import { reconcileAttempts } from './reconcile.js';
 import { GRADES, CardNotFoundError, type ReviewStore, type Grade } from './review.js';
+import { invalidUserName } from './users.js';
 import { maskKey, readEnvFile, readEnvValue, upsertEnvValue, writeEnvFile } from './envfile.js';
 import { loadRegistry, modelState, resolveModel } from './models.js';
 
@@ -57,6 +59,13 @@ export interface AppDeps {
   hasUv: boolean;
   /** 发音档案 Markdown 的路径。发音统计会写进它的 AUTO 标记块，手写部分不动 */
   profileFile: string;
+  /** 多用户。实现是 users.ts 的 UserManager，index.ts 接线；测试里给 stub */
+  users: {
+    current: () => string;
+    list: () => string[];
+    switchTo: (name: string) => 'ok' | 'not-found' | 'invalid';
+    create: (name: string) => 'ok' | 'exists' | 'invalid';
+  };
 }
 
 // 共享谓词：判断某词条是否命中某笔记（笔记 triggers 与词条各词 tags 的并集有交集）。
@@ -72,6 +81,39 @@ function entryHasNote(entry: store.EntryRow, note: Note): boolean {
 // Grade 类型，也顺带把"合法 grade 是什么"这份知识只放这一处。
 function isGrade(g: unknown): g is Grade {
   return typeof g === 'string' && GRADES.has(g as Grade);
+}
+
+/**
+ * 这个词上「跟你有关」的笔记：笔记 id → 是哪几处错把它拉出来的（`i→aɪ` 这样）。
+ * 讲这个词本身的（`words:`）也算，那种不需要你先错一次。
+ *
+ * **抽出来是因为两处在数同一个东西，而数出来不一样。** 词条页摆在外面的是这一档，
+ * 而首页那张表的「讲解」列数的是 `matchNotes` 的全部命中——实测 comfortable
+ * 列上写着「5 篇」，点进去一篇都没摆出来（五篇全收在折叠里）。列表许了一个
+ * 到了目的地不兑现的诺，而笔记越攒越多这个差越大：85 篇时长词命中 26 篇，
+ * 那一列就从「有多少讲解可看」变成了「这个词有多长」。
+ */
+function relevantNotes(deps: AppDeps, text: string, hits: ReturnType<typeof matchNotes>) {
+  // **只让替换说话**，理由见下面 entryDetail 里那段注释
+  const myErrors = store.errorsOnWord(deps.db, text).filter(
+    (e) => e.kind === 'sub' && e.targetIpa !== null,
+  );
+  const becauseOf = new Map<string, string[]>();
+  for (const e of myErrors) {
+    for (const n of notesCovering(e, deps.noteStore.all())) {
+      const label = `${e.targetIpa}→${e.heardIpa}`;
+      const cur = becauseOf.get(n.id) ?? [];
+      if (!cur.includes(label)) cur.push(label);
+      becauseOf.set(n.id, cur);
+    }
+  }
+  // 讲这个词的笔记：它整篇就是关于这个词的，没有「你还没在这儿错过」这一说
+  for (const h of hits) {
+    if (h.matched.some((m) => m.startsWith('word:')) && !becauseOf.has(h.note.id)) {
+      becauseOf.set(h.note.id, []);
+    }
+  }
+  return becauseOf;
 }
 
 function entryDetail(deps: AppDeps, text: string) {
@@ -98,21 +140,12 @@ function entryDetail(deps: AppDeps, text: string) {
   // 漏音只说"那个音没出现"，不指向任何一对，contrast 类的笔记教不了它。
   // 实测：dopamine 里 `/n/ 没发出来` 2 次（多半是坏转写），按"漏音也算"的话
   // 会把 l-vs-n 拉到外面——而这个词里根本没有 /l/。
-  const myErrors = store.errorsOnWord(deps.db, text).filter(
-    (e) => e.kind === 'sub' && e.targetIpa !== null,
-  );
+  //
   // 顺手记下**是哪几处错**把它拉到外面来的。界面上那行小字原来一律是
   // 「因为这个词里有 l」——那说的是"怎么匹配上的"，而它摆在外面的真实理由是
   // "你在这儿把 l 念成了 n"。后者才是这一栏存在的意义。
-  const becauseOf = new Map<string, string[]>();
-  for (const e of myErrors) {
-    for (const n of notesCovering(e, deps.noteStore.all())) {
-      const label = `${e.targetIpa}→${e.heardIpa}`;
-      const cur = becauseOf.get(n.id) ?? [];
-      if (!cur.includes(label)) cur.push(label);
-      becauseOf.set(n.id, cur);
-    }
-  }
+  // 算法在 relevantNotes 里，首页那张表数的是同一个东西。
+  const becauseOf = relevantNotes(deps, text, hits);
   const relevant = new Set(becauseOf.keys());
   const audio = store.getAudio(deps.db, text);
   return {
@@ -132,8 +165,9 @@ function entryDetail(deps: AppDeps, text: string) {
     // 所以这里不再是"音素笔记索引"，只负责把**跟你有关的**排到前面。
     notes: hits.map((h) => ({
       id: h.note.id, title: h.note.title, severity: severityOf(ev.get(h.note.id), h.note),
-      // 跟**这个词**有关吗——界面据此决定摆在外面还是收进折叠里
-      relevant: relevant.has(h.note.id) || h.matched.some((m) => m.startsWith('word:')),
+      // 跟**这个词**有关吗——界面据此决定摆在外面还是收进折叠里。
+      // 「讲这个词的也算」那一条在 relevantNotes 里，不在这儿再判一遍
+      relevant: relevant.has(h.note.id),
       /** 是哪几处错把它拉到外面来的（`l→n` 这样）。讲词的笔记和折叠里的都是空 */
       becauseOf: becauseOf.get(h.note.id) ?? [],
       matched: h.matched, markdown: h.note.markdown,
@@ -245,6 +279,37 @@ export function createApp(deps: AppDeps) {
   const app = new Hono();
 
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
+
+  // ── 多用户 ──────────────────────────────────────────────
+  // 谁在用由服务端定（整机一个「当前用户」），网页和 AI 端读到的永远一致。
+  const userInfo = () => ({ current: deps.users.current(), users: deps.users.list() });
+
+  app.get('/api/user', (c) => c.json(userInfo()));
+
+  app.post('/api/user', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+    if (typeof body.name !== 'string') return c.json({ error: '缺 name' }, 400);
+    // 判据只有一处（users.ts 的 invalidUserName）：直接调它，把真实理由原样回给用户，
+    // 而不是在这儿另写一句对不上具体规则的散文
+    const bad = invalidUserName(body.name);
+    if (bad) return c.json({ error: bad }, 400);
+    const r = deps.users.switchTo(body.name);
+    if (r === 'invalid') return c.json({ error: '这个名字不能用' }, 400);
+    // 不自动新建：手滑打错名字不该凭空多一个用户
+    if (r === 'not-found') return c.json({ error: `没有叫「${body.name}」的用户` }, 404);
+    return c.json(userInfo());
+  });
+
+  app.post('/api/users', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+    if (typeof body.name !== 'string') return c.json({ error: '缺 name' }, 400);
+    const bad = invalidUserName(body.name);
+    if (bad) return c.json({ error: bad }, 400);
+    const r = deps.users.create(body.name);
+    if (r === 'invalid') return c.json({ error: '这个名字不能用' }, 400);
+    if (r === 'exists') return c.json({ error: `已经有「${body.name}」了` }, 400);
+    return c.json(userInfo());
+  });
 
   // ---- 设置：Merriam-Webster 词典 API key ----
   // 只回是否已配置 + 末 4 位，绝不回显完整密钥。
@@ -417,7 +482,12 @@ export function createApp(deps: AppDeps) {
         text: e.text,
         ipa: e.words.map((w) => w.ipa).filter(Boolean).join(' '),
         updatedAt: e.updatedAt,
-        noteCount: matchNotes(tags, deps.noteStore.all(), e.text).length,
+        // **数的是「点进去真会摆出来的那几篇」，不是全部命中。**
+        // 全部命中会随笔记总数一起涨（实测 85 篇时长词命中 26 篇），于是这一列
+        // 慢慢变成「这个词有多长」——international 24 篇、light 10 篇，
+        // 排序出来跟音素个数一个样，对「该点哪个词」不再有分辨力。
+        // 更要紧的是它现在就跟词条页对不上：comfortable 这里写 5 篇，点进去 0 篇。
+        noteCount: relevantNotes(deps, e.text, matchNotes(tags, deps.noteStore.all(), e.text)).size,
         audioSource: audio.some((a) => a.source === 'mw') ? 'mw' : audio.length > 0 ? 'tts' : null,
       };
     });
@@ -449,12 +519,26 @@ export function createApp(deps: AppDeps) {
     const groups: Record<Note['severity'], unknown[]> = { confirmed: [], watch: [], info: [] };
     const entries = store.listEntries(deps.db);
     const ev = store.noteEvidence(deps.db);
-    for (const n of deps.noteStore.all()) {
+    // 先按素材库的顺序排好再分组，前端只要"遇到新的 shelf/place 就起一段"，
+    // 不用在客户端复制一份分类学（判据只能有一处）。
+    const sorted = deps.noteStore.all()
+      .map((n) => ({ n, ...shelfOf(n) }))
+      .sort((a, b) => compareShelf({ ...a, title: a.n.title }, { ...b, title: b.n.title }));
+    sorted.forEach(({ n, shelf, place, placeLabel }, order) => {
       const exampleCount = entries.filter((e) => entryHasNote(e, n)).length;
       // 分组按**你的**证据来：全新装上的人全在「资料」那一组，一条都不冒充成他的短板
       const sev = severityOf(ev.get(n.id), n);
-      groups[sev].push({ id: n.id, title: n.title, severity: sev, triggers: n.triggers, exampleCount });
-    }
+      groups[sev].push({
+        id: n.id, title: n.title, severity: sev, triggers: n.triggers, exampleCount,
+        // 素材库把 watch 和 info 两组拼起来看，一拼就把上面排好的顺序打乱了。
+        // 给个序号让前端排回来——它不用因此知道书架是怎么分的。
+        order,
+        // 这篇管的是什么，用来在素材库左边当路标：音素笔记给 IPA，其余给标签/词本身。
+        // 用户认的是 /θ/，不是「齿间擦音」四个字。
+        covers: coversOf(n),
+        shelf, place, placeLabel,
+      });
+    });
     return c.json({ groups });
   });
 
@@ -465,7 +549,12 @@ export function createApp(deps: AppDeps) {
     return c.json({ id: n.id, title: n.title, severity: severityOf(store.noteEvidence(deps.db).get(n.id), n), triggers: n.triggers, markdown: n.markdown, examples });
   });
 
-  app.get('/api/review/due', (c) => c.json({ cards: deps.review.due(deps.today()) }));
+  // upcoming 一起给：没有它，前端分不出「队列空」和「队列有、今天没到期」，
+  // 只能对着刚加了四个词的人说「去首页录一次音」。
+  app.get('/api/review/due', (c) => {
+    const today = deps.today();
+    return c.json({ cards: deps.review.due(today), upcoming: deps.review.upcoming(today) });
+  });
 
   // 手动收藏：模型没测出来、但你自己知道虚的词，标个星强制进队列。
   // 收藏的卡片不会自动毕业——那是你要留的，工具不该替你决定。
@@ -829,10 +918,15 @@ export function createApp(deps: AppDeps) {
     return c.json({
       places: PLACES,
       manners: MANNERS,
+      // 元音那张格子的行列。跟 places/manners 一样由服务端定，界面只摆
+      vowelRows: VOWEL_ROWS,
+      vowelCols: VOWEL_COLS,
       phones: articulationTable().map((p) => {
         const tag = `phoneme:${p.ipa}`;
         return {
           ...p,
+          // 元音落在哪一格（双元音按起点）。辅音有 place/manner，这是元音的对应物
+          ...(p.kind === 'vowel' ? vowelCell(p) : {}),
           exampleCount: entries.filter((e) => e.words.some((w) => w.tags.includes(tag))).length,
           noteCount: notes.filter((n) => n.triggers.includes(tag)).length,
         };

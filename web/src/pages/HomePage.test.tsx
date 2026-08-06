@@ -356,7 +356,8 @@ describe('文案里写死的数字，跟它数的东西对得上', () => {
   });
 
   it('「最该注意的六条」= 音素页那份清单的实际条数', () => {
-    const list = /最该注意的<\/span>\s*<ol[\s\S]*?<\/ol>/.exec(read('web/src/pages/PhonemesPage.tsx'));
+    // 这一块从 <div>+<span> 改成了 <details>+<summary>（录过音之后默认收起）
+    const list = /最该注意的\s*<\/summary>\s*<ol[\s\S]*?<\/ol>/.exec(read('web/src/pages/PhonemesPage.tsx'));
     expect(list, '音素页那份清单找不到了——结构变了就得改这条').not.toBeNull();
     const n = (list![0].match(/<li>/g) ?? []).length;
     expect(n, '一条都没数到').toBeGreaterThan(2);

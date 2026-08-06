@@ -27,7 +27,9 @@ export default function StarButton({ text, starred, onChange }: {
       // 提示语必须跟按钮**同一个词**：按钮写「移出复习」，这里就不能冒出
       // 一句「已取消收藏」。「收藏」在这个应用里根本不存在，是凭空多出来的
       // 第三个说法——按了「移出复习」却被告知「取消收藏」，人会以为点错了。
-      message.success(r.starred ? '已加入复习' : '已移出复习');
+      // 加进来的卡从**第二天**算起（review.ts 的 addCard），当场去复习页是空的。
+      // 只说「已加入复习」等于让人白跑一趟，所以把到期时间一起说了。
+      message.success(r.starred ? '已加入复习，明天到期' : '已移出复习');
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
     } finally {

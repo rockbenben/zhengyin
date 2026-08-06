@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { APP_NAME, APP_TAGLINE } from './brand';
+import { APP_NAME, APP_TAGLINE, REPO_URL } from './brand';
 
 /**
  * 名字只能有一个。
@@ -77,5 +77,28 @@ describe('这个工具只有一个名字', () => {
 
   it('副题说的是目标口音，不是一句空话', () => {
     expect(APP_TAGLINE).toContain('美式');
+  });
+});
+
+/**
+ * 侧栏版口上那个「源码」链接指向的地方，得跟 package.json 说的是同一个仓库。
+ *
+ * 这条跟上面那些是同一个毛病的不同面：一份事实散在两个文件里，
+ * 改一处不会有任何报错——只不过这次坏掉的不是名字，是一个**点了会去到错地方**的链接。
+ */
+describe('源码链接指向的就是这个仓库', () => {
+  it('跟 package.json 的 repository.url 是同一个', () => {
+    const pkg = JSON.parse(read('package.json')) as { repository?: { url?: string } };
+    const url = pkg.repository?.url ?? '';
+    expect(url, 'package.json 里没有 repository.url 了').toBeTruthy();
+    // package.json 那份是 git+https://…​.git，取出仓库本身来比
+    const bare = url.replace(/^git\+/, '').replace(/\.git$/, '');
+    expect(REPO_URL).toBe(bare);
+  });
+
+  it('侧栏真的把它渲染出来了，不是只定义了一个常量', () => {
+    const layout = read('web/src/layout.tsx');
+    expect(layout, '版口里没有用 REPO_URL').toContain('REPO_URL');
+    expect(layout, '没有 GitHub 图标').toContain('GithubOutlined');
   });
 });

@@ -5,7 +5,12 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --measure: 64ch;          /* 正文测量宽 */
+  /* 正文测量宽 = 一行放多少个汉字。
+     **单位必须是 em，不能是 ch**：ch 是数字「0」的宽度，而汉字宽约是它的两倍，
+     所以 `58ch` 写的人以为是 58 个字、实际只放得下 34 个。em 没有这个歧义——
+     等宽的汉字正好一个字一个 em（实测：14px 字号下汉字宽 14.0px）。
+     36 落在中文舒适行长 25–40 字之间。 */
+  --measure: 36em;
   --gutter: clamp(18px, 4vw, 40px);
 }
 
@@ -69,7 +74,11 @@ body {
   overflow-wrap: anywhere;
 }
 
-.measure { max-width: var(--measure); }
+/* 正文段落的行宽。**带 display:block 是必须的**：antd 的 Typography.Text 渲染成
+   `<span>`，行内盒直接忽略 max-width——实测 Recorder 和统计页那两处写了 58ch/62ch
+   却一点没生效，一行跑到 66 和 67 个字，比旁边的段落宽一倍。
+   加这个类就不用每处再想一遍它渲染成什么标签。 */
+.measure { display: block; max-width: var(--measure); }
 
 /* ── 套印带：这个工具的签名元素 ───────────────────────────────────────── */
 
@@ -222,6 +231,22 @@ body {
 }
 .grid-table thead th { padding: 9px 4px; vertical-align: bottom; }
 .grid-table tbody th { padding: 8px 10px; text-align: left; white-space: nowrap; }
+
+/* ── 行头钉在左边 ──
+   这张表比窄屏宽（min-width 620，而 390px 手机上容器只有 338），所以它在
+   .grid-wrap 里横滚。实测 390px：一滚行头就跟着滚走，而同时只看得见四列——
+   滚到「软腭」那一列时，你已经不知道自己在哪一行了，而这张表的全部意义
+   就是**行和列同时读**（/l/ 和 /n/ 同一列不同行）。
+   钉住的格子必须有不透明底色，否则底下滚过去的格子会透上来；右边那道线
+   用 box-shadow 补——border-collapse:collapse 下 sticky 元素的边框会被吃掉。 */
+.grid-table thead th:first-child,
+.grid-table tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--paper-deep);
+  box-shadow: 1px 0 0 var(--rule);
+}
 .grid-table td { text-align: center; height: 44px; position: relative; }
 .grid-cell {
   display: block; padding: 12px 2px;
@@ -397,9 +422,11 @@ body {
   padding: 22px 20px 18px;
   border-bottom: 1px solid var(--rule);
 }
+/* 刊头用衬线：这是报头该有的字，而且整个应用的 h1 用的就是它。
+   它必须**压得住下面那个人名**——两个都是名字，出版物的名字在前。 */
 .nav-brand b {
-  font: 600 14px/1.3 var(--font-body);
-  letter-spacing: .02em;
+  font: 400 18px/1.2 var(--font-display);
+  letter-spacing: -.015em;
 }
 .nav-brand small {
   display: block;
@@ -418,9 +445,57 @@ body {
 .nav-foot span { display: block; }
 .nav-foot b { color: var(--black); font-weight: 500; }
 
+/* ── 在练的是谁：版口里的一行，不是刊头里的一块 ──────────────────────
+   走过三版，前两版都错在**把罕用控件摆得太重**：
+     一、一个 6px 圆角描边的药丸，横跨整条侧栏——这套凸版语言里其余全是
+         细线和方角，那是从别的设计系统里掉进来的唯一一个圆角盒子；
+     二、改成刊头衬线的独立版带，层级是顺了，可绝大多数装机**只有一个用户**，
+         那条带子会永远写着「谁在练：默认」——为一个不存在的选择立标签。
+   现在归到版口，跟印次、源码同一档等宽小字：换用户罕用，但「这一版归谁」
+   跟「印了几次」「哪儿出的」是同一类信息，本来就该记在一起。
+   名字用 --black 拎出来（其余是 quiet），指过去整行变蓝。 */
+.user-switch {
+  display: block;
+  padding: 0;
+  margin-bottom: 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--quiet);
+}
+.user-switch b { color: var(--black); font-weight: 500; }
+.user-switch:hover,
+.user-switch:focus-visible { color: var(--blue); }
+.user-switch:hover b,
+.user-switch:focus-visible b { color: var(--blue); }
+.user-switch .caret { margin-left: 4px; font-size: 9px; vertical-align: 1px; }
+
+/* ── 侧栏钉在视口上，不跟着页面长 ────────────────────────────────────────
+   antd 的 Layout 是一行 flex，侧栏默认被拉伸到**整个文档**那么高。
+   实测音素页：视口 1215、文档 1281，侧栏就是 1281——而长页面（一篇笔记正文、
+   数据多的统计页）能有好几千，于是版口那一块（在练的是谁、印次、源码）
+   掉到页面最底下，要滚到底才够得着。导航更是滚一屏就没了。
+
+   sticky + 100vh 让它钉在视口上。**align-self 必须写**：不写的话 flex 的
+   stretch 会盖过 height，等于没设。 */
+.ant-layout-sider {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+}
+
 /* 侧栏内容要能把页脚推到底。antd 的直接子节点是 .ant-layout-sider-children，
-   flex 加在 Sider 元素本身不起作用。 */
-.ant-layout-sider-children { display: flex; flex-direction: column; }
+   flex 加在 Sider 元素本身不起作用。
+   **溢出滚动加在这一层、不加在 .ant-layout-sider 上**：窄屏那个重开导航的按钮
+   跟 `-children` 是**并列的两个子节点**（antd/lib/layout/Sider.js：aside 里先 children
+   再 triggerDom），而它定位在侧栏右侧 62px 之外。overflow 一加到 aside 上就会把它
+   裁掉——`overflow-y: auto` 会让 `overflow-x` 一起变成 auto，写 visible 也留不住。
+   加在 children 上则裁不到它，因为它根本不在 children 里面。 */
+.ant-layout-sider-children { display: flex; flex-direction: column; overflow-y: auto; }
 
 /* 「跳到正文」。平时**不占位也不可见**，但仍在 tab 序里——Tab 一下就现身。
    不用 display:none / visibility:hidden：那两个会把它从 tab 序里摘掉，等于没做。
@@ -522,3 +597,37 @@ body {
    （统计页那张部位矩阵早就是这么做的，见 .grid-wrap）。
    正常数据下表格本来就放得下，不会多出一条滚动条。 */
 .ant-table-content { overflow-x: auto; }
+
+/* 音素表里跟在符号右上角的例词数。挂在**每个音**上，不按格子合计——
+   合计会把同时含 ə 和 ʌ 的词数两遍。（统计页那张表可以合计，它数的是错误事件。） */
+.phone-count {
+  font: 700 9.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--blue);
+  margin-left: 1px;
+}
+
+/* 版口里的源码链接。是出处不是导航，压到跟印次同一档；指过去才亮起来 */
+.nav-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--quiet);
+}
+.nav-repo:hover,
+.nav-repo:focus-visible { color: var(--blue); }
+
+/* 一句小注：等宽小字，跟 .op-tick 一个长相，但**会折行**。
+   分出这个类是因为 .op-tick 带 white-space: nowrap——套印带上一格里的
+   「发成了 [l]」不许折行，那是对的；可整句话套上去就撑破页面。
+   实测 320px：元音表底下那句「双元音按起点摆…」把文档撑到 325px，
+   整页变成横向滚动，而页面其余部分都收得回来。
+   OverprintStrip 里「另有 N 处很短的声音没算进来…」是同一个毛病。 */
+.mono-note {
+  display: block;
+  margin-top: 8px;
+  font: 10.5px/1.7 var(--font-mono);
+  letter-spacing: .05em;
+  color: var(--quiet);
+}

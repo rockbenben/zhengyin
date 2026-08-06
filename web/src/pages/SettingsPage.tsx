@@ -79,12 +79,12 @@ export default function SettingsPage() {
              关掉那个黑窗口才是真的全停（连带整棵进程树）。所以这里说的是实话，不是按钮。 */}
       <Card title="怎么开启 / 怎么关闭" size="small">
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Typography.Text>
+          <Typography.Text className="measure">
             <strong>开启</strong>：双击桌面上的「正音」图标（没有的话，去正音这个文件夹里双击{' '}
             <Typography.Text code>启动.cmd</Typography.Text>，右键它「发送到 → 桌面快捷方式」就有了）。
             {'浏览器会自己打开，不用记网址。'}
           </Typography.Text>
-          <Typography.Text>
+          <Typography.Text className="measure">
             <strong>关闭</strong>：把启动时弹出的那个黑窗口<strong>关掉</strong>就全停了。
             {'窗口找不着了的话，双击仓库里的 停止.cmd（macOS 是 .command，Linux 是 .sh）——'}
             {'它按端口找进程，不会误杀别的程序。'}
@@ -94,7 +94,7 @@ export default function SettingsPage() {
               停止提示挪进服务启动输出时就删掉了，全仓库一个字都不剩，而这一页
               还在原样引着它。下面 SettingsPage.test.tsx 盯着这条：引的话必须是
               服务真会打出来的那句。 */}
-          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+          <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
             {'练发音的时候那个黑窗口一直开着就行。服务起来时会在里面打一行「'}
             {STOP_HINT}
             {'」。'}
@@ -115,7 +115,7 @@ export default function SettingsPage() {
         }
       >
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          <Typography.Paragraph type="secondary" className="measure" style={{ marginBottom: 0 }}>
             配了它，单词页放的是 Merriam-Webster 的<strong>美音真人录音</strong>；不配也能用，
             {'会自动退到微软 edge-tts 合成语音，再退到浏览器本地朗读——但合成音的口型细节、'}
             {'连读和轻重音跟真人有差距，练发音时差别不小。'}

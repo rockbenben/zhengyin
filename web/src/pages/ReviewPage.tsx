@@ -48,8 +48,19 @@ import Recorder from '../components/Recorder';
  */
 export default function ReviewPage() {
   useTitle('复习');
+  // 「2026-08-07 到期」对人没有意义，「明天」有。隔得远了才报日期。
+  function whenLabel(due: string | null): string {
+    if (!due) return '';
+    const days = Math.round((new Date(`${due}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000);
+    if (days <= 1) return '明天';
+    if (days === 2) return '后天';
+    return ` ${days} 天后`;
+  }
+
   const [queue, setQueue] = useState<ReviewCard[] | null>(null);
   const [total, setTotal] = useState(0);
+  /** 队列里还没到期的：几张、最早哪天。空队列跟「今天轮不到」得说不同的话 */
+  const [upcoming, setUpcoming] = useState<{ count: number; next: string | null }>({ count: 0, next: null });
   const [loadError, setLoadError] = useState<null | 'offline' | 'failed'>(null);
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +70,13 @@ export default function ReviewPage() {
 
   useEffect(() => {
     api.reviewDue()
-      .then((d) => { setQueue(d.cards); setTotal(d.cards.length); })
+      // upcoming 是后加的字段：旧响应/旧桩里可能没有，按「没有待办」降级，
+      // 别让空队列那一屏整个崩掉（跟统计页的 `stuck = []` 同一条）。
+      .then((d) => {
+        setQueue(d.cards);
+        setTotal(d.cards.length);
+        setUpcoming(d.upcoming ?? { count: 0, next: null });
+      })
       .catch((e) => setLoadError(isOffline(e) ? 'offline' : 'failed'));
   }, []);
 
@@ -150,10 +167,34 @@ export default function ReviewPage() {
   if (!queue) return <Spin style={{ marginTop: 48 }} />;
 
   if (queue.length === 0) {
-    // 队列空在新规则下是常态（只收有证据的词），不能只说"完成了"——
-    // 得说清楚什么会让它有东西，否则看着像功能坏了。
+    // 空队列要分三种情况说，**不能只有一套话**。
+    //
+    // 原来只分「刚复习完」和「其余」，于是队列里明明有卡、只是今天轮不到时，
+    // 页面照样说「复习队列只收有证据的词……去首页录一次音」——而刚点完「加入复习」
+    // 的人正是从那个按钮走过来的：新卡默认明天到期（review.ts 的 addCard），
+    // 他加了四个词，页面却说得像什么都没有。这不是措辞问题，是句假话。
+    if (total > 0) {
+      return (
+        <PageResult slug="复习" title={`复习完了，${total} 张`}>
+          今天这一轮做完了。练的是舌头的动作，隔一天再来比今天多做几遍管用。
+        </PageResult>
+      );
+    }
+    if (upcoming.count > 0) {
+      return (
+        <PageResult slug="复习" title="今天没有要复习的">
+          {/* 中文裹进 {'...'}：跨行的 JSXText 会把换行折成一个半角空格，
+              渲染出来是「到期—— 刚加进来的」，中间多一个豁口 */}
+          {'队列里还有 '}<strong>{upcoming.count}</strong>
+          {` 个词，最早${whenLabel(upcoming.next)}到期——刚加进来的词都从第二天算起，当天已经练过了。`}
+          <br />
+          {'等不及就去'}<Link to="/">首页</Link>{'直接查那个词，随时能录。'}
+        </PageResult>
+      );
+    }
+    // 真的一张卡都没有：只收有证据的词，这是新用户的常态，得说清什么会让它有东西
     return (
-      <PageResult slug="复习" title={total > 0 ? `复习完了，${total} 张` : '今天没有要复习的'}>
+      <PageResult slug="复习" title="今天没有要复习的">
         复习队列只收<strong>有证据</strong>的词：录音真发错了的，或者你在单词页点星加进来的。
         <br />
         去<Link to="/">首页</Link>录一次音，或者在<Link to="/stats">发音统计</Link>看看最近错在哪。

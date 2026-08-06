@@ -44,6 +44,9 @@ export default function HomePage() {
   const [entries, setEntries] = useState<EntryListItem[] | null>(null);
   const [error, setError] = useState<null | 'failed' | 'offline'>(null);
   const [mwConfigured, setMwConfigured] = useState<boolean | null>(null);
+  // 「怎么用」按**录过音没有**收起来，不按查过几个词——判据的理由见 HowItWorks 里那段。
+  // null = 还没取回来，那时先不渲染它，免得闪一下再消失。
+  const [attempts, setAttempts] = useState<number | null>(null);
   // 关掉之后就永久不再弹。这不是错误、只是"音频质量可以更好"的提示，知道了就没必要
   // 每次开页都被拦一次；真想再看，设置页里一直有当前状态。
   const [alertDismissed, setAlertDismissed] = useState(
@@ -110,6 +113,8 @@ export default function HomePage() {
   useEffect(() => {
     load();
     api.health().then((h) => setMwConfigured(h.mwConfigured)).catch(() => {});
+    // 取不到就当成 0：宁可多给一次说明，也不要让第一次用的人对着空页面没话看
+    api.stats().then((s) => setAttempts(s.overall.attempts)).catch(() => setAttempts(0));
   }, [load]);
 
   // 连不上 和 服务在跑但这次失败了，是两件事：前者要人去把服务起起来，
@@ -151,7 +156,13 @@ export default function HomePage() {
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
     },
     {
-      // 「命中」是系统的说法，用户不这么说话。这一列回答的是「这个词有没有讲解可看」。
+      // 「命中」是系统的说法，用户不这么说话。这一列回答的是
+      // 「这个词上，有几篇讲的是**我真犯过的错**」——跟点进去摆在外面的那几篇是同一批。
+      //
+      // 曾经数的是全部命中，于是列上写着「5 篇」、点进去一篇都没摆出来（全收在折叠里，
+      // 因为你还没在这个词上错过）。而笔记越攒越多这个差越大：85 篇笔记时
+      // comfortable 命中 26 篇，这一列就退化成「这个词有多长」。
+      // 「还有多少篇只是沾了音」由词条页那行折叠说，它到了那儿才有用。
       //
       // 也不再用 antd 的 Badge：它取 colorError，而调色板自己写着
       // `red: 只给破坏性操作`（theme.ts）。有几篇讲解是**好事**，却被渲染成整页最饱和
@@ -213,7 +224,7 @@ export default function HomePage() {
     <section style={{ borderLeft: '3px solid var(--blue)', paddingLeft: 20 }}>
       <span className="slug" style={{ color: 'var(--blue)' }}>不知道从哪个词开始？</span>
       {/* 中文裹在 {'...'} 里：JSX 会把换行缩进折成一个空格，中文之间多个空格就是个豁口 */}
-      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 12px', fontSize: 13.5, maxWidth: '58ch' }}>
+      <Typography.Paragraph type="secondary" className="measure" style={{ margin: '8px 0 12px', fontSize: 13.5 }}>
         {'这六个词一条对一条盖住中文母语者最容易错的六处，按'}
         <strong>影响听懂的程度</strong>
         {'排。点一下就加好了，直接能开录。'}
@@ -310,7 +321,7 @@ export default function HomePage() {
           不主动端出来就等于没有。到期数不在这儿——侧栏的角标已经够清楚了。 */}
       {entries.length > 0 && <TodayPlan />}
 
-      <HowItWorks count={entries.length} />
+      {attempts !== null && <HowItWorks attempts={attempts} />}
 
       {mwConfigured === false && !alertDismissed && (
         <Alert

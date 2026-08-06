@@ -79,9 +79,11 @@ export default function OverprintStrip({ align }: { align: AlignOp[] }) {
           );
         })}
       </div>
-      {/* 忽略掉了什么要说出来，不能悄悄扣掉——万一模型真听岔了，人得有迹可循 */}
+      {/* 忽略掉了什么要说出来，不能悄悄扣掉——万一模型真听岔了，人得有迹可循。
+          整句话不能用 .op-tick：那个类带 nowrap（套印带一格里的短刻度不许折行），
+          一整句套上去窄屏会把整页撑成横向滚动。 */}
       {noise > 0 && (
-        <span className="op-tick" style={{ marginTop: 12 }}>
+        <span className="mono-note" style={{ marginTop: 12 }}>
           另有 {noise} 处很短的声音没算进来，多半是气流或碰麦克风的杂音
         </span>
       )}

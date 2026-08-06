@@ -646,7 +646,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       {/* 复习流里一次要过七八张卡，每张都摊开同样几行灰字就只是噪音——
              那时人在做题，不是在学怎么用。所以复习页（brief）只留操作那一句。 */}
       {sidecar === 'up' && !listened && !busy && (
-        <Typography.Text type="secondary">
+        <Typography.Text type="secondary" className="measure">
           {hint === 'brief' ? (
             <>点「录音」念出来——<strong>念完它自己停</strong>，然后自动评测。</>
           ) : (
@@ -777,7 +777,7 @@ export function PhonemeResult({ result, mwKey }: { result: PronounceResult; mwKe
       {firstSub && <PlaceRuler targetIpa={firstSub.targetIpa} heardIpa={firstSub.heardIpa} />}
 
       {wrong.length === 0 ? (
-        <Typography.Text type="secondary" style={{ maxWidth: '58ch' }}>
+        <Typography.Text className="measure" type="secondary">
           这是音素层面的比对。音色、时长、重音它测不了——那部分靠 A/B 对比自己听。
         </Typography.Text>
       ) : notes.length > 0 ? (

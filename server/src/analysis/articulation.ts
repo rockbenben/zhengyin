@@ -31,6 +31,39 @@ export const MANNERS = {
 
 export type MannerId = keyof typeof MANNERS;
 
+/**
+ * 元音表的两根轴 —— 跟辅音的 PLACES / MANNERS 同一个角色：**格子的行列由这里定，
+ * 界面只负责摆**。
+ *
+ * 为什么是格子而不是标准的元音四边形：`height`/`back` 是连续值，照着画会撞在一起，
+ * 而且撞的正好是最要紧的几个——ə(0.50,0.50)、ɝ(0.52,0.52)、ɚ(0.50,0.52) 三个几乎同点，
+ * aɪ 和 aʊ 完全同点(0.10,0.40)，ɔ 和 ɔɪ 也完全同点(0.44,0.94)。
+ * 要画得清就得给每个音手工加偏移，那份偏移表没有依据、也没人守得住。
+ * （`PlaceRuler` 能照实画是因为它一次只画两个音，撞不上。）
+ * 分档保住了这张表真正要教的那件事：**舌位的高低和前后是两根独立的轴**。
+ */
+export const VOWEL_ROWS = [
+  { id: 'high', label: '高' },
+  { id: 'mid', label: '中' },
+  { id: 'low', label: '低' },
+] as const;
+
+export const VOWEL_COLS = [
+  { id: 'front', label: '前' },
+  { id: 'central', label: '央' },
+  { id: 'back', label: '后' },
+] as const;
+
+export type VowelRowId = typeof VOWEL_ROWS[number]['id'];
+export type VowelColId = typeof VOWEL_COLS[number]['id'];
+
+/** 这个元音落在哪一格。双元音按**起点**归格——它就是从那儿出发的 */
+export function vowelCell(v: Vowel): { row: VowelRowId; col: VowelColId } {
+  const row: VowelRowId = v.height > 0.7 ? 'high' : v.height >= 0.3 ? 'mid' : 'low';
+  const col: VowelColId = v.back < 0.34 ? 'front' : v.back <= 0.66 ? 'central' : 'back';
+  return { row, col };
+}
+
 export interface Consonant {
   kind: 'consonant';
   ipa: string;

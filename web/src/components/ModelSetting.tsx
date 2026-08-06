@@ -47,7 +47,7 @@ export default function ModelSetting() {
   return (
     <Card title="备用评测模型（浏览器本地）">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+        <Typography.Paragraph type="secondary" className="measure" style={{ marginBottom: 0 }}>
           {/* **不在这儿摆 `npm run asr`。** 双击启动的人从不开终端，而 `npm start`
               本来就带着那个服务——单跑它一样起不来（缺的多半是 uv）。
               「怎么把它开起来」由录音区那几条 Notice 一处说，那儿说得对也说得全。

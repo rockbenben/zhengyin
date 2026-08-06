@@ -166,7 +166,7 @@ export default function PhonemeBar({ word, hitTags, onTagClick }: Props) {
           </div>
 
           {phone?.howTo ? (
-            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.9, maxWidth: '58ch' }}>{phone.howTo}</p>
+            <p className="measure" style={{ margin: 0, fontSize: 14.5, lineHeight: 1.9 }}>{phone.howTo}</p>
           ) : (
             <p style={{ margin: 0, fontSize: 14, color: 'var(--quiet)' }}>
               {table ? '这个音还没写发音说明。' : '正在取发音说明…'}

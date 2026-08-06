@@ -97,8 +97,12 @@ export default function StatsPage() {
       <section>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 20px', alignItems: 'baseline', marginBottom: 12 }}>
           <span className="slug">横轴 舌头碰在哪儿　纵轴 气流怎么走</span>
+          {/* 说「越浓」不说「越深」：格子是把蓝往纸上兑（styles.css 的 data-heat，
+              12%→30%→55%→100%），**深浅要看是哪套纸**——浅色纸上兑得越多越深，
+              深色纸上兑得越多反而越亮。实测深色模式下错得最多的那格是全表最浅的一块，
+              而图例正说着「颜色越深」。浓度在两套纸上都是同一个方向。 */}
           <span className="slug" style={{ marginLeft: 'auto', letterSpacing: '.1em' }}>
-            颜色越深 错得越多
+            颜色越浓 错得越多
           </span>
         </div>
         <div className="grid-wrap">
@@ -240,7 +244,7 @@ export default function StatsPage() {
         <Notice tone="warn" label={`该补 ${missing.length} 篇`} title="这几个音反复出错，而且不止在一个词上，但还没有笔记">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {/* 不写 notes/：那是仓库里的目录名、开发者的叫法，界面里它叫「发音笔记」 */}
-            <span>把它们告诉 AI，它会写成一篇<Link to="/notes">发音笔记</Link>——写完之后评测报错时会直接给出"该怎么改"。</span>
+            <span>把它们告诉 AI，它会写成一篇<Link to="/notes">发音笔记</Link>——写完之后评测报错时会直接给出「该怎么改」。</span>
             <span className="mono" style={{ fontSize: 13 }}>
               {missing.map((r) => `${describe(r)} × ${r.count}`).join('　·　')}
             </span>
@@ -248,9 +252,9 @@ export default function StatsPage() {
         </Notice>
       )}
 
-      <Typography.Text type="secondary" style={{ fontSize: 12.5, maxWidth: '62ch' }}>
+      <Typography.Text type="secondary" className="measure" style={{ fontSize: 12.5 }}>
         这些数字只反映音素层面对没对上。音色、时长、重音测不了——那部分靠 A/B 对比自己听。
-        {'同一份统计也写在正音这个文件夹里的 '}<code>发音档案.md</code> 里。
+        {'同一份统计也写在 '}<code>{'data/users/<当前用户>/发音档案.md'}</code>{' 里。'}
       </Typography.Text>
     </Space>
   );

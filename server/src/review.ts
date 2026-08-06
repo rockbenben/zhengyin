@@ -389,6 +389,19 @@ export class ReviewStore {
     return this.state[text];
   }
 
+  /**
+   * 队列里**还没到期**的卡：还剩几张、最早哪天。
+   *
+   * 复习页要靠它分清两件事：队列是空的（新用户，该去录一次音），
+   * 还是队列有东西但今天轮不到（刚加进来的卡默认明天到期）。
+   * 分不清的话，刚点完「加入复习」的人会看到一句「复习队列只收有证据的词…
+   * 去首页录一次音」——他刚加进去四个词，而页面说得像什么都没有。
+   */
+  upcoming(today: string): { count: number; next: string | null } {
+    const later = Object.values(this.state).map((s) => s.due).filter((d) => d > today).sort();
+    return { count: later.length, next: later[0] ?? null };
+  }
+
   due(today: string): { text: string; due: string; starred: boolean }[] {
     return Object.entries(this.state)
       .filter(([, s]) => s.due <= today)
