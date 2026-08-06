@@ -48,3 +48,27 @@ describe('连不上 vs 服务说没有', () => {
     expect(isOffline({ offline: 'true' }), '只认布尔 true，字符串不算').toBe(false);
   });
 });
+
+/**
+ * switchUser/createUser 走 jx，不走 j——服务端 404/400 时写的是能直接展示的中文
+ * （`没有叫「X」的用户`、`已经有「X」了`），j() 会把它换成 `API 404` 这种占位文案。
+ * 这两个用例直接打 fetch、不 mock `../api` 模块，测的是真实的 jx/j 选择：
+ * 把 switchUser 改回 j 会让第一条变红（已经临时改回去实测过一遍，见 task-7-report.md）。
+ */
+describe('切人 / 建人失败时，弹出来的是服务端中文', () => {
+  it('switchUser 404 → Error.message 是服务端的中文，不是 API 404', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(
+      new Response(JSON.stringify({ error: '没有叫「张三」的用户' }), { status: 404 }),
+    ));
+    const e = await api.switchUser('张三').catch((x: unknown) => x);
+    expect((e as Error).message).toBe('没有叫「张三」的用户');
+  });
+
+  it('createUser 400 → 同上', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(
+      new Response(JSON.stringify({ error: '已经有「张三」了' }), { status: 400 }),
+    ));
+    const e = await api.createUser('张三').catch((x: unknown) => x);
+    expect((e as Error).message).toBe('已经有「张三」了');
+  });
+});

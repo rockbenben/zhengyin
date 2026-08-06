@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mwAudioUrl, fetchMwAudio } from './mw.js';
@@ -40,5 +40,14 @@ describe('fetchMwAudio', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mw-'));
     const fetchFn = vi.fn().mockResolvedValueOnce({ ok: false });
     expect(await fetchMwAudio('click', 'KEY', dir, fetchFn as any)).toBeNull();
+  });
+
+  it('磁盘上已有同名音频就直接复用，不打 MW', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mw-'));
+    writeFileSync(join(dir, 'night-mw.mp3'), 'CACHED');
+    const fetchFn = vi.fn();
+    const file = await fetchMwAudio('night', 'KEY', dir, fetchFn as unknown as typeof fetch);
+    expect(file).toBe('night-mw.mp3');
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

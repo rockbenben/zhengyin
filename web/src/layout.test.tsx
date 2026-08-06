@@ -10,6 +10,9 @@ vi.mock('./api', () => ({
   api: {
     reviewDue: () => Promise.resolve({ cards: Array.from({ length: stub.due }, () => ({})) }),
     stats: () => Promise.resolve({ overall: { attempts: stub.attempts } }),
+    // UserSwitcher 现在也挂在侧栏里，会调这个。这些测试不关心用户切换，拒绝掉让
+    // 它按设计返回 null（服务连不上时整个不渲染），不给这批断言添别的变量。
+    user: () => Promise.reject(new Error('not mocked in layout.test.tsx')),
   },
 }));
 

@@ -2,18 +2,18 @@ import { serve } from '@hono/node-server';
 import { exec } from 'node:child_process';
 import type { Context } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import dayjs from 'dayjs';
 import 'dotenv/config';
 import { serverPort } from './port.js';
 import { createApp } from './app.js';
-import { openDb, getEntry } from './db.js';
+import { getEntry } from './db.js';
 import { NoteStore } from './notes.js';
 import { fetchMwAudio, verifyMwKey } from './audio/mw.js';
 import { recognizePhonemes, checkPhonemeAsr, hasUv } from './audio/phonemeAsr.js';
 import { synthesizeTts } from './audio/tts.js';
-import { ReviewStore } from './review.js';
+import { UserManager, type UserSession } from './users.js';
 import { readEnvFile, readEnvValue } from './envfile.js';
 import { syncProfile } from './profile.js';
 import { reanalyzeEntries } from './reanalyze.js';
@@ -36,83 +36,89 @@ if (missingHow.length > 0) {
   console.warn(`[articulation] 这些音素还没写"怎么发"，发错时界面给不出指导：${missingHow.join(' ')}`);
 }
 
-const review = new ReviewStore(join(root, 'review-state.json'));
 const noteStore = new NoteStore(join(root, 'notes'));
 noteStore.load();
 
-const db = openDb(join(dataDir, 'index.db'));
+// 领域仪式：每打开一个用户的库都要跑一遍（启动、切换都算）。
+// 它们描述的是「这个用户的数据如何对齐当前代码的理解」，所以跟着会话走，不跟着进程走
+// ——以前这些是启动时跑一次的顶层代码，现在挂到 UserManager 的 onOpen，切换用户时原样重跑一遍。
+function openRituals(s: UserSession): void {
+  // 词条的推导结果是入库那一刻算好存下的，分析器加了新规则不会回溯——
+  // 实测 judge /dʒʌdʒ/ 该有 final-voiced 却没有，因为它是那个标签出现之前入库的。
+  // 这里按当前规则重算一遍（只碰"每个词都在词典里"的，理由见 reanalyze.ts）。
+  const re = reanalyzeEntries(s.db);
+  if (re.refreshed.length > 0) {
+    console.log(`[entries] 按当前的分析规则更新了 ${re.refreshed.length} 个词条的音素标签`
+      + `（共 ${re.checked} 个）：${re.refreshed.slice(0, 8).join('、')}${re.refreshed.length > 8 ? '…' : ''}`);
+  }
 
-// 词条的推导结果是入库那一刻算好存下的，分析器加了新规则不会回溯——
-// 实测 judge /dʒʌdʒ/ 该有 final-voiced 却没有，因为它是那个标签出现之前入库的。
-// 这里按当前规则重算一遍（只碰"每个词都在词典里"的，理由见 reanalyze.ts）。
-const re = reanalyzeEntries(db);
-if (re.refreshed.length > 0) {
-  console.log(`[entries] 按当前的分析规则更新了 ${re.refreshed.length} 个词条的音素标签`
-    + `（共 ${re.checked} 个）：${re.refreshed.slice(0, 8).join('、')}${re.refreshed.length > 8 ? '…' : ''}`);
-}
+  // 笔记归属（attempt_note）是**派生**的：错误行 + 这次念的词 + 当前的 notes/ 就能算出来。
+  // 它决定界面上那个「录音里反复出现」，而匹配规则改过好几轮——不对账的话，
+  // 界面上说的是按老规矩算的。判据只有一处（judge.ts 的 explainersFor）。
+  const rec = reconcileAttempts(s.db, noteStore.all());
+  if (rec.changed.length > 0) {
+    const sample = rec.changed.slice(0, 3).map((c) =>
+      `${c.target}${c.added.length ? ` +${c.added.join(' ')}` : ''}${c.removed.length ? ` -${c.removed.join(' ')}` : ''}`);
+    console.log(`[attempts] 按当前的匹配规则重算了 ${rec.changed.length} 次录音的笔记归属`
+      + `（共 ${rec.checked} 次）：${sample.join('，')}${rec.changed.length > 3 ? ' …' : ''}`);
+  }
+  if (rec.skipped > 0) {
+    console.warn(`[attempts] ${rec.skipped} 次录音的词现在词典里查不到了，归属没敢动`);
+  }
 
-// 笔记归属（attempt_note）是**派生**的：错误行 + 这次念的词 + 当前的 notes/ 就能算出来。
-// 它决定界面上那个「录音里反复出现」，而匹配规则改过好几轮——不对账的话，
-// 界面上说的是按老规矩算的。判据只有一处（judge.ts 的 explainersFor）。
-const rec = reconcileAttempts(db, noteStore.all());
-if (rec.changed.length > 0) {
-  const sample = rec.changed.slice(0, 3).map((c) =>
-    `${c.target}${c.added.length ? ` +${c.added.join(' ')}` : ''}${c.removed.length ? ` -${c.removed.join(' ')}` : ''}`);
-  console.log(`[attempts] 按当前的匹配规则重算了 ${rec.changed.length} 次录音的笔记归属`
-    + `（共 ${rec.checked} 次）：${sample.join('，')}${rec.changed.length > 3 ? ' …' : ''}`);
-}
-if (rec.skipped > 0) {
-  console.warn(`[attempts] ${rec.skipped} 次录音的词现在词典里查不到了，归属没敢动`);
-}
+  // 孤儿复习卡：指向一个已经不存在的词条。它每天都会出现在复习页、每天被跳过，
+  // 而 advance() 只从本地队列去掉它、不动文件——于是永远卡在那儿，用户没有任何手段清掉。
+  // 来源：手工改过 review-state.json（那个文件本来就是给人看、给人改的，见 review.ts）。
+  const orphans = s.review.dueAll().filter((text) => !getEntry(s.db, text));
+  for (const text of orphans) s.review.removeCard(text);
+  if (orphans.length > 0) {
+    console.warn(`[review] 清掉 ${orphans.length} 张指向不存在词条的复习卡：${orphans.join(' ')}`);
+  }
 
-const profileFile = join(root, '发音档案.md');
-
-// ── 档案是**本机的**，模板才进版本库 ──
-//
-// 里面是这台机器的统计，跟着仓库发出去的话新用户读到的是别人的数据，
-// 而约定让 AI「每次纠音前先读这里」。它还每次运行都被重写，跟踪它会让
-// 每个人的工作区永远是脏的。
-//
-// 所以第一次启动时从模板铺一份。**不能让 syncProfile 自己创建**：
-// 它只写统计块，手写的那几节会整个丢掉，而 AI 的工作流依赖那几节。
-if (!existsSync(profileFile)) {
-  const template = join(root, '发音档案.template.md');
-  if (existsSync(template)) {
-    copyFileSync(template, profileFile);
-    console.log('[profile] 已从模板生成 发音档案.md');
+  // 档案统计跟这个用户的库对一次账——理由见下面 refreshProfile 的注释，
+  // 这里是「刚打开/切换到这个用户」这一次触发。
+  try {
+    syncProfile(s.profileFile, s.db, noteStore, new Date().toISOString());
+  } catch (e) {
+    console.warn(`[profile] 同步发音档案失败（打开用户）：${(e as Error).message}`);
   }
 }
+
+// 铺文件（新用户的档案缺了从模板铺）、决定当前是谁、打开对应的 db/review 句柄，
+// 都在这个构造函数里做完；上面的 openRituals 就是它每次「打开一个用户」都会回调的那一下。
+const um = new UserManager({ root, dataDir, onOpen: openRituals });
+console.log(`[users] 当前用户：${um.current().name}`);
 
 /**
  * 把评测统计同步进发音档案。
  *
- * 只在评测成功后同步一次的话，三种情况档案会停在旧数据：写完一篇笔记、
- * 手工改过数据库、服务没开的时候动了上面两样。而这份档案正是下次对话时
- * AI 会读的东西，停在旧数据等于喂它过期信息。
- * 所以：启动时同步 + 笔记一变就同步 + 每次评测后同步。失败只警告不中断。
+ * 只在评测成功后同步一次的话，两种情况档案会停在旧数据：写完一篇笔记、
+ * 手工改过数据库的时候。而这份档案正是下次对话时 AI 会读的东西，
+ * 停在旧数据等于喂它过期信息。
+ * 所以：笔记一变就同步 + 每次评测后同步（启动/切换那次已经在 openRituals 里做过了）。
+ * 失败只警告不中断。
  */
 function refreshProfile(reason: string): void {
   try {
-    syncProfile(profileFile, db, noteStore, new Date().toISOString());
+    syncProfile(um.current().profileFile, um.current().db, noteStore, new Date().toISOString());
   } catch (e) {
     console.warn(`[profile] 同步发音档案失败（${reason}）：${(e as Error).message}`);
   }
 }
-
-// 孤儿复习卡：指向一个已经不存在的词条。它每天都会出现在复习页、每天被跳过，
-// 而 advance() 只从本地队列去掉它、不动文件——于是永远卡在那儿，用户没有任何手段清掉。
-// 来源：手工改过 review-state.json（那个文件本来就是给人看、给人改的，见 review.ts）。
-const orphans = review.dueAll().filter((text) => !getEntry(db, text));
-for (const text of orphans) review.removeCard(text);
-if (orphans.length > 0) {
-  console.warn(`[review] 清掉 ${orphans.length} 张指向不存在词条的复习卡：${orphans.join(' ')}`);
-}
-
-refreshProfile('启动');
 noteStore.watch(() => refreshProfile('笔记有变动'));
 
 const app = createApp({
-  db,
+  // 这三样跟着当前用户走。getter 而不是快照——切换用户后 app.ts 里
+  // 每一处 deps.db 读到的自动就是新用户的库，一行调用方都不用改。
+  get db() { return um.current().db; },
+  get review() { return um.current().review; },
+  get profileFile() { return um.current().profileFile; },
+  users: {
+    current: () => um.current().name,
+    list: () => um.list(),
+    switchTo: (name: string) => um.switchTo(name),
+    create: (name: string) => um.create(name),
+  },
   noteStore,
   audioDir: join(dataDir, 'audio'),
   // dotenv 按 cwd 找 .env，而本进程可能从仓库根也可能从 server/ 启动；
@@ -121,7 +127,6 @@ const app = createApp({
   fetchMw: fetchMwAudio,
   synthTts: synthesizeTts,
   now: () => new Date().toISOString(),
-  review,
   today: () => dayjs().format('YYYY-MM-DD'),
   modelsDir: join(dataDir, 'models'),
   envFile: join(root, '.env'),
@@ -131,7 +136,6 @@ const app = createApp({
   checkPhonemeAsr,
   // 启动时查一次就够：边车是启动脚本拉起来的，中途装上 uv 也得重启
   hasUv: hasUv(),
-  profileFile,
 });
 
 // 生产单进程托管：npm run build 产出 web/dist 后，同一个进程既提供 /api/* 又直接

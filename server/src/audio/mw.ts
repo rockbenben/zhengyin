@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 export function slugify(text: string): string {
@@ -41,6 +41,11 @@ export async function verifyMwKey(
 export async function fetchMwAudio(
   word: string, apiKey: string, destDir: string, fetchFn: typeof fetch = fetch,
 ): Promise<string | null> {
+  // 多用户后音频文件是全体用户共享的缓存：另一个人已经下过这个词，直接复用。
+  // 这也顺带让离线时的「升级到真人音」不再白打一次注定失败的请求。
+  const cached = `${slugify(word)}-mw.mp3`;
+  if (existsSync(join(destDir, cached))) return cached;
+
   try {
     const res = await fetchFn(
       `https://dictionaryapi.com/api/v3/references/collegiate/json/${encodeURIComponent(word)}?key=${apiKey}`,
