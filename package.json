@@ -36,9 +36,9 @@
   "scripts": {
     "preinstall": "node scripts/check-node.mjs",
     "go": "npm install && npm run build && npm start",
-    "dev": "concurrently -n server,web,asr -c cyan,green,magenta \"npm run dev -w server\" \"npm run dev -w web\" \"npm:asr\"",
+    "dev": "concurrently -n server,web,asr -c cyan,green,magenta \"npm run dev -w server\" \"npm run dev -w web\" \"npm run --silent asr\"",
     "build": "npm run build -w web && npm run build -w server",
-    "start": "concurrently -n server,asr -c cyan,magenta \"node server/dist/index.js\" \"npm:asr\"",
+    "start": "concurrently -n server,asr -c cyan,magenta \"node server/dist/index.js\" \"npm run --silent asr\"",
     "test": "npm run typecheck && vitest run",
     "fetch-model": "node scripts/fetch-model.mjs",
     "preasr": "node scripts/check-uv.mjs",

@@ -47,6 +47,31 @@ describe('.env 要能管到边车', () => {
     expect(parseEnv('K=a=b=c').K).toBe('a=b=c');
   });
 
+  /**
+   * stdout 是管道时 Python 按**系统区域编码**写（中文 Windows 上是 GBK），
+   * Node 这头一律按 UTF-8 读，于是边车那几句中文在窗口里全成了「锟斤拷」——
+   * 而「模型不在本地缓存里，开始获取」正是首次启动最该看清的一句。
+   * 这一条不是配置，是这条管道的事实，所以钉死、不给 .env 覆盖。
+   */
+  it('钉死 PYTHONIOENCODING——不然边车的中文在窗口里是乱码', () => {
+    const wrapper = readFileSync(join(root, 'scripts', 'asr.mjs'), 'utf8');
+    expect(wrapper).toMatch(/PYTHONIOENCODING:\s*'utf-8'/);
+    // 必须排在 fromFile 后面：写反了就能被 .env 里一行 PYTHONIOENCODING 顶掉
+    expect(wrapper).toMatch(/\.\.\.fromFile,\s*\n?\s*PYTHONIOENCODING/);
+  });
+
+  /**
+   * transformers 在权重是 .bin、仓库里没有 safetensors 时会起一个后台线程，
+   * 去 hub 上翻转换 PR、翻不着就请 bot 开一个（`modeling_utils.py` 的
+   * `Thread-auto_conversion`，抓栈确认过）。它跑完在**加载之后**，于是那两行
+   * 「You are sending unauthenticated requests to the HF Hub」正好压在窗口最后一行。
+   * 对本机零收益——模型已经从 .bin 加载好了，那个 PR 是开给公共仓库的。
+   */
+  it('关掉 safetensors 转换那个后台线程——它只往窗口最后甩两行英文告警', () => {
+    const wrapper = readFileSync(join(root, 'scripts', 'asr.mjs'), 'utf8');
+    expect(wrapper).toMatch(/DISABLE_SAFETENSORS_CONVERSION:\s*'1'/);
+  });
+
   it('npm run asr 真的走这个包装，不是直接调 uv', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as
       { scripts: Record<string, string> };

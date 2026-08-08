@@ -76,7 +76,23 @@ function main() {
   const fromFile = existsSync(join(root, '.env'))
     ? parseEnv(readFileSync(join(root, '.env'), 'utf8'), process.env)
     : {};
-  const env = { ...process.env, ...fromFile };
+  // PYTHONIOENCODING 不给 .env 覆盖的机会，因为它不是配置、是这条管道的事实：
+  // stdout 是管道时 Python 按**系统区域编码**写（中文 Windows 上是 GBK），
+  // 而 Node 这头一律按 UTF-8 读——边车那几句中文提示（「模型不在本地缓存里，
+  // 开始获取」正是首次启动最该看清的一句）在窗口里全成了「锟斤拷」。
+  //
+  // DISABLE_SAFETENSORS_CONVERSION 同理，它关掉的是 transformers 的一个后台线程
+  // （`modeling_utils.py` 的 `Thread-auto_conversion`）：权重是 .bin 而仓库里没有
+  // safetensors 时，它会去 hub 上翻有没有转换 PR，翻不着就请转换 bot 开一个。
+  // 抓栈确认过那几个请求就是它发的——而它是**加载完之后**才跑完的，于是那两行
+  // 「You are sending unauthenticated requests to the HF Hub」正好落在窗口最后一行，
+  // 成了整个启动过程的收尾语，看着像出了什么事。
+  // 对本机零收益：模型已经从 .bin 加载好了，那个 PR 是开给公共仓库的。
+  const env = {
+    ...process.env, ...fromFile,
+    PYTHONIOENCODING: 'utf-8',
+    DISABLE_SAFETENSORS_CONVERSION: '1',
+  };
 
   // 命令整串传，别写成 ('uv', [...])——理由见 web/src/lib/spawnShell.test.ts。
   // 这里每个词都是写死的字面量、没空格，拼一串不用管引号；带空格的 cwd 是单独传的。

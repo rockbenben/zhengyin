@@ -88,4 +88,28 @@ describe('模型来源的几条底线', () => {
     expect(py, '没配 handler，日志根本不会出现').toMatch(/logging\.basicConfig/);
     expect(py).toMatch(/来源/);
   });
+
+  /**
+   * 窗口里只该有那三句中文。`basicConfig(level=INFO)` 抬的是 **root**，
+   * 于是 httpx 每发一个请求打一行 `HTTP Request: HEAD https://…`——缓存命中的
+   * 启动也有三十来行英文 URL，那三句中文夹在里面等于没有。
+   * root 留 WARNING、只把自己这个 logger 抬到 INFO，两头都保住。
+   */
+  it('root 不许开到 INFO——第三方库的每个 HTTP 请求都会刷屏', () => {
+    expect(py).toMatch(/basicConfig\(level=logging\.WARNING/);
+    expect(py, 'root 压下去之后，自己这几句中文也要能出来').toMatch(
+      /log\.setLevel\(logging\.INFO\)/);
+  });
+
+  /**
+   * 缓存命中还联网核对 etag，代价不只是刷屏：**断网就起不来**，而缓存里什么都有。
+   * 兜底那次必须留着——`_hf_cache_hit()` 只看 config.json，缓存不全时得能落回联网。
+   */
+  it('先按离线加载一次，失败再联网——不然「本地已有」还是要发几十个请求', () => {
+    expect(py).toMatch(/_load\(src,\s*offline=True\)/);
+    expect(py, '离线那趟失败了要能落回联网，否则缓存不全的人直接起不来').toMatch(
+      /except OSError:\s*\n\s*_load\(src,\s*offline=False\)/);
+    expect(py, 'local_files_only 没传下去的话，offline 这个参数是摆设').toMatch(
+      /local_files_only=offline/);
+  });
 });

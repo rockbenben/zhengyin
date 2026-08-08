@@ -37,9 +37,15 @@ MAX_SECONDS = 30
 # 一直如此，原来那句「模型已加载」从来没人见过。现在要紧了：模型从哪儿来、
 # 是不是正在下 1.2GB，恰恰是启动窗口里最该看见的东西——界面上那条
 # 「回来看终端」指的就是这里。
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+#
+# **level 给 WARNING，只把自己这个 logger 抬到 INFO。** 原来这里是
+# `basicConfig(level=INFO)`——那是给 **root** 设的，于是每个第三方库的 INFO 一起开闸：
+# httpx 每发一个请求打一行 `HTTP Request: HEAD https://huggingface.co/...`，
+# 缓存命中的启动也有三十来行英文 URL，把本该只有三句中文的窗口整个淹掉。
+logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 log = logging.getLogger("asr-service")
+log.setLevel(logging.INFO)
 app = FastAPI(title="pronunciation phoneme ASR")
 
 _state: dict = {}
@@ -128,15 +134,31 @@ def resolve_model() -> str:
     return _from_modelscope() or MODEL
 
 
+def _load(src: str, offline: bool) -> None:
+    # do_phonemize=False 跳过 phonemizer 后端初始化：那个后端只用于"文本→音素"编码，
+    # 这里只做"音频→音素"解码，用不上；而它在 Windows 上还要另装 eSpeak-NG 二进制。
+    _state["processor"] = AutoProcessor.from_pretrained(
+        src, do_phonemize=False, local_files_only=offline)
+    model = AutoModelForCTC.from_pretrained(src, local_files_only=offline)
+    model.eval()
+    _state["model"] = model
+
+
 @app.on_event("startup")
 def load_model() -> None:
     src = resolve_model()
-    # do_phonemize=False 跳过 phonemizer 后端初始化：那个后端只用于"文本→音素"编码，
-    # 这里只做"音频→音素"解码，用不上；而它在 Windows 上还要另装 eSpeak-NG 二进制。
-    _state["processor"] = AutoProcessor.from_pretrained(src, do_phonemize=False)
-    model = AutoModelForCTC.from_pretrained(src)
-    model.eval()
-    _state["model"] = model
+    # **先按离线加载一次。** 不带 local_files_only 的话，from_pretrained 即使全部命中
+    # 缓存也要回 hub 逐个文件核对 etag——实测三十来次 HEAD/GET，还包括去翻这个仓库的
+    # safetensors 转换 PR。代价不只是刷屏：白等一两秒，而且**断网就起不来**，
+    # 尽管缓存里什么都有。
+    #
+    # 失败了再联网走一次原来那条路：`_hf_cache_hit()` 只看 config.json，
+    # 缓存不全（下到一半、或者只有 ModelScope 那份）时离线这趟会抛 OSError
+    # （LocalEntryNotFoundError 是它的子类），这时行为跟以前一模一样。
+    try:
+        _load(src, offline=True)
+    except OSError:
+        _load(src, offline=False)
     log.info("模型已加载：%s（来源 %s）", MODEL, src if src != MODEL else "HuggingFace")
 
 

@@ -16,7 +16,7 @@ export const APP_TAGLINE = '美式发音';
  * 不引共享包就传不过来。拷贝会跟原件脱节（真发生过：设置页引了一句早已删掉的英文），
  * 所以 `SettingsPage.test.tsx` 直接读 index.ts 的源码比对。
  */
-export const STOP_HINT = '要停下来：关掉这个窗口，或者按 Ctrl+C';
+export const STOP_HINT = '这个窗口开着，网页才能用；用完关掉它就是停止，也可以按 Ctrl+C';
 
 /**
  * 源码在哪。侧栏页脚那个 GitHub 链接用它。
