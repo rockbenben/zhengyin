@@ -3,7 +3,7 @@ id: v-not-w
 title: /v/ 中文里没有——very 不是 wery，也不是 fery
 # 这篇讲 /v/。念成 /w/ 或 /f/ 都是**错法**，不是这篇的主题——
 # 写进 triggers 的话，water / wish / fish / four 这些压根没有 /v/ 的词都会弹出它。
-# 通则见 CLAUDE.md：念错了才会得到的那个音，不该当 trigger。
+# 通则见 AGENTS.md：念错了才会得到的那个音，不该当 trigger。
 triggers: [phoneme:v]
 contrasts: [w, f]
 ---

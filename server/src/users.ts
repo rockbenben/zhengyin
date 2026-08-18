@@ -71,7 +71,7 @@ export function writeCurrentUser(dataDir: string, name: string): void {
 
 /**
  * 旧布局（单用户）→ 新布局（data/users/<名>/）。**原样 rename，一个字节不改**——
- * 这是「已发布必须写迁移」（CLAUDE.md）的执行：别人机器上的数据只挪位置。
+ * 这是「已发布必须写迁移」（AGENTS.md）的执行：别人机器上的数据只挪位置。
  *
  * 幂等性：指针指向有效用户目录时立即返回（不改指针）。如果需要补完成标记，也会写指针。
  * 可续跑性：中途被杀后下次启动能补搬剩余文件或补完成标记。

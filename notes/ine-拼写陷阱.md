@@ -13,7 +13,7 @@ title: 词尾 -ine 不都读 /aɪn/——machine、routine 这一类读 /iːn/
 # 加这篇是因为：在此之前只有 dopamine 一个词挂得上笔记，machine / marine /
 # routine / caffeine 录进去什么都不弹。
 # 注意这**不是**在断言使用者有这个毛病——是不是他的短板由他的评测记录说了算
-# （见 CLAUDE.md「severity 是派生的」）。
+# （见 AGENTS.md「severity 是派生的」）。
 triggers: []
 words: [machine, routine, marine, caffeine, magazine, gasoline, vaccine, cuisine, sardine, tangerine, limousine, dopamine]
 ---

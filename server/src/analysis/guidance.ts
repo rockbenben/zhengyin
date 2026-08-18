@@ -13,7 +13,7 @@ import type { Note } from '../notes.js';
 // 小标题里出现这些词，就算"可执行的发音指导"。
 // 用关键词而不是固定标题名，是因为现有笔记的标题本来就不统一（`## 原理`、
 // `## 自检法：捏鼻子测试（Pinch Test）`、`## 舌头的"胖瘦"（物理阻断法）`），
-// CLAUDE.md 的模板也只规定顺序不规定字面。硬编标题名会在下一篇笔记就失效。
+// AGENTS.md 的模板也只规定顺序不规定字面。硬编标题名会在下一篇笔记就失效。
 const ACTIONABLE = ['原理', '自检', '舌', '口型', '气流', '物理', '发音'];
 
 export interface Section { heading: string; body: string }

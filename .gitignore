@@ -22,7 +22,7 @@ review-state.json
 review-state.json.*
 
 # 发音档案。里面是这台机器的统计（每次评测后重写），发出去的话新用户读到的是
-# 别人的数据——而 CLAUDE.md 让 AI「每次纠音前先读这里」。
+# 别人的数据——而 AGENTS.md 让 AI「每次纠音前先读这里」。
 # 进版本库的是 发音档案.template.md，第一次启动时照它铺一份（server/src/index.ts）。
 发音档案.md
 

@@ -105,11 +105,11 @@
 
 <sub>讲解分两档摆：排在外面的那条是**你在这个词上真错过 n→l**；只是「这个词里有这个音」的收在下面那行折叠里。</sub>
 
-**要哪种 AI**：装在你电脑上、能读写这个文件夹的那种，上面说的才成立——它得看得见你的记录、也得写得进 `notes/`。[Claude Code](https://claude.ai/code)、Codex、Cursor 都行，约定它们都读得到（`CLAUDE.md` 和 `AGENTS.md` 是同一份）。只能在浏览器里聊天的用不了「自己看出该补哪篇」这一层，但你把词发给它、再把写好的那篇手工存进 `notes/`，页面照样认。
+**要哪种 AI**：装在你电脑上、能读写这个文件夹的那种，上面说的才成立——它得看得见你的记录、也得写得进 `notes/`。[Claude Code](https://claude.ai/code)、Codex、Cursor 都行，约定它们都读得到（`AGENTS.md` 是这几个工具通用的文件名）。只能在浏览器里聊天的用不了「自己看出该补哪篇」这一层，但你把词发给它、再把写好的那篇手工存进 `notes/`，页面照样认。
 
 **还没有笔记的音，页面不会空着。** 它会显示这个音的通用发音说明（舌尖顶哪、气流走哪），并注明还没有笔记。刚装上的时候绝大多数音都是这个状态。
 
-**自己写笔记的话，有两条容易踩**（细节在 [CLAUDE.md](CLAUDE.md)）：
+**自己写笔记的话，有两条容易踩**（细节在 [AGENTS.md](AGENTS.md)）：
 
 - **讲音的写 `triggers:`，讲词的写 `words:`。** 混了会让一篇讲 dopamine 的笔记弹到 light / night / fine / time 上——真发生过。
 - **念错了才会得到的那个音，不该当 `triggers`。** 它是错法，写 `contrasts:`。讲 θ 的那篇一度声明 `phoneme:s`，于是 yes / this / bus 全都弹出它。
@@ -210,7 +210,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh  # Linux / macOS
 | `data/users/<当前用户>/review-state.json`           | 复习进度（下次到期、当前阶梯）                                   | 复习记忆清零                                                                     |
 | **`data/users/<当前用户>/index.db`**                | 你查过的词 + **每一次录音的判定**                                | ⚠️ **你练过多少次、哪个音错了多少回，全在这里，没有第二份。** 删之前先导一份备份 |
 | `data/audio/`、`data/models/`                       | 音频 mp3、Vosk 模型                                              | 重下就有。但删音频要**连 `index.db` 一起删**，否则补不回来                       |
-| [`CLAUDE.md`](CLAUDE.md) · [`AGENTS.md`](AGENTS.md) | 给 AI 用的操作手册（怎么写笔记、triggers 词表）                  | 两个文件同一份约定——前者是 Claude Code 认的名字，后者是 Codex / Cursor 认的      |
+| [`AGENTS.md`](AGENTS.md) | 给 AI 用的操作手册（怎么写笔记、triggers 词表）——**正本**，所有工具都读这份 |
+| `CLAUDE.md` | 一句指路，指回 `AGENTS.md` |
 
 除了 `notes/`，你的数据全都已 gitignore，不会跟着仓库跑。
 

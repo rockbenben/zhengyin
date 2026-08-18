@@ -15,9 +15,34 @@ severity: confirmed
 正文内容。
 `;
 
+const NL = String.fromCharCode(10);
+
 describe('NoteStore', () => {
   let dir: string;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'notes-')); });
+
+  it('告警攒进 warnings 供 /api/stats 暴露，重扫会重置不累积', () => {
+    // console.warn 只有人盯着终端才看得见，写笔记的 AI 够得到的只有 HTTP。
+    // 这条守着：告警必须落进 warnings 字段，而且每次重扫从零攒（否则越攒越长，
+    // 已经修好的笔记还挂在列表里）。
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      writeFileSync(join(dir, 'bad.md'), ['---', 'id: bad', 'title: 空笔记', '---', '正文', ''].join(NL), 'utf8');
+      const store = new NoteStore(dir);
+      store.load();
+      expect(store.warnings.some((w) => w.includes('bad.md') && w.includes('都是空的'))).toBe(true);
+
+      // 修好后重扫：旧告警必须消失（不许累积）。这篇笔记仍会因缺「自检法」等节
+      // 触发**别的**告警——正好顺带证明 validateShape 那路也落进 warnings，
+      // 所以只断言「都是空的」这条没了，不断言 bad.md 完全清零。
+      writeFileSync(join(dir, 'bad.md'), NOTE.replace('test-note', 'bad'), 'utf8');
+      store.load();
+      expect(store.warnings.filter((w) => w.includes('都是空的'))).toEqual([]);
+      expect(store.warnings.some((w) => w.includes('bad') && w.includes('自检法'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
   it('loads note with frontmatter', () => {
     writeFileSync(join(dir, 'a.md'), NOTE, 'utf8');

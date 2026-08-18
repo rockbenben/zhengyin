@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * **全部字段都是必填的。** 曾经有四个是可选的，因为库里躺着那几个字段出现之前落库的
  * 旧词条；发布前把开发机上的库清空了，而任何一台新机器上的词条都由下面这一版
  * `analyzeText()` 写入，一次都不会缺。**别再往这里加可选字段来兼容老数据**——
- * 那条路已经关了，加列/改结构就得写迁移（见 CLAUDE.md）。
+ * 那条路已经关了，加列/改结构就得写迁移（见 AGENTS.md）。
  */
 export interface WordAnalysis {
   word: string; found: boolean;
@@ -47,7 +47,7 @@ export function openDb(file: string): Database.Database {
       file TEXT NOT NULL
     );
     -- 每一次音素级评测的流水。这个仓库的核心目的是"积累使用者的发音习惯短板"
-    -- （见 CLAUDE.md），而在这张表之前，每次评测的结论看完就蒸发了——工具自己测出来的
+    -- （见 AGENTS.md），而在这张表之前，每次评测的结论看完就蒸发了——工具自己测出来的
     -- 数据一条都没沉淀下来，发音档案全靠手写。
     CREATE TABLE IF NOT EXISTS attempt (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

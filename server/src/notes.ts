@@ -31,7 +31,7 @@ export interface Note {
    * 这篇笔记还教了「念成什么」——只写 IPA 符号，不带 `phoneme:` 前缀。
    *
    * **为什么它必须跟 triggers 分开。** triggers 回答的是「这是关于哪个音的课」，
-   * 决定这篇出现在哪些词条页、点哪个音素跳到它；所以 CLAUDE.md 明写着
+   * 决定这篇出现在哪些词条页、点哪个音素跳到它；所以 AGENTS.md 明写着
    * **「念错了才会得到的那个音，不该当 trigger」**——θ 那篇声明 `phoneme:s` 会让它
    * 弹在每一个含 /s/ 的词上，dopamine 那篇声明 `phoneme:aɪ` 真的把 light/night/fine
    * 全弄脏过。
@@ -150,14 +150,14 @@ export function validateShape(notes: Note[]): string[] {
     for (const r of REQUIRED) {
       if (!r.re.test(note.markdown)) {
         warnings.push(
-          `[notes] 笔记 "${note.id}"（${note.file}）没有「${r.what}」这一节——${r.why}。见 CLAUDE.md 的「笔记模板」`,
+          `[notes] 笔记 "${note.id}"（${note.file}）没有「${r.what}」这一节——${r.why}。见 AGENTS.md 的「笔记模板」`,
         );
       }
     }
     for (const s of 对读者的实测断言(note.markdown)) {
       warnings.push(
         `[notes] 笔记 "${note.id}"（${note.file}）在正文里对读者作实测断言：「${s}」`
-        + '——那是写笔记那个人的数，不是读这篇的人的。见 CLAUDE.md 的「severity 是派生的」',
+        + '——那是写笔记那个人的数，不是读这篇的人的。见 AGENTS.md 的「severity 是派生的」',
       );
     }
   }
@@ -176,7 +176,7 @@ export function validateShape(notes: Note[]): string[] {
  * **只认两种机械形状**，不假装能认出所有写法：
  *   1. 同一句里既有「你」又有实测次数（`N 次` / `N%`）
  *   2. 「你」当了「犯 / 踩」的主语
- * 规矩本身写在 CLAUDE.md，这里只拦最常见、最容易手滑的那两种。
+ * 规矩本身写在 AGENTS.md，这里只拦最常见、最容易手滑的那两种。
  *
  * 数字那一条**只认 次/%**，不认所有数字：「把弱读音节拖长 2 秒，听你拖出来的是什么」
  * 是正当的自检法，按"你+数字"去拦会把它误伤掉。
@@ -278,6 +278,13 @@ export function validateTriggers(notes: Note[]): string[] {
 export class NoteStore {
   private notes = new Map<string, Note>();
   private watcher: FSWatcher | undefined;
+  /**
+   * 上一次成功重扫产生的全部告警。console.warn 只有人盯着终端才看得见，而写笔记的
+   * 往往是 AI——它够不到服务端控制台，够得到的只有 HTTP。/api/stats 原样带上这份，
+   * 写完笔记（chokidar 自动重扫）再 GET 一次就能自查，不用「回头看一眼服务端日志」。
+   */
+  warnings: string[] = [];
+  private warn(msg: string): void { console.warn(msg); this.warnings.push(msg); }
   constructor(private dir: string) {}
 
   load(): void {
@@ -295,6 +302,7 @@ export class NoteStore {
     }
 
     this.notes.clear();
+    this.warnings = [];
     // id -> 声明了这个 id 的所有文件（按读取顺序）
     const seenFiles = new Map<string, string[]>();
 
@@ -306,14 +314,14 @@ export class NoteStore {
         const rawTriggers = Array.isArray(data.triggers) ? data.triggers : [];
         const rawWords = Array.isArray(data.words) ? data.words : [];
         if (!data.id || !data.title) {
-          console.warn(`[notes] 跳过（frontmatter 缺 id 或 title）: ${file}`);
+          this.warn(`[notes] 跳过（frontmatter 缺 id 或 title）: ${file}`);
           continue;
         }
         if (rawTriggers.length === 0 && rawWords.length === 0) {
-          console.warn(`[notes] ${file}：triggers 和 words 都是空的，这篇笔记永远匹配不上任何词条。讲音的写 triggers，讲词的写 words。`);
+          this.warn(`[notes] ${file}：triggers 和 words 都是空的，这篇笔记永远匹配不上任何词条。讲音的写 triggers，讲词的写 words。`);
         }
         // 笔记按 id 存进 Map，id 撞了后一篇会把前一篇顶掉。这在正常工作流里很容易发生
-        // ——照着已有笔记复制一份当模板、忘了改 id（CLAUDE.md 本来就让人从已有笔记里
+        // ——照着已有笔记复制一份当模板、忘了改 id（AGENTS.md 本来就让人从已有笔记里
         // 复制粘贴 IPA）。以前顶掉是完全静默的：文件躺在 notes/ 里，但既不出现在笔记页、
         // 也永远匹配不上任何词，用户无从知道为什么。
         //
@@ -343,20 +351,20 @@ export class NoteStore {
         // 启动时服务起不来，chokidar 那条路上则是直接弄死正在跑的 dev server。
         seenFiles.set(id, [...(seenFiles.get(id) ?? []), file]);
       } catch (e) {
-        console.warn(`[notes] 解析失败: ${file}`, e);
+        this.warn(`[notes] 解析失败: ${file}（${(e as Error)?.message ?? e}）`);
       }
     }
     for (const [id, files] of seenFiles) {
       if (files.length < 2) continue;
       const winner = this.notes.get(id)!.file;
       const ignored = files.filter((f) => f !== winner);
-      console.warn(
+      this.warn(
         `[notes] id 冲突：id "${id}" 被 ${files.length} 篇笔记声明——当前生效的是 "${winner}"，` +
         `${ignored.map((f) => `"${f}"`).join('、')} 会被完全忽略（谁生效取决于文件系统的目录读取顺序，不保证稳定）。给多余的那几篇换个唯一 id`,
       );
     }
     for (const warning of [...validateTriggers(this.all()), ...validateShape(this.all())]) {
-      console.warn(warning);
+      this.warn(warning);
     }
   }
 

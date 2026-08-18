@@ -756,7 +756,7 @@ export function createApp(deps: AppDeps) {
         guidance: guidanceSections(x.note),
       }));
 
-    // 落盘：这个仓库的核心是积累习惯性短板（见 CLAUDE.md），不存下来的话每次结论
+    // 落盘：这个仓库的核心是积累习惯性短板（见 AGENTS.md），不存下来的话每次结论
     // 看完就蒸发。写失败绝不能连累这次评测的结果——用户已经录完了，结果照给。
     // 背景太吵时**结果照给、但不落盘**：你需要这次的反馈（哪怕它不准），
     // 而发音档案不需要一批录音条件已经坏掉的数据——那些数据会变成"你的习惯性短板"，
@@ -874,6 +874,8 @@ export function createApp(deps: AppDeps) {
 
   app.get('/api/stats', (c) => c.json({
     overall: store.overallStats(deps.db),
+    // 笔记告警。写笔记的 AI 够不到服务端控制台，这是它唯一能自查的通道（NoteStore.warnings）
+    noteWarnings: deps.noteStore.warnings,
     // ── 卡住的词：练了很多次、全对率还是很低 ──
     //
     // 这份数据早就算了，但**只喂给发音档案那个 md 文件**——只用网页的人一直看不到。
