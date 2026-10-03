@@ -58,7 +58,10 @@ export function LoadFailed({ what }: { what: string }) {
       title={`没能读出${what}`}
       extra={<Button type="primary" onClick={() => window.location.reload()}>刷新</Button>}
     >
-      服务在跑，但这次请求出错了。刷新一下；还是不行的话看启动那个窗口里的报错。
+      {/* 不写「服务在跑，但这次出错了」：生产里收到 HTTP 错误确实=在跑，
+          但 dev 的 vite 代理把"服务没起"也变成 500，那句就成了假话。
+          一句话在某些状态下是假的，就整句都别说——下一步不变。 */}
+      服务这次没答上来。刷新一下；还是不行的话看启动那个窗口里的报错。
     </PageResult>
   );
 }

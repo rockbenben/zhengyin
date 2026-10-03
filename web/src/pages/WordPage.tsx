@@ -12,7 +12,7 @@ import Recorder from '../components/Recorder';
 import StarButton from '../components/StarButton';
 import Offline from '../components/Offline';
 import { wordIpa } from '../lib/notation';
-import PageResult from '../components/PageResult';
+import PageResult, { LoadFailed } from '../components/PageResult';
 
 // 词条页：查过一个词/短语之后落地的详情页。只渲染服务端已经算好的东西，
 // 页面本身不产出任何讲解内容——服务端没有这个词条时给一个友好的空状态，而不是报错。
@@ -22,7 +22,7 @@ export default function WordPage() {
   const { text } = useParams<{ text: string }>();
   useTitle(text);
   const [entry, setEntry] = useState<EntryDetail | null>(null);
-  const [error, setError] = useState<null | 'missing' | 'offline'>(null);
+  const [error, setError] = useState<null | 'missing' | 'offline' | 'failed'>(null);
   /** 缺词时服务端给的「在不在词典」。null = 服务端没给（旧服务），按在的话说 */
   const [inDictionary, setInDictionary] = useState<boolean | null>(null);
   const [starred, setStarred] = useState(false);
@@ -36,13 +36,19 @@ export default function WordPage() {
       .then((e) => { setEntry(e); setStarred(e.review?.starred ?? false); })
       .catch((e) => {
         if (isOffline(e)) { setError('offline'); return; }
-        setError('missing');
+        // 「库里还没有」是一句关于库的断言，只有 404 撑得起它。
+        // 500/超时也走这一屏的话，服务在跑但崩了（或 dev 下服务根本没起——
+        // 代理把它变成 500）时，页面会请人回首页建一个建不出来的词。
+        // api.ts 开头记的那族事故修剩的正是这半条。
         const nd = (e as Error & { notFound?: { inDictionary?: boolean } }).notFound;
-        setInDictionary(nd?.inDictionary ?? null);
+        if (!nd) { setError('failed'); return; }
+        setError('missing');
+        setInDictionary(nd.inDictionary ?? null);
       });
   }, [text]);
 
   if (error === 'offline') return <Offline />;
+  if (error === 'failed') return <LoadFailed what="这个词的详情" />;
   if (error) {
     // ── 空状态要给**他自己就能做**的那一步 ──
     //

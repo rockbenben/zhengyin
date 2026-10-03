@@ -104,4 +104,14 @@ describe('连不上服务时，页面不能白着也不能瞎猜', () => {
     await waitFor(() => expect(c.textContent).toMatch(/刷新/));
     expect(c.textContent).not.toMatch(SAYS_HOW);
   });
+
+  it('失败屏不替服务作证——「服务在跑」在 dev 代理下恰好是假的', async () => {
+    // 生产里收到 HTTP 错误确实=在跑；但 dev 的 vite 代理把"没起"也变成 500，
+    // 实测（batch2 S-2）：服务停着，屏上印「服务在跑，但这次请求出错了」。
+    // 一句话在某些状态下是假的，就整句都别说。
+    stub.mode = 'error';
+    const c = draw(<PhonemesPage />);
+    await waitFor(() => expect(c.textContent).toMatch(/刷新/));
+    expect(c.textContent, '断言了自己看不见的事').not.toMatch(/服务在跑/);
+  });
 });

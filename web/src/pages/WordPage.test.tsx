@@ -11,13 +11,17 @@ const stub = vi.hoisted(() => ({
   health: { ok: false, uv: true } as { ok: boolean; uv?: boolean },
   // undefined = 服务端没给这个字段（旧服务）；true/false = 404 体里的 inDictionary
   inDictionary: undefined as boolean | undefined,
+  http500: false,
 }));
 vi.mock('../api', () => ({
   api: {
     getEntry: () => {
       if (stub.entry) return Promise.resolve(stub.entry);
-      const err = new Error(stub.offline ? '连不上' : 'API 404') as Error & { notFound?: { inDictionary?: boolean } };
-      if (!stub.offline && stub.inDictionary !== undefined) err.notFound = { inDictionary: stub.inDictionary };
+      if (stub.offline) return Promise.reject(new Error('连不上'));
+      if (stub.http500) return Promise.reject(new Error('API 500'));
+      const err = new Error('API 404') as Error & { notFound?: { inDictionary?: boolean } };
+      // 真实 api.getEntry 对 404 总带 notFound（inDictionary 可能缺失=旧服务）
+      err.notFound = { inDictionary: stub.inDictionary };
       return Promise.reject(err);
     },
     pronounceHealth: () => Promise.resolve(stub.health),
@@ -65,6 +69,7 @@ async function draw() {
   stub.offline = false;
   stub.entry = null;
   stub.inDictionary = undefined;
+  stub.http500 = false;
   const { container } = render(
     <MemoryRouter initialEntries={['/word/coffee']}>
       <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
@@ -113,6 +118,7 @@ describe('连不上服务时', () => {
   async function drawOffline() {
     stub.offline = true;
     stub.entry = null;
+    stub.http500 = false;
     const { container } = render(
       <MemoryRouter initialEntries={['/word/coffee']}>
         <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
@@ -204,5 +210,32 @@ describe('库里没有、而词典里也没有的词', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(container.textContent).toContain('就能建'));
+  });
+});
+
+/**
+ * 500 不是「库里没有这个词」（打磨稿 batch2 的 S-1）。
+ *
+ * api.ts 开头记着同一族事故：服务一停，每个词条页都说「库里还没有这个词」，
+ * 还请你回首页去建——而首页同样连不上。当年修的是 TypeError→offline 那半条；
+ * 另半条一直开着：**任何非 offline 的错误都被当成 missing**。
+ * 生产里服务在跑但这一次 500（磁盘忙、库锁）照样中招；
+ * dev 里 vite 代理把"服务没起"变成 HTTP 500，离线时满屏都是假消息。
+ */
+describe('服务答非所问（500）时不许说「库里还没有」', () => {
+  it('给的是读不出来的屏，不是请人回首页建一个建不出来的词', async () => {
+    stub.offline = false;
+    stub.entry = null;
+    stub.http500 = true;
+    const { container } = render(
+      <MemoryRouter initialEntries={['/word/coffee']}>
+        <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(container.textContent).toMatch(/没能读出/));
+    const t = container.textContent ?? '';
+    expect(t, '把 500 说成了库里没有').not.toContain('库里还没有');
+    expect(t).toMatch(/刷新/);
+    stub.http500 = false;
   });
 });
