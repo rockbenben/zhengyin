@@ -71,7 +71,7 @@ export function UserSwitcher({ reload = () => window.location.reload() }: { relo
         title="添加用户" open={adding} onOk={() => void create()}
         onCancel={() => setAdding(false)} okText="建好并切过去" cancelText="算了"
       >
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="名字，比如：张三" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} aria-label="新用户名字" placeholder="名字，比如：张三" />
       </Modal>
     </>
   );

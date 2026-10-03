@@ -53,7 +53,9 @@ export default function HomePage() {
     () => localStorage.getItem(MW_ALERT_DISMISSED) === '1',
   );
   const [kw, setKw] = useState('');
-  const [adding, setAdding] = useState(false);
+  /** 正在添加**哪个**词，不是"有没有在添加"——整排起步词共享一个布尔的话，
+      点一个六个全转圈（loading 即 disabled，一整排此刻全都点不动）。 */
+  const [addingWord, setAddingWord] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -68,8 +70,8 @@ export default function HomePage() {
    */
   const lookUp = useCallback(async (raw?: string) => {
     const text = (raw ?? kw).trim();
-    if (!text || adding) return;
-    setAdding(true);
+    if (!text || addingWord) return;
+    setAddingWord(text);
     try {
       // ── 先问一句：这是一个**音**吗？ ──
       //
@@ -106,9 +108,9 @@ export default function HomePage() {
     } catch (e) {
       message.error(e instanceof Error ? e.message : '没能加上这个词');
     } finally {
-      setAdding(false);
+      setAddingWord(null);
     }
-  }, [kw, adding, load, navigate]);
+  }, [kw, addingWord, load, navigate]);
 
   useEffect(() => {
     load();
@@ -232,7 +234,7 @@ export default function HomePage() {
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         {STARTERS.map(({ word, why }) => (
           <Space key={word} size={10} align="baseline" wrap>
-            <Button size="small" loading={adding} onClick={() => void lookUp(word)}>
+            <Button size="small" loading={addingWord === word} onClick={() => void lookUp(word)}>
               {word}
             </Button>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>{why}</Typography.Text>
@@ -295,7 +297,7 @@ export default function HomePage() {
           onChange={(e) => setKw(e.target.value)}
           onSearch={() => void lookUp()}
           enterButton="查这个词"
-          loading={adding}
+          loading={!!addingWord}
           // 340 是**上限不是宽度**。写死 340 时，360px 的机器（很多安卓机、
           // iPhone SE 都是 375）算下来正文只剩 354－ 而这个框自己就 340，
           // 一挤就把**整页**推成横向滚动（实测 320 和 360 两档都中）。

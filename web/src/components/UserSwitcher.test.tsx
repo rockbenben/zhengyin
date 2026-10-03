@@ -77,4 +77,13 @@ describe('UserSwitcher', () => {
     await waitFor(() => expect(stub.toast.length).toBe(1));
     expect(stub.toast[0]).toBe('没有叫「张三」的用户');
   });
+it('添加用户弹窗的输入框算得出名字——placeholder 不是名字', async () => {
+    // 本仓库自己的判据（HomePage 的 aria-label 注释）：一开始打字 placeholder 就没了，
+    // 读屏也未必拿它当名字。首页主框守了，弹窗曾经漏了（探针实测可及名=空串）。
+    render(<UserSwitcher />);
+    fireEvent.click(await screen.findByText(/默认/));
+    fireEvent.click(await screen.findByText('添加用户…'));
+    expect(await screen.findByRole('textbox', { name: '新用户名字' })).toBeTruthy();
+  });
+
 });

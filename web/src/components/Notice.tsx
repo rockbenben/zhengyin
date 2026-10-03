@@ -19,16 +19,19 @@ const RULE: Record<Tone, string> = {
   quiet: 'var(--rule)',
 };
 
-export default function Notice({ tone = 'note', label, title, children }: {
+export default function Notice({ tone = 'note', label, labelKeepsCase, title, children }: {
   tone?: Tone;
   /** 小标签：这是哪一类提示 */
   label?: string;
+  /** 标签里带单位/音标这类**大小写本身有意义**的字（dB 不是 DB）时置真：
+      .slug 的疏排大写会把它们改错。 */
+  labelKeepsCase?: boolean;
   title?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <div style={{ borderLeft: `3px solid ${RULE[tone]}`, paddingLeft: 18 }}>
-      {label && <span className="slug" style={{ color: RULE[tone] === 'var(--rule)' ? undefined : RULE[tone] }}>{label}</span>}
+      {label && <span className={labelKeepsCase ? 'slug nocaps' : 'slug'} style={{ color: RULE[tone] === 'var(--rule)' ? undefined : RULE[tone] }}>{label}</span>}
       {title && (
         <div style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.5, margin: label ? '5px 0 0' : 0 }}>
           {title}

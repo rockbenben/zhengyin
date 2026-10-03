@@ -200,6 +200,13 @@ describe('版口与行内代码块的形状判据', () => {
     expect(css(), '行内 code 没有钉住不折行').toMatch(/(^|\n)code\s*\{[^}]*white-space:\s*nowrap/);
   });
 
+  it('疏排大写的豁免口存在（.slug.nocaps）', () => {
+    // 单位（dB）的大小写有意义，整条大写等于改单位；Notice 的 labelKeepsCase 走这个类。
+    const rule = css().match(/\.slug\.nocaps\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule, '没有 .slug.nocaps 这条规则').toBeTruthy();
+    expect(rule).toMatch(/text-transform:\s*none/);
+  });
+
   it('音素格的例词计数不许掉回 9.5px 那一档', () => {
     // 它带的是一列里唯一的数字信息。9.5px 是整站字形的地板下（实拍：没人读它）。
     const rule = css().match(/\.phone-count\s*\{[^}]*\}/)?.[0] ?? '';

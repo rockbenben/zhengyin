@@ -53,6 +53,11 @@ body {
   text-transform: uppercase;
   color: var(--quiet);
 }
+/* 标签里带单位（dB）、音标这类**大小写有意义**的字时用它：疏排照旧，transform 关掉。
+   分贝的符号就是 dB——整条大写等于改了单位。 */
+.slug.nocaps {
+  text-transform: none;
+}
 
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .ipa { font-family: var(--font-ipa); }

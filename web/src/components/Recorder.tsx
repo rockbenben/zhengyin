@@ -565,7 +565,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       )}
 
       {clip && clip.snrDb < LOW_SNR_DB && (
-        <Notice tone="warn" label={`信噪比 ${Math.round(clip.snrDb)}dB`} title="背景噪音偏大，识别结果会不稳">
+        <Notice tone="warn" label={`信噪比 ${Math.round(clip.snrDb)}dB`} labelKeepsCase title="背景噪音偏大，识别结果会不稳">
           安静一点的环境、或者离麦克风近一些，通常能到 30dB 以上。
           {'如果换了环境还是这样，去'}<Link to="/settings">设置</Link>里试试关掉浏览器降噪——
           {'它可能把 /s/ /θ/ /ʃ/ 这些擦音一起削掉了。'}

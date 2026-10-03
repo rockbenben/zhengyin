@@ -23,6 +23,9 @@ const stub = vi.hoisted(() => ({
   /** 记下问过哪些——用来断言"根本没去问" */
   phonemeAsked: [] as string[],
   navigated: [] as string[],
+  /** 挂住 addEntry 用：观察"点下去的那一刻"哪些按钮在转 */
+  holdAdd: false,
+  releaseAdd: null as null | (() => void),
 }));
 
 vi.mock('../api', () => ({
@@ -39,6 +42,7 @@ vi.mock('../api', () => ({
     }),
     addEntry: (text: string) => {
       stub.added.push(text);
+      if (stub.holdAdd) return new Promise<any>((res) => { stub.releaseAdd = () => res({ text, words: [{ word: text, found: true }] }); });
       return Promise.resolve({ text, words: [{ word: text, found: true }] });
     },
     deleteEntry: () => Promise.resolve({}),
@@ -367,3 +371,33 @@ describe('文案里写死的数字，跟它数的东西对得上', () => {
     expect(said, `首页说 ${m![1]} 条，音素页实际 ${n} 条`).toBe(n);
   });
 });
+
+/**
+ * 起步词一排按钮，点一个不许让整排转圈（打磨稿量的：六个词全部 loading）。
+ *
+ * loading 是 disabled 的另一种写法——整排转圈等于整排点不动，
+ * 而此刻真正在忙的只有一个词。共享布尔改记「正在加哪个」。
+ */
+describe('起步词的忙碌态只许落在被点的那一个上', () => {
+  it('点 thin 时，desk/seat 们不带 loading；thin 自己带', async () => {
+    stub.entries = [];
+    stub.holdAdd = true;
+    const { container } = render(<MemoryRouter><HomePage /></MemoryRouter>);
+    const thin = await screen_get(container, 'thin');
+    fireEvent.click(thin);
+    await waitFor(() => expect(thin.className).toContain('ant-btn-loading'));
+    for (const word of ['desk', 'seat', 'comfortable', 'about', 'light']) {
+      const b = await screen_get(container, word);
+      expect(b.className, `「${word}」跟着转圈了——它没在被加`).not.toContain('ant-btn-loading');
+      expect(b.disabled, `「${word}」被连带禁用`).toBe(false);
+    }
+    stub.releaseAdd?.();
+    stub.holdAdd = false;
+    await waitFor(() => expect(stub.navigated).toContain('/word/thin'));
+  });
+});
+
+async function screen_get(container: HTMLElement, word: string) {
+  await waitFor(() => expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === word)).toBe(true));
+  return [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === word)!;
+}
