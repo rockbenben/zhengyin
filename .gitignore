@@ -33,4 +33,6 @@ review-state.json.*
 .decisions/
 .claude/
 .superpowers/
+web/design-preview/
 *.bak
+.qoder*
