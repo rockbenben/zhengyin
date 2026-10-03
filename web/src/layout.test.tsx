@@ -179,3 +179,32 @@ describe('窄屏下导航还打得开', () => {
       .toMatch(new RegExp(`@media\\s*\\(max-width:\\s*${width!.replace('.', '\\.')}px\\)[^}]*\\.page`));
   });
 });
+
+/**
+ * 版口与行内代码块的三条形状判据。都是 2026-10 打磨稿 batch1 量出来的：
+ * jsdom 没有布局，display:block 把 ▾ 折到下一行这种事在测试里看不见，
+ * 只能守选择器/规则本身——所以每条都写清"看着对、其实坏"的那个近邻写法。
+ */
+describe('版口与行内代码块的形状判据', () => {
+  const css = () => readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8');
+
+  it('页脚"各占一行"只许管直接子代——后代选择器会把用户切换器的 ▾ 块化', () => {
+    // 实测：`.nav-foot span { display:block }` 连 .user-switch .caret 一起命中，
+    // 箭头孤零零折到下一行。写成 `.nav-foot > span` 才是"页脚那几行"。
+    expect(css(), '版口又用后代选择器了（会误伤 ▾）').not.toMatch(/\.nav-foot\s+span\s*\{/);
+    expect(css(), '页脚的 span 不再各占一行').toMatch(/\.nav-foot\s*>\s*span\s*\{\s*display:\s*block/);
+  });
+
+  it('行内代码块不许在词中折行', () => {
+    // 中文排版允许在任意两字之间断行，「启动.cmd」被断成「启/动.cmd」（设置页实拍）。
+    expect(css(), '行内 code 没有钉住不折行').toMatch(/(^|\n)code\s*\{[^}]*white-space:\s*nowrap/);
+  });
+
+  it('音素格的例词计数不许掉回 9.5px 那一档', () => {
+    // 它带的是一列里唯一的数字信息。9.5px 是整站字形的地板下（实拍：没人读它）。
+    const rule = css().match(/\.phone-count\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rule, '没有 .phone-count 这条规则').toBeTruthy();
+    const px = Number(rule.match(/font:\s*700\s*([\d.]+)px/)?.[1] ?? 0);
+    expect(px, `.phone-count 字号掉到 ${px}px`).toBeGreaterThanOrEqual(10.5);
+  });
+});

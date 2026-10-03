@@ -39,7 +39,6 @@ export default function StarButton({ text, starred, onChange }: {
 
   return (
     <Button
-      size="small"
       loading={busy}
       icon={starred ? <StarFilled /> : <StarOutlined />}
       onClick={() => void toggle()}

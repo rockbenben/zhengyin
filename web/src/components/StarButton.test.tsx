@@ -50,6 +50,13 @@ describe('星标按钮', () => {
     expect(stub.toast[0], `按钮「${label}」→ 提示「${stub.toast[0]}」`).toContain(label);
   });
 
+  it('页眉上它是唯一的动作按钮，不许缩成 small——同屏控件同高', () => {
+    // 打磨稿量的：「加入复习」26px vs 紧挨的「听标准音」34px。
+    // 首页起步词那排保留 small 是另一回事：那是列表里的快捷动作，不在页眉。
+    const btn = draw(false).querySelector('button')!;
+    expect(btn.className, '星标按钮又缩回 ant-btn-sm 了').not.toMatch(/ant-btn-sm/);
+  });
+
   it('移出：同上——不能冒出一个别处没有的说法', async () => {
     const c = draw(true);
     const btn = c.querySelector('button')!;

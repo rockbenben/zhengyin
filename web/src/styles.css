@@ -313,6 +313,12 @@ body {
 .note-md li::marker { color: var(--quiet); }
 .note-md strong { font-weight: 600; }
 
+/* 行内代码块全是文件名 / 参数 / 音标 / 短命令，**没有该从词中折行的**。
+   中文排版允许在任意两字之间断行，实测把设置页的「启动.cmd」断成了「启/动.cmd」，
+   一个文件名被读成两个词。全站行内 code 最长的是 `winget install astral-sh.uv`
+   （约 200px），320px 窄屏也放得下。 */
+code { white-space: nowrap; }
+
 .note-md code {
   font: 13px/1.5 var(--font-mono);
   background: var(--blue-soft);
@@ -442,7 +448,9 @@ body {
   letter-spacing: .04em;
   color: var(--quiet);
 }
-.nav-foot span { display: block; }
+/* **直接子代**。写成 `.nav-foot span` 会连带把用户切换器里的 .caret（▾）也块化——
+   箭头孤零零折到下一行，实测过。页脚要各占一行的是它自己挂的那几个 span。 */
+.nav-foot > span { display: block; }
 .nav-foot b { color: var(--black); font-weight: 500; }
 
 /* ── 在练的是谁：版口里的一行，不是刊头里的一块 ──────────────────────
@@ -601,7 +609,9 @@ body {
 /* 音素表里跟在符号右上角的例词数。挂在**每个音**上，不按格子合计——
    合计会把同时含 ə 和 ʌ 的词数两遍。（统计页那张表可以合计，它数的是错误事件。） */
 .phone-count {
-  font: 700 9.5px/1 var(--font-mono);
+  /* 10.5px 是版口那一档的地板。原来 9.5px——它带的是一列里唯一的数字信息
+     （库里有几个例词），小到没人读。格子高度 44px，加大不撑破。 */
+  font: 700 10.5px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--blue);
   margin-left: 1px;
