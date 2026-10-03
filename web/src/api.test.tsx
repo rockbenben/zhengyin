@@ -28,6 +28,16 @@ describe('连不上 vs 服务说没有', () => {
     expect((e as Error).message).toContain('404');
   });
 
+  it('404 的 body 要带过来（空状态按 inDictionary 分叉承诺），message 仍是 API 404', async () => {
+    // message 一字不许改：ReviewPage 靠 e.message === 'API 404' 认出"卡片对应的词条已被删"
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(
+      JSON.stringify({ error: '没有这个词', inDictionary: false }), { status: 404 },
+    )));
+    const e = await api.getEntry('anthropic').catch((x: unknown) => x) as Error & { notFound?: { inDictionary?: boolean } };
+    expect(e.message).toBe('API 404');
+    expect(e.notFound?.inDictionary, '404 体里的 inDictionary 没带出来').toBe(false);
+  });
+
   it('HTTP 500 也不是 offline——服务在跑，只是这次崩了', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 500 })));
     const e = await api.getEntry('coffee').catch((x: unknown) => x);

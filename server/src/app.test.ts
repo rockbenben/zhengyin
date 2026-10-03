@@ -184,6 +184,19 @@ describe('entries api', () => {
     expect((await app.request('/api/entries/click')).status).toBe(404);
   });
 
+  it('缺词的 404 说清在不在词典——空状态那句承诺按它分叉', async () => {
+    const app = createApp(testDeps());
+    const inDict = await app.request('/api/entries/click');
+    expect(inDict.status).toBe(404);
+    expect((await inDict.json()).inDictionary, 'click 在词典里却报 false').toBe(true);
+    const notIn = await app.request('/api/entries/anthropic');
+    expect(notIn.status).toBe(404);
+    expect((await notIn.json()).inDictionary, '生造词该是 false').toBe(false);
+    // 短语口径跟 POST 一致：任一词查得到就算查得到
+    const phrase = await app.request('/api/entries/black%20quorble');
+    expect((await phrase.json()).inDictionary, '短语里 black 查得到，整条不该是 false').toBe(true);
+  });
+
   // 上面那条只证了"没错过就是 0"。这条证它不是**永远**是 0——
   // 少了它，把 noteCount 写死成 0 也能全绿。
   it('讲这个词的笔记（words:）不用先错一次就算数，列表和词条页仍然同一个数', async () => {

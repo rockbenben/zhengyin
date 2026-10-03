@@ -9,12 +9,17 @@ const stub = vi.hoisted(() => ({
   entry: null as EntryDetail | null,
   // 边车健康：默认没就绪（状态条该出现，且**整页只出现一份**）
   health: { ok: false, uv: true } as { ok: boolean; uv?: boolean },
+  // undefined = 服务端没给这个字段（旧服务）；true/false = 404 体里的 inDictionary
+  inDictionary: undefined as boolean | undefined,
 }));
 vi.mock('../api', () => ({
   api: {
-    getEntry: () => (stub.entry
-      ? Promise.resolve(stub.entry)
-      : Promise.reject(new Error(stub.offline ? '连不上' : '404'))),
+    getEntry: () => {
+      if (stub.entry) return Promise.resolve(stub.entry);
+      const err = new Error(stub.offline ? '连不上' : 'API 404') as Error & { notFound?: { inDictionary?: boolean } };
+      if (!stub.offline && stub.inDictionary !== undefined) err.notFound = { inDictionary: stub.inDictionary };
+      return Promise.reject(err);
+    },
     pronounceHealth: () => Promise.resolve(stub.health),
     getMwKey: () => Promise.resolve({ configured: true, masked: '••••1234' }),
     confusions: () => Promise.resolve({ contrasts: [] }),
@@ -59,6 +64,7 @@ const TWO_WORDS: EntryDetail = {
 async function draw() {
   stub.offline = false;
   stub.entry = null;
+  stub.inDictionary = undefined;
   const { container } = render(
     <MemoryRouter initialEntries={['/word/coffee']}>
       <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
@@ -157,5 +163,46 @@ describe('两音节短语页上，识别服务状态条恰好一份', () => {
     const count = (document.body.textContent?.match(/音素识别服务正在加载模型/g) ?? []).length;
     unmount();
     expect(count, `状态条重复了 ${count} 份`).toBe(1);
+  });
+});
+
+/**
+ * 词典里没有的词，不许许"回首页就能建"的诺（打磨稿 batch1 的 T-8）。
+ *
+ * 原来缺词页一律说「回首页按『查这个词』就能建，音标、真人录音…都会自动配好」，
+ * 而 zzz 这类词真回首页按了，得到的是「词典里没有…让 AI 帮你录」。
+ * 服务端此刻就知道词在不在词典（404 体现在带 inDictionary），这一屏按它分叉。
+ */
+describe('库里没有、而词典里也没有的词', () => {
+  async function drawNoDict() {
+    stub.offline = false;
+    stub.entry = null;
+    stub.inDictionary = false;
+    const { container } = render(
+      <MemoryRouter initialEntries={['/word/anthropic']}>
+        <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(container.textContent).toContain('这个词'));
+    return container;
+  }
+
+  it('不出现「就能建」，说的是让 AI 手工录', async () => {
+    const sub = (await drawNoDict()).querySelector('.result-body')?.textContent ?? '';
+    expect(sub).toContain('不在词典里');
+    expect(sub, '对词典没有的词许了空诺').not.toMatch(/就能建/);
+    expect(sub, '没给能走通的那一步').toMatch(/AI/);
+  });
+
+  it('服务端没给字段（旧服务）→ 退回原来的说法，不猜', async () => {
+    stub.offline = false;
+    stub.entry = null;
+    stub.inDictionary = undefined;
+    const { container } = render(
+      <MemoryRouter initialEntries={['/word/coffee']}>
+        <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(container.textContent).toContain('就能建'));
   });
 });

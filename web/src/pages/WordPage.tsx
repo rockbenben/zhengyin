@@ -23,15 +23,23 @@ export default function WordPage() {
   useTitle(text);
   const [entry, setEntry] = useState<EntryDetail | null>(null);
   const [error, setError] = useState<null | 'missing' | 'offline'>(null);
+  /** 缺词时服务端给的「在不在词典」。null = 服务端没给（旧服务），按在的话说 */
+  const [inDictionary, setInDictionary] = useState<boolean | null>(null);
   const [starred, setStarred] = useState(false);
 
   useEffect(() => {
     setEntry(null);
     setError(null);
+    setInDictionary(null);
     if (!text) return;
     api.getEntry(text)
       .then((e) => { setEntry(e); setStarred(e.review?.starred ?? false); })
-      .catch((e) => setError(isOffline(e) ? 'offline' : 'missing'));
+      .catch((e) => {
+        if (isOffline(e)) { setError('offline'); return; }
+        setError('missing');
+        const nd = (e as Error & { notFound?: { inDictionary?: boolean } }).notFound;
+        setInDictionary(nd?.inDictionary ?? null);
+      });
   }, [text]);
 
   if (error === 'offline') return <Offline />;
@@ -44,15 +52,29 @@ export default function WordPage() {
     //
     // 两件事分开说：**词条**他自己就能建，**讲解**才需要 AI 写。
     // 按钮上的字跟首页那个按钮一字不差——同一个动作在两处叫两个名字，人得重新认一遍。
+    //
+    // 但「就能建」这句**只在词典里有这个词时成立**：查不到的词（专有名词、缩写、
+    // 生造词）回首页按了同样被退回来。服务端在 404 里给了 inDictionary，按它分叉；
+    // 字段缺失（旧服务）时不猜，按原来那句说。
     return (
       <PageResult
         slug="找不到"
         title="库里还没有这个词"
         extra={<Link to="/"><Button type="primary">回首页查这个词</Button></Link>}
       >
-        回首页按「查这个词」就能建，音标、真人录音、音素条、评测都会自动配好。
-        <br />
-        「为什么会错」那种讲解要去问 AI，它写完会自动出现在这一页。
+        {inDictionary === false ? (
+          <>
+            这个词不在词典里（专有名词、缩写、生造词都这样）——回首页按「查这个词」
+            也建不出它的音标。让 AI 帮你录一个：给它能读写文件的那种 AI 说
+            「把这个词录进正音，音标是 /…/」，它写完会自动出现在这一页。
+          </>
+        ) : (
+          <>
+            回首页按「查这个词」就能建，音标、真人录音、音素条、评测都会自动配好。
+            <br />
+            「为什么会错」那种讲解要去问 AI，它写完会自动出现在这一页。
+          </>
+        )}
       </PageResult>
     );
   }

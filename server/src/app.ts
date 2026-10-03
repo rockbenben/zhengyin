@@ -495,8 +495,15 @@ export function createApp(deps: AppDeps) {
   });
 
   app.get('/api/entries/:text', (c) => {
-    const d = entryDetail(deps, c.req.param('text').toLowerCase());
-    return d ? c.json(d) : c.json({ error: '没有这个词' }, 404);
+    const key = c.req.param('text').toLowerCase();
+    const d = entryDetail(deps, key);
+    if (d) return c.json(d);
+    // 404 带上「在不在词典」。空状态要按这个分叉说承诺：词典里有的词，
+    // 回首页按「查这个词」就能建；词典里没有的（专有名词、缩写、生造词），
+    // 那句就是空诺——首页会把同样的请求退回来。判断口径跟 POST 一致：
+    // 分词后**任一**词查得到就算查得到（短语里一个词查不到不影响其余）。
+    const inDictionary = tokenize(key).some((w) => lookupWord(w) !== null);
+    return c.json({ error: '没有这个词', inDictionary }, 404);
   });
 
   app.delete('/api/entries/:text', (c) => {

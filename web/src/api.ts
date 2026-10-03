@@ -62,7 +62,25 @@ export const api = {
   })),
 
   listEntries: () => j<{ entries: T.EntryListItem[] }>(fetch('/api/entries')),
-  getEntry: (text: string) => j<T.EntryDetail>(fetch(`/api/entries/${encodeURIComponent(text)}`)),
+  // 404 单独剥出来：空状态要按「在不在词典」分叉承诺（服务端在 404 体里给
+  // inDictionary）。走 j() 的话状态码和 body 一起淹死在 `API 404` 里。
+  // message 保持 `API 404` 不变——ReviewPage 靠它认出"卡片对应的词条已被删"。
+  getEntry: async (text: string): Promise<T.EntryDetail> => {
+    let r: Response;
+    try {
+      r = await fetch(`/api/entries/${encodeURIComponent(text)}`);
+    } catch (e) {
+      throw offline(e);
+    }
+    if (r.status === 404) {
+      const body = await r.json().catch(() => ({})) as { inDictionary?: boolean };
+      const err = new Error('API 404') as Error & { notFound?: { inDictionary?: boolean } };
+      err.notFound = { inDictionary: body.inDictionary };
+      throw err;
+    }
+    if (!r.ok) throw new Error(`API ${r.status}`);
+    return r.json();
+  },
   deleteEntry: (text: string) => j<{ ok: boolean }>(fetch(`/api/entries/${encodeURIComponent(text)}`, {
     method: 'DELETE',
   })),
