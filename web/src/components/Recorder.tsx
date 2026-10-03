@@ -560,7 +560,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
         <Notice tone="quiet" label="没有参考音" title="这个词没抓到参考发音，对比播放用不了">
           录音和评测照常用。上面的喇叭还是能听，但那是浏览器自己朗读的，取不出来跟你的录音对播。
           {mwKey === false && <> 去<Link to="/settings">设置页</Link>配一个词典 API key，就能抓到真人录音。</>}
-          {mwKey === true && ' 合成服务这次也没连上——启动服务那个终端里有一行 [tts] 开头的原因。'}
+          {mwKey === true && ' 合成服务这次也没连上——启动时打开的那个黑窗口里有一行 [tts] 开头的原因。'}
         </Notice>
       )}
 
