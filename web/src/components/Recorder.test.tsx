@@ -146,8 +146,10 @@ describe('没录音之前不摆一个说手动的按钮', () => {
 
   it('提示里说了「自动评测」——正因为如此才不该同时摆一个手动按钮', async () => {
     render(<MemoryRouter><Recorder target="book" entry="book" referenceUrl={null} /></MemoryRouter>);
-    await screen.findByRole('button', { name: /录音/ });
-    expect(document.body.textContent).toMatch(/自动评测/);
+    // 这句提示只在边车探到 ok 之后才渲染（健康检查是异步的），而录音钮从第一帧就在。
+    // 拿 findByRole(录音) 当同步点再断言，赌的就是"Promise 恰好先落地"——
+    // CI 实测：ubuntu×node20.19 输了这一赌（#32198768651），另三格赢了。等它，别赌。
+    await waitFor(() => expect(document.body.textContent).toMatch(/自动评测/));
   });
 
   it('「对比播放」照旧在——它没有这个矛盾，而且它为什么灰另有说明', async () => {
