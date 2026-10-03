@@ -273,7 +273,10 @@ function Head({ overall, headline }: { overall: StatsResult['overall']; headline
           {headline ?? '发音统计'}
         </h1>
         <p className="mono" style={{ margin: '14px 0 0', fontSize: 13, color: 'var(--quiet)' }}>
-          {overall.attempts} 次评测 · {overall.words} 个词 · {overall.clean} 次全对（{pct}%）
+          {overall.attempts} 次评测 · {overall.words} 个词
+          {/* 空集是第三种状态，不装成读数：0÷0 印成「0 次全对（0%）」，
+              把「还没有数据」说成了「全对率 0%」，而下一行明明写着「还没有评测记录」。 */}
+          {overall.attempts > 0 && ` · ${overall.clean} 次全对（${pct}%）`}
           {overall.firstAt && ` · ${overall.firstAt.slice(0, 10)} 起`}
         </p>
       </div>

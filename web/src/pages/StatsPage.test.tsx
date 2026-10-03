@@ -128,3 +128,33 @@ describe('卡住的词', () => {
     expect(t).toContain('最常犯的错');
   });
 });
+
+/**
+ * 空集是第三种状态，不装成读数（打磨稿 batch1 的 T-3）。
+ * 原来 0 次评测时页头印「0 次评测 · 0 个词 · 0 次全对（0%）」——
+ * 0÷0 没有值，把「还没有数据」说成了「全对率 0%」，而下一行明明写着
+ * 「还没有评测记录」，同一屏自我矛盾。
+ */
+describe('还没有评测记录时，页头不印全对率', () => {
+  async function drawEmpty() {
+    stub.stats = {
+      overall: { attempts: 0, clean: 0, words: 0, firstAt: null, lastAt: null },
+      stuck: [], phonemes: [],
+    };
+    const { container } = render(<MemoryRouter><StatsPage /></MemoryRouter>);
+    await waitFor(() => expect(container.textContent).toContain('发音统计'));
+    return container.querySelector('p.mono')?.textContent ?? '';
+  }
+
+  it('「0%」整段不出现，但评测/词数照实说', async () => {
+    const meta = await drawEmpty();
+    expect(meta).toContain('0 次评测');
+    expect(meta, `空集装成了读数：「${meta}」`).not.toMatch(/全对|%/);
+  });
+
+  it('有记录时全对率照印——守卫不是把这段删了', async () => {
+    const c = await draw();
+    const meta = c.querySelector('p.mono')?.textContent ?? '';
+    expect(meta).toMatch(/10 次全对（11%）/);
+  });
+});

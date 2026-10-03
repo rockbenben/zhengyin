@@ -99,7 +99,7 @@ export default function PhonemesPage() {
 
       <Typography.Paragraph className="measure" type="secondary">
         点进任意一个音，看它<strong>客观上怎么发</strong>（舌尖顶哪、气流走哪、唇形）
-        {'以及库里含它的例词。这跟'}<Link to="/notes">笔记</Link>是两件事：
+        {'以及库里含它的例词。这跟「'}<Link to="/notes">发音笔记</Link>{'」是两回事：'}
         {'这里跟谁在念无关，笔记讲的是'}<strong>你自己</strong>在某个音或某个词上的问题。
       </Typography.Paragraph>
 
@@ -171,7 +171,7 @@ export default function PhonemesPage() {
               横轴 舌头碰在哪儿　纵轴 气流怎么走
             </span>
             <span className="slug" style={{ marginLeft: 'auto', color: 'var(--quiet)' }}>
-              加粗 · 有笔记　右上角小数字 · 库里有几个例词
+              加粗蓝线 · 有笔记　右上角小数字 · 库里有几个例词
             </span>
           </div>
           <div className="grid-wrap">

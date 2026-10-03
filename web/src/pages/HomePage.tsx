@@ -284,8 +284,10 @@ export default function HomePage() {
         <Input.Search
           // placeholder 不是名字：一开始打字它就没了，读屏也未必拿它当名字。
           // 这是整个应用的主控件，得说得出自己是什么。
+          // 占位按 340px 的框量着写：原来那句 22 字被截成「输入一个英文单词、短语，或一…」，
+          // 丢掉的「（如 θ）」恰恰是只有打音素的人才需要的那半句提示。
           aria-label="要查的词、短语或音标"
-          placeholder="输入一个英文单词、短语，或一个音标（如 θ）…"
+          placeholder="单词、短语，或一个音标（如 θ）"
           // 默认那个 × 的可访问名是 antd 图标名「close-circle」——一句英文，
           // 念给用中文界面的人听。自带一个说人话的。
           allowClear={{ clearIcon: <span aria-label="清空">✕</span> }}
