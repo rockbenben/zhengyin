@@ -293,7 +293,6 @@ export default function ReviewPage() {
             id="review-recorder"
             style={{ borderTop: '1px solid var(--rule)', paddingTop: 22 }}
           >
-            <AsrStatus />
             <Recorder
               target={detail.text}
               entry={detail.text}
@@ -301,6 +300,8 @@ export default function ReviewPage() {
               referenceUrl={detail.phraseAudio?.url ?? detail.audio[0]?.url ?? null}
               onResult={(r) => { setJudged(r); setTried(true); }}
             />
+            {/* 服务状态贴着录音区，不劈开「先听再录」的动线 */}
+            <AsrStatus />
           </div>
 
           {detail.notes.length > 0 && <NoteHits notes={detail.notes} emptyHint={false} />}

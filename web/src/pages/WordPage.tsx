@@ -111,9 +111,6 @@ export default function WordPage() {
         </div>
       </header>
 
-      {/* 识别服务的状态是**整页一份**的事实（原来每个音节各摊一份同样的三行字） */}
-      <AsrStatus />
-
       {entry.words.map((w, i) => {
         const audio = entry.audio.find((a) => a.word === w.word);
         return (
@@ -179,6 +176,11 @@ export default function WordPage() {
           </section>
         );
       })}
+
+      {/* 识别服务的状态是**整页一份**的事实（原来每个音节各摊一份同样的三行字）。
+          放在录音区下缘、讲解之前：它说的是"等下那一下录音测得到什么"，
+          摆在词与音标中间会把「先听再录」的动线劈成两段。 */}
+      <AsrStatus />
 
       <NoteHits notes={entry.notes} />
     </Space>

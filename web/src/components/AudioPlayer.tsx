@@ -20,6 +20,12 @@ export default function AudioPlayer({ src, label }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [rate, setRate] = useState(1);
   const [unsupported, setUnsupported] = useState(false);
+  /**
+   * 正在播。<audio> 走 play/ended/pause 事件，speechSynthesis 走 utterance 的回调——
+   * 两路都汇到这个布尔。没有它的时候，点了「听标准音」屏上零变化（实测音频在走、
+   * 两帧截图逐字节相同）：静音的人分不出点了与没点。录音那侧有「在听着」的先例。
+   */
+  const [playing, setPlaying] = useState(false);
   // 这个实例当前正在朗读的那条 utterance。speechSynthesis 是全局单例，组件卸载不会停下
   // 它——复习页评完分翻到下一张，整块内容连同本组件一起卸载，上一张卡片的词会继续念到下一张卡片
   // 上，只能刷新页面才止得住。<audio> 元素没有这个问题（规范规定元素被移出文档时自动
@@ -52,8 +58,12 @@ export default function AudioPlayer({ src, label }: Props) {
     speakingUtterance.current = utter;
     // 只有"结束的正是当前这条"才清空——迟到的旧事件不许动新一条的状态
     const clearIfCurrent = () => {
-      if (speakingUtterance.current === utter) speakingUtterance.current = null;
+      if (speakingUtterance.current === utter) {
+        speakingUtterance.current = null;
+        setPlaying(false);
+      }
     };
+    setPlaying(true);
     utter.onend = clearIfCurrent;
     utter.onerror = clearIfCurrent;
     speechSynthesis.speak(utter);
@@ -80,8 +90,9 @@ export default function AudioPlayer({ src, label }: Props) {
   return (
     <Space wrap>
       <Button icon={<SoundOutlined />} onClick={play}>
-        {/* 「播放」在复习页里指代不明——播什么？说清是标准音 */}
-        {src ? '听标准音' : '听合成音'}
+        {/* 「播放」在复习页里指代不明——播什么？说清是标准音。
+            在播时换成「正在播」：这一屏得说得出"那一下点到了"。 */}
+        {playing ? '正在播…' : src ? '听标准音' : '听合成音'}
       </Button>
       <Segmented
         size="small"
@@ -89,7 +100,16 @@ export default function AudioPlayer({ src, label }: Props) {
         onChange={(v) => setRate(v as number)}
         options={RATE_OPTIONS}
       />
-      {src && <audio ref={audioRef} src={src} preload="auto" />}
+      {src && (
+        <audio
+          ref={audioRef}
+          src={src}
+          preload="auto"
+          onPlay={() => setPlaying(true)}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+        />
+      )}
       {unsupported && (
         <Typography.Text type="danger">当前浏览器不支持语音合成，且没有音频文件</Typography.Text>
       )}

@@ -258,6 +258,16 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
     expect(gumCalls).toBe(1);
   }, 15000);
 
+  it('录音中状态行带计时——10 秒的自动上限不许让人靠猜', async () => {
+    // 「在听着 —— 念出来，停下就自动结束」说了会自动停，却没说多久算长。
+    // 假麦克风下实测：从按下到上限，屏上没有任何东西在动。
+    healthStub.impl = () => Promise.resolve({ ok: true, uv: true });
+    mount();
+    await startRecording();
+    await waitFor(() => expect(document.body.textContent).toMatch(/已录 \d+\.\ds/), { timeout: 2000 });
+    await act(async () => { btn('停止录音').click(); });
+  }, 15000);
+
   it('只在解码、还没进评测的那一帧，按钮也必须已经禁用', async () => {
     // working = preparing || busy。只看 busy 的话，解码那一帧会留出一个空档，
     // 而那一帧恰好就是自动停之后误点最容易落进去的地方。

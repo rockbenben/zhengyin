@@ -141,6 +141,8 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   const starting = useRef(false);
 
   const [recording, setRecording] = useState(false);
+  /** 已录秒数。10 秒的自动上限不写出来的话，念得长的人只能靠猜它停没停 */
+  const [recSeconds, setRecSeconds] = useState(0);
   const [preparing, setPreparing] = useState(false);
   // 解码+剪静音后的样本。评测直接吃它，A/B 播它编出来的 WAV——两边是同一段音频。
   const [clip, setClip] = useState<Clip | null>(null);
@@ -171,6 +173,15 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
    * null = 还没问到，那就不提建议，只说事实。
    */
   const [mwKey, setMwKey] = useState<boolean | null>(null);
+
+  // 录音期间每 100ms 走一次秒表；停下就停表（不清零：清零会让按钮文案跳的同一帧数字闪回 0）
+  useEffect(() => {
+    if (!recording) return;
+    const t0 = Date.now();
+    setRecSeconds(0);
+    const iv = setInterval(() => setRecSeconds((Date.now() - t0) / 1000), 100);
+    return () => clearInterval(iv);
+  }, [recording]);
 
   useEffect(() => {
     checkModelAvailability().then(setModelState);
@@ -529,7 +540,8 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
         {/* 录音中必须有反馈：既让人知道它在听，也说清不用自己按停 */}
         {recording && (
           <Typography.Text style={{ fontSize: 12.5, color: 'var(--blue)' }}>
-            在听着 —— 念出来，停下就自动结束
+            在听着 —— 念出来，停下就自动结束{' '}
+            <span className="mono">已录 {recSeconds.toFixed(1)}s</span>
           </Typography.Text>
         )}
         {/* 处理期也必须有话说，否则三个按钮同时变灰、没有任何交代。
