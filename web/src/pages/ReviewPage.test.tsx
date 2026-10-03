@@ -60,6 +60,8 @@ vi.mock('../components/Recorder', () => ({
 vi.mock('../components/AudioPlayer', () => ({ default: () => <span>标准音替身</span> }));
 vi.mock('../components/PhonemeBar', () => ({ default: () => null }));
 vi.mock('../components/NoteHits', () => ({ default: () => null }));
+// 真 AsrStatus 要问识别服务健康、要探备用模型的文件，跟本页要测的复习流转无关
+vi.mock('../components/AsrStatus', () => ({ default: () => null }));
 
 const { default: ReviewPage } = await import('./ReviewPage');
 

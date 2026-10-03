@@ -1,16 +1,49 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
+import type { EntryDetail } from '../types';
 
-const stub = vi.hoisted(() => ({ offline: false }));
+const stub = vi.hoisted(() => ({
+  offline: false,
+  // null = 库里没有这个词；放一条 entry 进来就是"查到了"的整页
+  entry: null as EntryDetail | null,
+  // 边车健康：默认没就绪（状态条该出现，且**整页只出现一份**）
+  health: { ok: false, uv: true } as { ok: boolean; uv?: boolean },
+}));
 vi.mock('../api', () => ({
-  api: { getEntry: () => Promise.reject(new Error(stub.offline ? '连不上' : '404')) },
+  api: {
+    getEntry: () => (stub.entry
+      ? Promise.resolve(stub.entry)
+      : Promise.reject(new Error(stub.offline ? '连不上' : '404'))),
+    pronounceHealth: () => Promise.resolve(stub.health),
+    getMwKey: () => Promise.resolve({ configured: true, masked: '••••1234' }),
+    confusions: () => Promise.resolve({ contrasts: [] }),
+    articulation: () => Promise.resolve({ places: [], manners: {}, phones: [] }),
+    pronounce: () => Promise.reject(new Error('本测试不评测')),
+    asr: () => Promise.reject(new Error('本测试不转写')),
+    star: () => Promise.resolve({ starred: false, card: null }),
+  },
   // 桩必须把 isOffline 也给出来：页面靠它区分"连不上服务"和"库里没有这个词"，
   // 漏了的话 catch 里自己抛异常，错误状态根本设不上——这一条就是这么红的。
   isOffline: () => stub.offline,
 }));
+vi.mock('../lib/asr', () => ({
+  checkModelAvailability: () => Promise.resolve('missing'),
+  contrastAll: () => Promise.resolve([]),
+  resetModel: () => {},
+}));
 
 const { default: WordPage } = await import('./WordPage');
+
+const word = (t: string) => ({
+  word: t, found: true, arpabet: [], ipa: '', tags: [],
+  phoneIpa: [], phoneTags: [], syllables: [], syllableStress: [],
+});
+const TWO_WORDS: EntryDetail = {
+  text: 'dopamine detox', createdAt: '',
+  words: [word('dopamine'), word('detox')] as EntryDetail['words'],
+  audio: [], notes: [], review: null, phraseAudio: null,
+} as EntryDetail;
 
 /**
  * 词条页的空状态——库里没有这个词的时候。
@@ -25,6 +58,7 @@ const { default: WordPage } = await import('./WordPage');
  */
 async function draw() {
   stub.offline = false;
+  stub.entry = null;
   const { container } = render(
     <MemoryRouter initialEntries={['/word/coffee']}>
       <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
@@ -72,6 +106,7 @@ describe('库里没有这个词时', () => {
 describe('连不上服务时', () => {
   async function drawOffline() {
     stub.offline = true;
+    stub.entry = null;
     const { container } = render(
       <MemoryRouter initialEntries={['/word/coffee']}>
         <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
@@ -98,5 +133,29 @@ describe('连不上服务时', () => {
     const c = await drawOffline();
     const home = [...c.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/');
     expect(home, '连不上的时候还给了一个走不通的首页入口').toBeUndefined();
+  });
+});
+
+/**
+ * 识别服务的状态条是**这台机器的状态**，不是每个音节的状态。
+ *
+ * 原来它长在 Recorder 里，而词条页逐音节各摆一个 Recorder——两个音节的短语
+ * 就把同样的三行字整份读两遍（90 秒后的升级态同样 ×2）。现在归 AsrStatus，
+ * 页面挂一次。这条钉的是相等关系「整页份数 === 1」，不是某个具体文案。
+ */
+describe('两音节短语页上，识别服务状态条恰好一份', () => {
+  it('「正在加载模型」整页只出现一次', async () => {
+    stub.offline = false;
+    stub.entry = TWO_WORDS;
+    stub.health = { ok: false, uv: true };
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/word/dopamine%20detox']}>
+        <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain('音素识别服务正在加载模型'));
+    const count = (document.body.textContent?.match(/音素识别服务正在加载模型/g) ?? []).length;
+    unmount();
+    expect(count, `状态条重复了 ${count} 份`).toBe(1);
   });
 });

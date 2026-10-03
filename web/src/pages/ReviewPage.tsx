@@ -8,6 +8,7 @@ import { wordIpa } from '../lib/notation';
 import PageResult, { LoadFailed } from '../components/PageResult';
 import type { EntryDetail, Grade, PronounceResult, ReviewCard } from '../types';
 import AudioPlayer from '../components/AudioPlayer';
+import AsrStatus from '../components/AsrStatus';
 import PhonemeBar from '../components/PhonemeBar';
 import NoteHits from '../components/NoteHits';
 import { gradeOf } from '../lib/align';
@@ -292,6 +293,7 @@ export default function ReviewPage() {
             id="review-recorder"
             style={{ borderTop: '1px solid var(--rule)', paddingTop: 22 }}
           >
+            <AsrStatus />
             <Recorder
               target={detail.text}
               entry={detail.text}

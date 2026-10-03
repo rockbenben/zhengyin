@@ -5,6 +5,7 @@ import { Button, Space, Typography } from 'antd';
 import { api, isOffline } from '../api';
 import type { EntryDetail } from '../types';
 import AudioPlayer from '../components/AudioPlayer';
+import AsrStatus from '../components/AsrStatus';
 import PhonemeBar from '../components/PhonemeBar';
 import NoteHits from '../components/NoteHits';
 import Recorder from '../components/Recorder';
@@ -81,6 +82,9 @@ export default function WordPage() {
           )}
         </div>
       </header>
+
+      {/* 识别服务的状态是**整页一份**的事实（原来每个音节各摊一份同样的三行字） */}
+      <AsrStatus />
 
       {entry.words.map((w, i) => {
         const audio = entry.audio.find((a) => a.word === w.word);

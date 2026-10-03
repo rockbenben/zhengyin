@@ -593,56 +593,10 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
         )
       )}
 
-      {/* 浏览器是主服务一绑上端口就打开的，而边车还要十几秒加载模型——这十几秒里
-             说"没启动"跟事实相反。这一档会自己转成下面的结果，不用手动刷新。 */}
-      {sidecar === 'starting' && (
-        <Notice tone="quiet" label="正在启动" title="音素识别服务正在加载模型，稍等十几秒">
-          模型还在读进内存，<strong>好了会自己变，不用刷新页面</strong>。
-          {'这段时间录音和对比播放照常用，只是还测不出「第几个音发成了什么」。'}
-        </Notice>
-      )}
-
-      {/* 没装 uv：立刻说，并且**在浏览器里**就给出装法。
-             不叫人去翻终端——双击启动的人可能根本没有那个窗口。 */}
-      {sidecar === 'no-uv' && (
-        <Notice tone="quiet" label="逐音素评测没开" title="这台机器还没装 uv，装上就能用">
-          <>
-            「你第几个音发成了什么」这一项要一个本机的 Python 服务，它由
-            <Typography.Text code>uv</Typography.Text> 拉起来，而这台机器上还没有 uv。
-            <br />
-            装法（三选一）：<Typography.Text code>pip install uv</Typography.Text> ·
-            {' '}<Typography.Text code>winget install astral-sh.uv</Typography.Text> ·
-            {' '}<Typography.Text code>brew install uv</Typography.Text>
-            <br />
-            装完重新双击启动那个文件即可（首次会下约 1.2GB 模型）。
-            <strong>在那之前查词、真人发音、录音、A/B 对比都照常用</strong>，
-            {'只是测不出「第几个音发成了什么」。'}
-          </>
-        </Notice>
-      )}
-      {/* 标题只说观察到的事（还没连上），不能断言"没起来"——模型在 uvicorn 的 startup
-             事件里加载，加载完之前端口不接受连接，所以"还没装"和"正在下 1.2GB"
-             在浏览器这一侧一模一样，都是连接被拒。第一次启动最容易越过这里的 90 秒
-             （建 venv 装依赖实测 71 秒，再加下模型），而那时候它一切正常。 */}
-      {sidecar === 'down' && (
-        <Notice tone="warn" label="逐音素评测没开" title="等了一分半还没连上">
-          {(
-            <>
-              <strong>看一眼启动服务那个终端窗口</strong>，里面有一行
-              <Typography.Text code>[asr]</Typography.Text> 开头的说明——首次启动多半是还在下模型
-              {'（约 1.2GB，那里有进度条），缺 uv 的话那里会直接给出装法。'}
-              {modelState === 'available'
-                ? ' 这期间会退到一个更弱的办法：在两个相近的词里挑一个，说不出你实际发的是什么音。'
-                : ' 在那之前录音和 A/B 对比照常用，只是测不出「第几个音发成了什么」。'}
-            </>
-          )}
-        </Notice>
-      )}
-      {sidecar === 'up' && modelState === 'error' && (
-        <Notice tone="quiet" title="备用识别模型检测失败">
-          不影响音素级评测，只是主服务挂掉时没有退路。
-        </Notice>
-      )}
+      {/* 边车状态的四条提示（正在启动 / 没装 uv / 等了一分半 / 备用模型检测失败）
+             搬去了 AsrStatus——那是这台机器的状态，不是每个音节的状态。
+             词条页逐音节各摆一个 Recorder，原来同一份三行字会整份重复多遍。
+             sidecar 这个 state 留着，只因为它还管着下面那行操作说明的出现时机。 */}
       {/* 复习流里一次要过七八张卡，每张都摊开同样几行灰字就只是噪音——
              那时人在做题，不是在学怎么用。所以复习页（brief）只留操作那一句。 */}
       {sidecar === 'up' && !listened && !busy && (

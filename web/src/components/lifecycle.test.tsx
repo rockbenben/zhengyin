@@ -81,6 +81,7 @@ vi.mock('../lib/asr', () => ({
 }));
 
 const { default: Recorder } = await import('./Recorder');
+const { default: AsrStatus } = await import('./AsrStatus');
 const { default: AudioPlayer } = await import('./AudioPlayer');
 
 beforeEach(() => {
@@ -340,17 +341,16 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
  * 浏览器是服务一绑上端口就自动打开的，而边车还要十几秒加载 1.2GB 模型，
  * 于是页面挂载时那唯一一次健康检查必然落在"还没就绪"的窗口里——
  * 而原来只问一次，「音素识别服务没启动」就一直挂着，直到手动刷新。
+ *
+ * 这些提示原来长在 Recorder 里，短语页会按音节整份重复（见 AsrStatus 头注）；
+ * 现在归 AsrStatus，一页一份，测试也跟着搬到这里。
  */
 describe('边车没就绪时要接着问，页面自己会好', () => {
   it('先没就绪、后就绪 → 提示自己从「正在启动」变成不再出现，不用刷新', async () => {
     let ok = false;
     healthStub.impl = () => Promise.resolve({ ok, uv: true });
 
-    render(
-      <MemoryRouter>
-        <Recorder target="book" entry="book" referenceUrl="/api/audio/book-mw.mp3" />
-      </MemoryRouter>,
-    );
+    render(<AsrStatus />);
 
     // 第一次问：没就绪 → 说"正在启动"，而不是"没启动"（后者跟事实相反）
     await waitFor(() => expect(document.body.textContent).toContain('正在加载模型'));
@@ -366,14 +366,20 @@ describe('边车没就绪时要接着问，页面自己会好', () => {
     expect(document.body.textContent).not.toContain('音素识别服务没起来');
   }, 15000);
 
+  it('熬过 give-up 要说「黑窗口」，不许说「终端窗口」——走到这档的人多半是双击启动的', async () => {
+    healthStub.impl = () => Promise.resolve({ ok: false, uv: true });
+    // 90 秒不该真等 90 秒：pollMs/giveUpMs 是测试缝
+    render(<AsrStatus pollMs={20} giveUpMs={40} />);
+    await waitFor(() => expect(document.body.textContent).toContain('等了一分半还没连上'));
+    const t = document.body.textContent ?? '';
+    expect(t, '没给可照做的下一步').toMatch(/黑窗口/);
+    expect(t, '把人打发去翻终端了（uv 分支早钉过同样的理由）').not.toMatch(/终端/);
+  }, 15000);
+
   it('卸载后不许再问 —— 否则换了页面它还在轮询，还会对已卸载的组件 setState', async () => {
     healthStub.impl = () => { healthCalls += 1; return Promise.resolve({ ok: false, uv: true }); };
 
-    const { unmount } = render(
-      <MemoryRouter>
-        <Recorder target="book" entry="book" referenceUrl="/api/audio/book-mw.mp3" />
-      </MemoryRouter>,
-    );
+    const { unmount } = render(<AsrStatus />);
     await waitFor(() => expect(healthCalls).toBeGreaterThan(0));
     await act(async () => { unmount(); });
 
@@ -484,11 +490,7 @@ describe('AudioPlayer 与全局的 speechSynthesis', () => {
 describe('这台机器没装 uv 时', () => {
   async function withHealth(h: { ok: boolean; uv?: boolean }) {
     healthStub.impl = () => Promise.resolve(h as { ok: boolean; uv: boolean });
-    render(
-      <MemoryRouter>
-        <Recorder target="book" entry="book" referenceUrl="/api/audio/book-mw.mp3" />
-      </MemoryRouter>,
-    );
+    render(<AsrStatus />);
     await waitFor(() => expect(document.body.textContent).toMatch(/uv|加载模型/));
     return document.body.textContent ?? '';
   }

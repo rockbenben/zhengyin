@@ -4,6 +4,7 @@ import { Space, Spin, Typography } from 'antd';
 import { api, isOffline } from '../api';
 import type { EntryDetail } from '../types';
 import Recorder from './Recorder';
+import AsrStatus from './AsrStatus';
 import Offline from './Offline';
 
 export interface Example { text: string; ipa?: string }
@@ -116,6 +117,7 @@ export default function DrillPhoneme({ ipa, words }: { ipa: string; words: Examp
               </Typography.Text>
               {/* 短语按第一个词录（Recorder 本来就是逐词的）；entry 传整条，
                   这样流水和复习卡记在真实词条上，不会落到裸词上打不开 */}
+              <AsrStatus />
               <Recorder
                 target={entry.words[0]?.word ?? picked}
                 entry={entry.text}
