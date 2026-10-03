@@ -74,3 +74,36 @@ describe('设置页引的那句停止提示，服务必须真的会打', () => {
       .toContain(STOP_HINT);
   });
 });
+
+/**
+ * 页头与启动/关闭两段（打磨稿 batch1 的 T-1 / T-2）。
+ *
+ * 一、H1 必须是页面名。原来屏上最大的字是「词典与评测」——那是六张卡里第一组
+ *     的名字，而侧栏点的是「设置」、浏览器标签也是「设置 · 正音」，标签页和屏上
+ *     打架。jsdom 之外没人拦得住"PageHead 的 title 填了组名"这种手滑，钉一下。
+ * 二、开启/关闭两段说人话：「仓库」是 git 黑话（同一段前文自己用的是「正音这个
+ *     文件夹」），而"开启"原来只写了 Windows 的桌面图标——macOS/Linux 用户照着
+ *     找的是自己机器上不存在的操作路径。三个启动器本来都在，点名即可。
+ */
+describe('设置页的页头与启停文案', () => {
+  const page = readFileSync(join(root, 'web', 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
+  // 只查 JSX 正文，注释里讲历史的那两句不算（它们正是在解释为什么不能那么写）
+  const body = page.split('\n')
+    .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+    .join('\n');
+
+  it('H1 是「设置」，跟侧栏导航项一字不差', () => {
+    expect(body).toMatch(/<PageHead slug="设置" title="设置"/);
+  });
+
+  it('启停两段不出现「仓库」这种黑话', () => {
+    expect(body, '又把停止文件说成"仓库里的"了').not.toContain('双击仓库里的');
+    expect(body).toContain('双击正音文件夹里的 停止.cmd');
+  });
+
+  it('开启一段点名三个平台的启动器', () => {
+    for (const f of ['启动.cmd', '启动.command', '启动.sh']) {
+      expect(body, `启停文案漏了 ${f}`).toContain(f);
+    }
+  });
+});
