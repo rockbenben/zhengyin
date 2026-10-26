@@ -3,7 +3,9 @@ import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createApp, type AppDeps } from './app.js';
-import { openDb, overallStats, putReferenceIpa, noteEvidence } from './db.js';
+import {
+  openDb, overallStats, putReferenceIpa, noteEvidence, logAttempt, pruneOrphanAttempts,
+} from './db.js';
 import { NoteStore } from './notes.js';
 import { analyzeText } from './service.js';
 import { ReviewStore } from './review.js';
@@ -161,6 +163,57 @@ describe('entries api', () => {
     expect(d.audio[0]).toMatchObject({ source: 'mw', url: '/api/audio/click-mw.mp3' });
   });
 
+  /**
+   * 手工音标没有单独的列，它是 `found:false` 的词条上那个非空 ipa。
+   * 首页为了顺手升级音频会对**已有**的词再 POST 一次；不带 ipaOverride 时
+   * 分析结果是「查不到、音标为空」，无条件 upsert 会把手写音标冲掉。
+   * 对直接调 API 的 AI 也一样是静默的数据丢失。
+   */
+  it('已有的手工音标不会被不带 ipaOverride 的 POST 冲掉', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    const put = (body: object) => app.request('/api/entries', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+    const first = await put({ text: 'anthropic', ipaOverride: '/ænˈθrɑpɪk/' });
+    expect(first.status).toBe(200);
+    expect((await first.json()).words[0]).toMatchObject({ found: false, ipa: '/ænˈθrɑpɪk/' });
+
+    const again = await put({ text: 'anthropic' });
+    expect(again.status).toBe(200);
+    expect((await again.json()).words[0].ipa, '裸 POST 抹掉了手写音标').toBe('/ænˈθrɑpɪk/');
+
+    const get = await app.request('/api/entries/anthropic');
+    expect(get.status, '词条被删掉了').toBe(200);
+    expect((await get.json()).words[0].ipa).toBe('/ænˈθrɑpɪk/');
+  });
+
+  /**
+   * S3 的删除只对新数据生效。发布之后在旧版删过词的机器上，流水还挂在一个
+   * 不存在的词条下；开库仪式要替它们补账，同时在册词的历史一行不能动。
+   */
+  it('开库时清掉没有词条的孤儿流水，在册词的历史不动', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    await addEntry(app, 'light');
+    const log = (entryText: string) => logAttempt(deps.db, {
+      entryText, target: entryText, at: '2026-07-28T00:00:00Z',
+      targetIpa: ['l'], heardIpa: ['n'],
+      ops: [{ kind: 'sub', targetIpa: 'l', heardIpa: 'n' }], clean: false,
+    });
+    const ghost = log('ghost');
+    const live = log('light');
+    expect(overallStats(deps.db).attempts).toBe(2);
+
+    expect(pruneOrphanAttempts(deps.db), '该清掉恰好 1 次孤儿').toBe(1);
+    expect(overallStats(deps.db)).toMatchObject({ attempts: 1, words: 1 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt WHERE id = ?').get(ghost)).toEqual({ c: 0 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt_error WHERE attempt_id = ?').get(ghost)).toEqual({ c: 0 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt WHERE id = ?').get(live), '在册词的流水被误删').toEqual({ c: 1 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt_error WHERE attempt_id = ?').get(live)).toEqual({ c: 1 });
+  });
+
   it('GET list + GET one + DELETE', async () => {
     const app = createApp(testDeps());
     await app.request('/api/entries', {
@@ -182,6 +235,40 @@ describe('entries api', () => {
     const del = await app.request('/api/entries/click', { method: 'DELETE' });
     expect((await del.json()).ok).toBe(true);
     expect((await app.request('/api/entries/click')).status).toBe(404);
+  });
+
+  /**
+   * 删词条 = 词条 + 练习记录。只删词条的话，首页「卡住的地方」和统计页
+   * 还会挂着它，点进去是 404；重词条名又会把旧记录带回来。
+   */
+  it('删掉练过的词，只清它自己的流水和笔记归属，别的词不动', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    await addEntry(app, 'light');
+    await addEntry(app, 'night');
+    const pronounce = (target: string) => app.request(`/api/pronounce?target=${target}&entry=${target}&snr=35`, {
+      method: 'POST', body: new Uint8Array([1, 2, 3]),
+    });
+    for (let i = 0; i < 2; i += 1) expect((await pronounce('light')).status).toBe(200);
+    // 同一个识别桩对 night 返回 n aɪ t，是**全对**；用来证明别的词的历史不会被连坐
+    expect((await pronounce('night')).status).toBe(200);
+
+    expect(overallStats(deps.db), '先确认评测真的记下来了').toMatchObject({ attempts: 3, clean: 1, words: 2 });
+    const lightNoteBefore = deps.db.prepare(
+      'SELECT COUNT(*) AS c FROM attempt_note WHERE attempt_id IN (SELECT id FROM attempt WHERE entry_text = ?)',
+    ).get('light') as { c: number };
+    expect(lightNoteBefore.c, 'light 该有笔记归属，否则下面的删除断言是空的').toBeGreaterThan(0);
+    expect(readFileSync(deps.profileFile, 'utf8'), '删之前档案里应有这个词').toMatch(/light/);
+    expect(deps.review.cardOf('light'), '念错过该有复习卡').toBeTruthy();
+
+    expect((await app.request('/api/entries/light', { method: 'DELETE' })).status).toBe(200);
+
+    expect(overallStats(deps.db), '删 light 不应动 night 的流水').toMatchObject({ attempts: 1, clean: 1, words: 1 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt_error').get(), '错误行没删').toEqual({ c: 0 });
+    expect(deps.db.prepare('SELECT COUNT(*) AS c FROM attempt_note').get(), '笔记归属没删').toEqual({ c: 0 });
+    expect(deps.review.cardOf('light'), '复习卡没删').toBeUndefined();
+    expect(await (await app.request('/api/entries/night')).json(), '别的词条被删了').toMatchObject({ text: 'night' });
+    expect(readFileSync(deps.profileFile, 'utf8'), '发音档案里的 light 没清掉').not.toMatch(/light/);
   });
 
   it('缺词的 404 说清在不在词典——空状态那句承诺按它分叉', async () => {

@@ -409,6 +409,19 @@ export function createApp(deps: AppDeps) {
     }
     const words = analyzeText(key, ipaOverride);
     if (words.length === 0) return c.json({ error: '没找出可分析的词，换一个说法试试' }, 400);
+
+    // ── 已有手工音标的词，裸 POST 不能把它冲掉 ──
+    //
+    // 首页的输入框对**库里已有**的词也会走这条 POST（为了顺手升级音频）；而一个
+    // 手工录进来的词（词典查不到、音标是人敲的）在不带 ipaOverride 重新分析时，
+    // 结果就是 found:false + ipa:''。无条件 upsert 会把那段手写音标抹成空串，
+    // 随后首页看到「全都查不到」还会把词条删掉。对 API/AI 调用者同样是数据丢失。
+    // 保留原词条，原样返回；音频本来也没有（词典查不到）。
+    const existing = store.getEntry(deps.db, key);
+    if (existing && !ipaOverride && store.hasManualIpa(existing.words) && words.every((w) => !w.found)) {
+      return c.json(entryDetail(deps, key));
+    }
+
     store.upsertEntry(deps.db, key, words, deps.now());
 
     // 音频：逐词 MW（有 key 时）→ 失败 TTS；短语额外整句 TTS。
@@ -516,9 +529,27 @@ export function createApp(deps: AppDeps) {
       // 404（重新 POST 它也不会修复，因为 POST 的"已有音频"判断只看 DB 行在不在）。
       if (store.audioFileInUse(deps.db, a.file)) continue;
       const f = join(deps.audioDir, a.file);
-      if (existsSync(f)) unlinkSync(f);
+      // 库里的行已经删了；文件删不掉（Windows 上被占用是常事）不该让整次删除
+      // 变成 500——那会让界面说「没能删除」，而词条其实已经没了。
+      try {
+        if (existsSync(f)) unlinkSync(f);
+      } catch (e) {
+        console.warn('[entries] 删除音频文件失败', f, e);
+      }
     }
-    deps.review.removeCard(key);
+    try {
+      deps.review.removeCard(key);
+    } catch (e) {
+      // 复习状态写盘失败同理：下次打开用户时 openRituals 会清掉指向不存在词条的卡。
+      console.warn('[entries] 删除复习卡失败', e);
+    }
+    // 流水删了，发音档案末尾的 AUTO 统计块也得跟着重算——它是给 AI 读的，
+    // 不能留着一个已经不在库里的词。刷新失败不影响这次删除。
+    try {
+      syncProfile(deps.profileFile, deps.db, deps.noteStore, deps.now());
+    } catch (e) {
+      console.warn('[entries] 删除后刷新发音档案失败', e);
+    }
     return c.json({ ok: true });
   });
 

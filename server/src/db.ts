@@ -136,11 +136,65 @@ export function listEntries(db: Database.Database): EntryRow[] {
     .map((r) => ({ text: r.text, words: JSON.parse(r.words_json), createdAt: r.created_at, updatedAt: r.updated_at }));
 }
 
+/**
+ * 删词条 = 词条本身 + 它的音频 + 它的练习流水。
+ *
+ * 流水原来是留着的，于是删掉一个练过的词之后：
+ *   · 首页「卡住的地方」和统计页「卡住的词」还挂着它，点进去是 404；
+ *   · 「N 次评测 · N 个词」把已经不在库里的词也算进去；
+ *   · 重新建同一个词，旧记录会突然复活。
+ * 词条是练习的锚点，锚点没了，流水就是孤儿。验证行不能删——那是删词条的代价。
+ *
+ * attempt_error / attempt_note 的 ON DELETE CASCADE **不能依赖**：`foreign_keys`
+ * 的默认值随 SQLite 的编译选项变化（本机装的这一版恰好是开的，别的构建可能是关的），
+ * 所以显式按 entry_text 找 attempt id 删干净。整个删除放进一个事务，
+ * 中途失败不会留下半条词条。
+ */
 export function deleteEntry(db: Database.Database, text: string): AudioRow[] {
-  const rows = getAudio(db, text);
-  db.prepare('DELETE FROM audio WHERE entry_text = ?').run(text);
-  db.prepare('DELETE FROM entries WHERE text = ?').run(text);
-  return rows;
+  const drop = db.transaction((entryText: string) => {
+    const rows = getAudio(db, entryText);
+    db.prepare(
+      'DELETE FROM attempt_note WHERE attempt_id IN (SELECT id FROM attempt WHERE entry_text = ?)',
+    ).run(entryText);
+    db.prepare(
+      'DELETE FROM attempt_error WHERE attempt_id IN (SELECT id FROM attempt WHERE entry_text = ?)',
+    ).run(entryText);
+    db.prepare('DELETE FROM attempt WHERE entry_text = ?').run(entryText);
+    db.prepare('DELETE FROM audio WHERE entry_text = ?').run(entryText);
+    db.prepare('DELETE FROM entries WHERE text = ?').run(entryText);
+    return rows;
+  });
+  return drop(text);
+}
+
+/**
+ * 清掉**没有对应词条**的练习流水。给旧版本补账用。
+ *
+ * S3 之前删词条不删流水，所以发布之后在旧版删过词的机器上，`attempt` 还指着
+ * 一个不存在的 `entries.text`：首页「卡住的地方」和统计页会一直挂着它，点进去
+ * 404；那个词条已经不在了，用户没有任何 UI 能触发清理。每次打开用户（启动/切换）
+ * 跑一遍，跟孤儿复习卡、笔记归属、发音档案在 openRituals 里对账是同一类仪式。
+ *
+ * 只删**孤儿**：有词条的流水一行不动。返回清掉的次数，调用方决定怎么记日志。
+ */
+export function pruneOrphanAttempts(db: Database.Database): number {
+  const prune = db.transaction(() => {
+    const { c } = db.prepare(
+      'SELECT COUNT(*) AS c FROM attempt WHERE entry_text NOT IN (SELECT text FROM entries)',
+    ).get() as { c: number };
+    if (c === 0) return 0;
+    db.prepare(
+      'DELETE FROM attempt_note WHERE attempt_id IN (SELECT id FROM attempt WHERE entry_text NOT IN (SELECT text FROM entries))',
+    ).run();
+    db.prepare(
+      'DELETE FROM attempt_error WHERE attempt_id IN (SELECT id FROM attempt WHERE entry_text NOT IN (SELECT text FROM entries))',
+    ).run();
+    db.prepare(
+      'DELETE FROM attempt WHERE entry_text NOT IN (SELECT text FROM entries)',
+    ).run();
+    return c;
+  });
+  return prune();
 }
 
 export function addAudio(db: Database.Database, a: Omit<AudioRow, 'id'>): void {
@@ -466,7 +520,7 @@ export function exportBackup(db: Database.Database, now: string): Backup {
  * 所以判据只能是这个组合：查不到（found: false）而又有音标，那必然是人给的。
  * 来自备份的数据是外部输入，字段可能压根不是字符串，这里不假设。
  */
-function hasManualIpa(words: WordAnalysis[]): boolean {
+export function hasManualIpa(words: WordAnalysis[]): boolean {
   return words.some((w) => w && !w.found && typeof w.ipa === 'string' && w.ipa.trim() !== '');
 }
 

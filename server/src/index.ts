@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 import 'dotenv/config';
 import { serverPort } from './port.js';
 import { createApp } from './app.js';
-import { getEntry } from './db.js';
+import { getEntry, pruneOrphanAttempts } from './db.js';
 import { NoteStore } from './notes.js';
 import { fetchMwAudio, verifyMwKey } from './audio/mw.js';
 import { recognizePhonemes, checkPhonemeAsr, hasUv } from './audio/phonemeAsr.js';
@@ -50,6 +50,13 @@ function openRituals(s: UserSession): void {
   if (re.refreshed.length > 0) {
     console.log(`[entries] 按当前的分析规则更新了 ${re.refreshed.length} 个词条的音素标签`
       + `（共 ${re.checked} 个）：${re.refreshed.slice(0, 8).join('、')}${re.refreshed.length > 8 ? '…' : ''}`);
+  }
+
+  // 旧版本删词条时没有删练习流水，留下的孤儿记录会一直挂在首页/统计里，
+  // 而词条已经不在，用户没有任何按钮能清。先补这笔账，再做下面的归属重算。
+  const pruned = pruneOrphanAttempts(s.db);
+  if (pruned > 0) {
+    console.warn(`[attempts] 清掉 ${pruned} 次没有对应词条的录音记录（旧版本删词条时留下的）`);
   }
 
   // 笔记归属（attempt_note）是**派生**的：错误行 + 这次念的词 + 当前的 notes/ 就能算出来。
