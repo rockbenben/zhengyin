@@ -19,7 +19,7 @@ words: [dopamine detox, dopamine, detox]
 | **dopamine** | /ˈdoʊpəˌmiːn/ | 3（DOH-puh-meen） |
 | **detox** | /ˈdiˌtɑks/ | 2（DEE-toks） |
 
-> ⚠️ CMUdict 里 `dopamine` 这条**是错的**（写成 `D AA1 P AH0 M AY2 N`，即 "DAH-puh-mine"）。已在 `server/src/analysis/lookup.ts` 的修正表里改掉——不改的话你念对了工具反而报你发错。证据见那里的注释。
+> ⚠️ 有些词典把 `dopamine` 标成 "DAH-puh-mine"。以上面的音标为准——这个词该念 "DOH-puh-meen"。
 
 ## 常见误区
 
