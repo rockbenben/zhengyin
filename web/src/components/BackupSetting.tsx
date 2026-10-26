@@ -55,9 +55,19 @@ export default function BackupSetting() {
   }
 
   async function importIt(f: File) {
+    // 选错文件时 JSON.parse 抛的是英文 SyntaxError（"Unexpected token '<'…"），
+    // 对普通用户等于没说——这里换成"选错了哪个文件"。
+    let data: unknown;
+    try {
+      data = JSON.parse(await f.text());
+    } catch {
+      message.error('这个文件不是正音的备份——请选导出时下载的那个 .json 文件');
+      if (file.current) file.current.value = '';
+      return;
+    }
     setBusy('in');
     try {
-      const r = await api.importBackup(JSON.parse(await f.text()) as unknown);
+      const r = await api.importBackup(data);
       message.success(`并入 ${r.added} 次录音、${r.cards} 张复习卡；${r.skipped} 次本机已有，跳过`);
       // 统计、复习、发音档案全变了。整页重载最省事，也不会留下半新半旧的界面
       setTimeout(() => window.location.reload(), 900);
