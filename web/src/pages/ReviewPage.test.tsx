@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { STATS_CHANGED } from '../lib/events';
 import type { AlignOp, PronounceResult } from '../types';
 
 /**
@@ -182,7 +183,9 @@ describe('要练的东西一进卡就摆着，不用先录', () => {
     const skip = [...c.querySelectorAll('button')].find((b) => /跳过/.test(b.textContent ?? ''));
     expect(skip, '没给跳过的出口，人会卡在这张卡上').toBeDefined();
     fireEvent.click(skip!);
-    await waitFor(() => expect(c.textContent).toMatch(/复习完了|没有要复习/));
+    // 跳过的卡没评分、还在队列里，所以完成页现在说的是「这一轮结束了」而不是
+    // 「复习完了」；三档都算交代过（见下面「跳过最后一张」那条）。
+    await waitFor(() => expect(c.textContent).toMatch(/复习完了|今天这一轮结束了|没有要复习/));
     expect(stub.graded, '跳过不该产生分数').toEqual([]);
   });
 });
@@ -247,5 +250,60 @@ describe('空队列分三档说话', () => {
     const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
     await waitFor(() => expect(container.textContent).toMatch(/没有要复习/));
     expect(container.textContent).toMatch(/有证据/);
+  });
+});
+
+/**
+ * 跳过 = 没评分、没移出队列。跳完最后一张时再说「复习完了」，
+ * 侧栏还挂着的角标就变成了谎话，下次打开那张卡又回来。
+ */
+describe('跳过最后一张时，完成页要说清它还会回来', () => {
+  it('说「跳过 1 张」「还会出现」，不说「复习完了」', async () => {
+    const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+    const skip = await waitFor(() => {
+      const b = [...container.querySelectorAll('button')].find((x) => /跳过这张/.test(x.textContent ?? ''));
+      expect(b).toBeDefined();
+      return b!;
+    });
+    fireEvent.click(skip);
+    await waitFor(() => expect(container.textContent).toMatch(/跳过.*1.*还会出现/));
+    expect(container.textContent).toMatch(/今天这一轮结束了/);
+    expect(container.textContent, '没评分却说复习完了').not.toMatch(/复习完了/);
+  });
+});
+
+/**
+ * 侧栏的角标和「已评测」靠这个事件重拉。评分成功会改变到期数，必须发；
+ * 跳过没有评分、卡还在，不该发（否则会把角标错误地推成 0）。
+ */
+describe('评分成功发 STATS_CHANGED；跳过不发', () => {
+  it('grade 成功 → 事件一次；skip → 零次', async () => {
+    let got = 0;
+    const onChange = () => { got += 1; };
+    window.addEventListener(STATS_CHANGED, onChange);
+    try {
+      const c = await drawAndRecord(ALL_OK);
+      const next = await waitFor(() => {
+        const b = [...c.querySelectorAll('button')].find((x) => x.textContent?.trim() === '下一个');
+        expect(b).toBeDefined();
+        return b!;
+      });
+      fireEvent.click(next);
+      await waitFor(() => expect(stub.graded.length).toBe(1));
+      await waitFor(() => expect(got).toBe(1));
+
+      got = 0;
+      const { container } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+      const skip = await waitFor(() => {
+        const b = [...container.querySelectorAll('button')].find((x) => /跳过这张/.test(x.textContent ?? ''));
+        expect(b).toBeDefined();
+        return b!;
+      });
+      fireEvent.click(skip);
+      await waitFor(() => expect(container.textContent).toMatch(/跳过.*1.*还会出现/));
+      expect(got, '跳过没评分却发了刷新').toBe(0);
+    } finally {
+      window.removeEventListener(STATS_CHANGED, onChange);
+    }
   });
 });

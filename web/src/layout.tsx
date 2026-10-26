@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Layout, Menu, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { Link, Outlet, useLocation } from 'react-router';
@@ -8,6 +8,7 @@ import { applyPalette, makeTheme, paletteFor } from './theme';
 import { isDarkPaper, loadHue, loadPaper, savePaper, saveHue, type PaperPref } from './lib/ink';
 import { GithubOutlined } from '@ant-design/icons';
 import { APP_NAME, APP_TAGLINE, REPO_URL } from './lib/brand';
+import { STATS_CHANGED } from './lib/events';
 
 /** 设置页靠它换墨。用 Outlet context 而不是另起一个全局 store——只有一个消费者 */
 export interface InkContext {
@@ -58,10 +59,17 @@ export default function AppLayout() {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   }, [palette, dark]);
 
-  useEffect(() => {
+  const refreshCounts = useCallback(() => {
     api.reviewDue().then((d) => setDueCount(d.cards.length)).catch(() => {});
     api.stats().then((s) => setAttempts(s.overall.attempts)).catch(() => {});
-  }, [loc]);
+  }, []);
+
+  // 换页时拉一次；录音 / 评分 / 删词后在页面里发 STATS_CHANGED，不换页也重拉。
+  useEffect(() => { refreshCounts(); }, [loc, refreshCounts]);
+  useEffect(() => {
+    window.addEventListener(STATS_CHANGED, refreshCounts);
+    return () => window.removeEventListener(STATS_CHANGED, refreshCounts);
+  }, [refreshCounts]);
 
   /**
    * 导航分两组，因为这六项本来就不是同级的东西。

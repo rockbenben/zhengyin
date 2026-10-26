@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
 import { Link, useParams } from 'react-router';
-import { Button, Space, Typography } from 'antd';
+import { Button, Space, Spin, Typography } from 'antd';
 import { api, isOffline } from '../api';
 import type { EntryDetail } from '../types';
 import AudioPlayer from '../components/AudioPlayer';
@@ -26,15 +26,25 @@ export default function WordPage() {
   /** 缺词时服务端给的「在不在词典」。null = 服务端没给（旧服务），按在的话说 */
   const [inDictionary, setInDictionary] = useState<boolean | null>(null);
   const [starred, setStarred] = useState(false);
+  // 路由里的当前词。录音结果回来后要重拉词条，但那次请求可能在路由已经
+  // 换到另一个词之后才回来——不能把旧词的数据塞进新页面。
+  const currentText = useRef(text);
+  useEffect(() => { currentText.current = text; }, [text]);
 
   useEffect(() => {
+    let alive = true;
     setEntry(null);
     setError(null);
     setInDictionary(null);
-    if (!text) return;
+    if (!text) return undefined;
     api.getEntry(text)
-      .then((e) => { setEntry(e); setStarred(e.review?.starred ?? false); })
+      .then((e) => {
+        if (!alive) return;
+        setEntry(e);
+        setStarred(e.review?.starred ?? false);
+      })
       .catch((e) => {
+        if (!alive) return;
         if (isOffline(e)) { setError('offline'); return; }
         // 「库里还没有」是一句关于库的断言，只有 404 撑得起它。
         // 500/超时也走这一屏的话，服务在跑但崩了（或 dev 下服务根本没起——
@@ -45,6 +55,7 @@ export default function WordPage() {
         setError('missing');
         setInDictionary(nd.inDictionary ?? null);
       });
+    return () => { alive = false; };
   }, [text]);
 
   if (error === 'offline') return <Offline />;
@@ -84,7 +95,7 @@ export default function WordPage() {
       </PageResult>
     );
   }
-  if (!entry) return null;
+  if (!entry) return <Spin style={{ marginTop: 48 }} />;
 
   // 音素→笔记的联动靠这个集合：把这个词条命中的每条笔记的 matched（笔记 trigger
   // 里真正跟这个词条搭上的那部分）拍平成一个 tag 并集，PhonemeBar 逐音素跟它求交。
@@ -167,6 +178,18 @@ export default function WordPage() {
                 entry={entry.text}
                 referenceUrl={audio?.url ?? entry.phraseAudio?.url ?? null}
                 hint={i === 0 ? 'full' : 'brief'}
+                // 这一遍真错了之后，服务端会把这处错归到「你在这个词上错过」，
+                // 而页面手里的 notes 还是进来时那份——不重拉的话，结果区刚说
+                // 「l 发成了 n」，底下那行却还写着「你还没在这个词上错过」。
+                onResult={(r) => {
+                  if (!r) return;
+                  const requested = entry.text;
+                  void api.getEntry(requested)
+                    .then((fresh) => {
+                      if (currentText.current === requested) setEntry(fresh);
+                    })
+                    .catch(() => {});
+                }}
               />
             ) : (
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>

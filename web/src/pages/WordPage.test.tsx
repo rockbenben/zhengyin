@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import type { EntryDetail } from '../types';
+import type { EntryDetail, EntryDetailNote } from '../types';
 
 const stub = vi.hoisted(() => ({
   offline: false,
@@ -40,6 +40,13 @@ vi.mock('../lib/asr', () => ({
   checkModelAvailability: () => Promise.resolve('missing'),
   contrastAll: () => Promise.resolve([]),
   resetModel: () => {},
+}));
+// Recorder 要 getUserMedia/MediaRecorder，这里只关心它把「评测出了结果」转告页面，
+// 所以换成一个能手动触发的按钮。
+vi.mock('../components/Recorder', () => ({
+  default: ({ onResult }: { onResult?: (r: unknown) => void }) => (
+    <button type="button" onClick={() => onResult?.({})}>fake-record</button>
+  ),
 }));
 
 const { default: WordPage } = await import('./WordPage');
@@ -210,6 +217,47 @@ describe('库里没有、而词典里也没有的词', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(container.textContent).toContain('就能建'));
+  });
+});
+
+/**
+ * 刚在这个词上错过，页面得立刻改口。
+ *
+ * 评测结果回来时，服务端已经把这处错记成「你在这个词上错过 l→n」，
+ * 而页面手里的 notes 还是进来时那份。不重拉的话，同一屏里上面写着
+ * 「l 发成了 n」，下面那行折叠却说「你还没在这个词上错过」——用户会怀疑
+ * 这次判定到底算没算数。
+ */
+describe('评测出了结果，页面要跟着服务端刷新', () => {
+  const OLD: EntryDetailNote = {
+    id: 'l-vs-n', title: 'l / n 不分（边音 vs 鼻音）', severity: 'info',
+    matched: ['phoneme:l'], markdown: '', relevant: false, becauseOf: [],
+  };
+  const NEW: EntryDetailNote = {
+    ...OLD, severity: 'watch', relevant: true, becauseOf: ['l→n'],
+  };
+  const light = (notes: EntryDetailNote[]): EntryDetail => ({
+    text: 'light', createdAt: '', words: [word('light')] as EntryDetail['words'],
+    audio: [], notes, review: null, phraseAudio: null,
+  } as EntryDetail);
+
+  it('录完那一刻，「你还没在这个词上错过」不能还挂着', async () => {
+    stub.offline = false;
+    stub.http500 = false;
+    stub.entry = light([OLD]);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/word/light']}>
+        <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(container.textContent).toContain('你还没在这个词上错过'));
+
+    // 录音组件报出结果；服务端那边这个词从此有了「l→n」的证据
+    stub.entry = light([NEW]);
+    fireEvent.click([...container.querySelectorAll('button')].find((b) => b.textContent === 'fake-record')!);
+
+    await waitFor(() => expect(container.textContent).not.toContain('你还没在这个词上错过'));
+    expect(container.textContent).toContain('你在这个词上错过 l→n');
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { STATS_CHANGED } from '../lib/events';
 import type { EntryListItem } from '../types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,13 +20,18 @@ const stub = vi.hoisted(() => ({
   due: 0,
   added: [] as string[],
   /** 服务端认得的音素。不在这张表里的一律 404，跟真实的 /api/phonemes/:ipa 一致 */
-  phonemes: ['θ', 'ɑ', 'æ'] as string[],
+  phonemes: ['θ', 'ɑ', 'æ', 'l'] as string[],
   /** 记下问过哪些——用来断言"根本没去问" */
   phonemeAsked: [] as string[],
   navigated: [] as string[],
   /** 挂住 addEntry 用：观察"点下去的那一刻"哪些按钮在转 */
   holdAdd: false,
   releaseAdd: null as null | (() => void),
+  /** 这一次 addEntry 让词典查不到——模拟拼错/专有名词 */
+  notInDict: false,
+  /** 服务端保住的手工音标（notInDict 时才有意义） */
+  manualIpa: '',
+  deleted: [] as string[],
 }));
 
 vi.mock('../api', () => ({
@@ -42,10 +48,11 @@ vi.mock('../api', () => ({
     }),
     addEntry: (text: string) => {
       stub.added.push(text);
-      if (stub.holdAdd) return new Promise<any>((res) => { stub.releaseAdd = () => res({ text, words: [{ word: text, found: true }] }); });
-      return Promise.resolve({ text, words: [{ word: text, found: true }] });
+      const body = { text, words: [{ word: text, found: !stub.notInDict, ipa: stub.manualIpa }] };
+      if (stub.holdAdd) return new Promise<any>((res) => { stub.releaseAdd = () => res(body); });
+      return Promise.resolve(body);
     },
-    deleteEntry: () => Promise.resolve({}),
+    deleteEntry: (text: string) => { stub.deleted.push(text); return Promise.resolve({}); },
     phoneme: (ipa: string) => (stub.phonemeAsked.push(ipa), stub.phonemes.includes(ipa)
       ? Promise.resolve({ phone: { ipa } })
       : Promise.reject(new Error('404'))),
@@ -88,6 +95,9 @@ beforeEach(() => {
   stub.added = [];
   stub.navigated = [];
   stub.phonemeAsked = [];
+  stub.notInDict = false;
+  stub.manualIpa = '';
+  stub.deleted = [];
 });
 
 /**
@@ -184,6 +194,82 @@ describe('空库时必须给起步词', () => {
 });
 
 /**
+ * 首页的框同时管"筛"和"建"，两种行为必须在屏幕上说得清。
+ * 上一版把失败提示放在"没有匹配"的分支里，于是输入 ligh、下面明明列着 light 时，
+ * 点按钮会静默地 POST + DELETE，页面一点反应都没有。
+ */
+describe('前缀输入：有匹配时也要说清按钮会干什么', () => {
+  it('大写也能筛出小写的词——手机键盘默认首字母大写', async () => {
+    stub.entries = [entry('light')];
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'Light' } });
+    await waitFor(() => expect(c.querySelectorAll('tbody tr').length).toBe(1));
+    expect(c.textContent).not.toMatch(/库里还没有/);
+    expect(c.textContent).toMatch(/库里已有「light」/);
+  });
+
+  it('有匹配但词典没有 ligh：错误必须显示，light 行不能被吞掉', async () => {
+    stub.entries = [entry('light')];
+    stub.notInDict = true;
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'ligh' } });
+    await waitFor(() => expect(c.querySelectorAll('tbody tr').length).toBe(1));
+    expect(c.textContent, '没说清按钮会新建 ligh').toMatch(/会新建「ligh」/);
+
+    fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
+    await waitFor(() => expect(c.textContent).toMatch(/词典里没有/));
+    expect(c.querySelectorAll('tbody tr').length, '匹配行被错误吞掉了').toBe(1);
+    expect(c.textContent).toMatch(/light/);
+    // 失败之后不能再同时说「会新建」——那是同屏自相矛盾
+    expect(c.textContent, '失败后还在承诺会新建').not.toMatch(/会新建/);
+    // 原来的 toast 自带 role=alert；换成常驻提示后要有自己的播报区域
+    expect(c.querySelector('[role="status"]')?.textContent, '失败没有播报区域').toContain('词典里没有');
+  });
+
+  /**
+   * 手工音标只存在于 found:false 的词条上。首页为了升级音频会对已有词再 POST；
+   * 服务端现在会保住手写音标，前端也必须把「全都查不到」当成“它是手工词”，
+   * 而不是垃圾——否则点一下就直接删。
+   */
+  it('已有的手工音标词：再查一次只能打开，不能删掉', async () => {
+    stub.entries = [entry('anthropic')];
+    stub.notInDict = true;
+    stub.manualIpa = '/ænˈθrɑpɪk/';
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'anthropic' } });
+    await waitFor(() => expect(c.textContent).toContain('库里已有「anthropic」'));
+    fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
+    await waitFor(() => expect(stub.navigated).toContain('/word/anthropic'));
+    expect(stub.deleted, '把手写音标词当垃圾删了').toEqual([]);
+  });
+
+  /**
+   * 1–3 个字符会先走音素分支。有匹配的词时不能许“会新建”，因为按钮可能去音素页。
+   */
+  it('输入字母 l（下面有 light）：说「查」而不是「会新建」，点了去音素页', async () => {
+    stub.entries = [entry('light')];
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'l' } });
+    await waitFor(() => expect(c.textContent).toMatch(/查「l」/));
+    expect(c.textContent, '短查询还承诺新建').not.toMatch(/会新建/);
+    fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
+    await waitFor(() => expect(stub.navigated).toContain('/phoneme/l'));
+    expect(stub.added).toEqual([]);
+  });
+
+  it('库里真的有一个叫 l 的词条时，它优先于音素页', async () => {
+    stub.entries = [entry('l')];
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'l' } });
+    await waitFor(() => expect(c.textContent).toContain('库里已有「l」'));
+    fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
+    await waitFor(() => expect(stub.navigated).toContain('/word/l'));
+    expect(stub.added).toContain('l');
+    expect(stub.phonemeAsked, '有同名词条时不该先去音素页').toEqual([]);
+  });
+});
+
+/**
  * 打一个音进来的人，想看的是「这个音怎么发」，而不是建一个词条。
  *
  * 原来一律走建词条：CMUdict 查不到 → 词条被删掉 → 弹一句
@@ -198,6 +284,8 @@ describe('输入一个音标', () => {
     // fireEvent.change 会绕过 React 受控输入的 value tracker；
     // 直接赋 value + dispatch('input') 是没用的（第一版就是那么写的，两条全没触发）
     fireEvent.change(c.querySelector('input')!, { target: { value: 'θ' } });
+    await waitFor(() => expect(c.textContent).toMatch(/是音标/));
+    expect(c.textContent, '对音标还承诺新建').not.toMatch(/就能建/);
     fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
     await waitFor(() => expect(stub.navigated.length).toBe(1));
     expect(stub.navigated[0]).toContain('/phoneme/');
@@ -225,6 +313,26 @@ describe('输入一个音标', () => {
     fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
     await waitFor(() => expect(stub.added.length).toBe(1));
     expect(stub.phonemeAsked, '不该为一个 11 个字符的词去问音素接口').toEqual([]);
+  });
+});
+
+/**
+ * 词典里没有这个词时，失败要说在它发生的地方。
+ *
+ * 原来只弹一条几秒的提示，而输入框下面那块还写着「按「查这个词」就能建」——
+ * 同屏两句相反的话，用户会再点一次，然后看着提示消失。
+ */
+describe('词典里没有这个词时', () => {
+  it('输入框下面改成「查不到」，不再同时承诺「按一下就能建」', async () => {
+    stub.entries = [];
+    stub.notInDict = true;
+    const c = await draw();
+    fireEvent.change(c.querySelector('input')!, { target: { value: 'zzz' } });
+    await waitFor(() => expect(c.textContent).toMatch(/库里还没有/));
+    fireEvent.click([...c.querySelectorAll('button')].find((b) => /查这个词/.test(b.textContent ?? ''))!);
+    await waitFor(() => expect(c.textContent).toMatch(/词典里没有/));
+    expect(c.textContent, '失败之后还在说「按一下就能建」').not.toMatch(/按「查这个词」就能建/);
+    expect(c.textContent, '没告诉用户下一步该查什么').toMatch(/拼写/);
   });
 });
 
@@ -394,6 +502,33 @@ describe('起步词的忙碌态只许落在被点的那一个上', () => {
     stub.releaseAdd?.();
     stub.holdAdd = false;
     await waitFor(() => expect(stub.navigated).toContain('/word/thin'));
+  });
+});
+
+/**
+ * 删词条把练习记录也删了，侧栏的「已评测」「复习 N」不能还停在旧数。
+ * 事件由 HomePage 发，Layout 监听（见 layout.test.tsx）。
+ */
+describe('删掉词条后通知侧栏重拉计数', () => {
+  it('确认删除 → 发 STATS_CHANGED', async () => {
+    stub.entries = [entry('light')];
+    let got = 0;
+    const onChange = () => { got += 1; };
+    window.addEventListener(STATS_CHANGED, onChange);
+    try {
+      const c = await draw();
+      const del = [...c.querySelectorAll('tbody button')].find((b) => b.textContent?.trim() === '删除');
+      expect(del, '没找到删除按钮').toBeDefined();
+      fireEvent.click(del!);
+      await waitFor(() => expect(document.querySelector('.ant-popconfirm')).not.toBeNull());
+      const ok = [...document.querySelectorAll('.ant-popconfirm button')]
+        .find((b) => b.textContent?.replace(/\s/g, '') === '删除');
+      expect(ok, '确认框里没有删除').toBeDefined();
+      fireEvent.click(ok!);
+      await waitFor(() => expect(got).toBe(1));
+    } finally {
+      window.removeEventListener(STATS_CHANGED, onChange);
+    }
   });
 });
 

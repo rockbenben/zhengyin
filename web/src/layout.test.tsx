@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { STATS_CHANGED } from './lib/events';
 
 const stub = vi.hoisted(() => ({ due: 0, attempts: 12 }));
 
@@ -70,6 +71,24 @@ describe('侧栏是复习入口唯一的常驻位置', () => {
     const c = draw();
     await waitFor(() => expect(c.textContent).toMatch(/复习/));
     expect([...c.querySelectorAll('a')].some((a) => a.getAttribute('href') === '/review')).toBe(true);
+  });
+
+  /**
+   * 复习完最后一张、或在词条页录完音，页面里会发 STATS_CHANGED。不换页也得重拉，
+   * 否则页面写「复习完了」、角标还停在 1，「已评测」也停在旧数。
+   */
+  it('页面里说数据变了 → 角标和已评测立刻重拉，不用换页', async () => {
+    stub.due = 1;
+    stub.attempts = 12;
+    const c = draw();
+    await waitFor(() => expect(c.querySelector('.due-count')?.textContent).toBe('1'));
+
+    stub.due = 0;
+    stub.attempts = 13;
+    await act(async () => { window.dispatchEvent(new Event(STATS_CHANGED)); });
+
+    await waitFor(() => expect(c.querySelector('.due-count')).toBeNull());
+    expect(c.textContent).toMatch(/已评测\s*13\s*次/);
   });
 });
 

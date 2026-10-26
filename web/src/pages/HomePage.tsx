@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
 import { APP_NAME } from '../lib/brand';
+import { STATS_CHANGED } from '../lib/events';
 import { Link, useNavigate } from 'react-router';
 import { Alert, Button, Input, Popconfirm, Space, Spin, Table, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
@@ -36,9 +37,10 @@ const STARTERS: Array<{ word: string; why: string }> = [
   { word: 'light', why: 'l / n 不分' },
 ];
 
-// 首页＝查询历史：只列出已经落地到服务端的词条，搜索只在这些已存条目里前端过滤
-// （entries.filter(e => e.text.includes(kw))）。这个页面从不生成新讲解，搜不到东西
-// 时明确告诉用户去问 AI，不能让人以为这里能现查新词。
+// 首页＝查词 + 建词条：输入框先在已存词条里做**大小写不敏感**的筛选；库里没有的词
+// 按「查这个词」现建（音标、音频、评测自动配好）。1–3 个字符会先走音素分支——
+// 打 θ 的人要的是那个音怎么发，不是一个叫 θ 的词条。讲解仍然不在这里生成，
+// 词条建好后的「为什么会错」才需要 AI。
 export default function HomePage() {
   useTitle('查词');
   const [entries, setEntries] = useState<EntryListItem[] | null>(null);
@@ -53,6 +55,12 @@ export default function HomePage() {
     () => localStorage.getItem(MW_ALERT_DISMISSED) === '1',
   );
   const [kw, setKw] = useState('');
+  /**
+   * 上一次查词因为**词典里没有**而失败。toast 一闪而过，而输入框下面那块
+   * 还写着「按「查这个词」就能建」——同屏两句相反的话，用户不知道该信哪句。
+   * 所以把失败留在它发生的位置：改输入之前一直看得见。
+   */
+  const [lookupError, setLookupError] = useState<{ text: string; msg: string } | null>(null);
   /** 正在添加**哪个**词，不是"有没有在添加"——整排起步词共享一个布尔的话，
       点一个六个全转圈（loading 即 disabled，一整排此刻全都点不动）。 */
   const [addingWord, setAddingWord] = useState<string | null>(null);
@@ -83,9 +91,13 @@ export default function HomePage() {
       //
       // 不在前端存一份音素表：直接问服务端，404 就说明不是音素。
       // 存一份的话它迟早跟 phones.ts 漂移，而那种漂移是无声的。
-      if (text.length <= 3) {
+      // 但库里已经有的**完全相同**的词优先：否则一个叫 l 的词条永远打不开，
+      // 而状态行还写着「会打开它」。
+      const exactExisting = (entries ?? []).some((e) => e.text === text.toLowerCase());
+      if (!exactExisting && text.length <= 3) {
         try {
           await api.phoneme(text);
+          setLookupError(null);
           navigate(`/phoneme/${encodeURIComponent(text)}`);
           setKw('');
           return;
@@ -98,10 +110,26 @@ export default function HomePage() {
       // 音标、音素条、评测全都没有，留着只是往库里堆垃圾。删掉并说清楚。
       // 注意只在**全都**查不到时才删——短语里一个词查不到、其余能查到的仍然有用。
       if (d.words.length > 0 && d.words.every((w) => !w.found)) {
+        // 服务端会保留已有词条上**手工敲进去的音标**（见 POST /api/entries）。
+        // 这种词出现在这里只说明它不在 CMUdict，不说明它是垃圾——打开它，别删。
+        if (d.words.some((w) => w.ipa.trim() !== '')) {
+          setLookupError(null);
+          setKw('');
+          navigate(`/word/${encodeURIComponent(d.text)}`);
+          return;
+        }
         await api.deleteEntry(d.text).catch(() => {});
-        message.warning(`词典里没有「${d.text}」，检查一下拼写。专有名词和缩写得手工给音标，让 AI 帮你录`);
+        // 本地列表里可能还留着这个词（比如另一个标签页刚删掉它）；重新拉一次，
+        // 不要留一行点进去 404 的幽灵。
+        load();
+        setLookupError({
+          text: d.text,
+          msg: '先检查一下拼写。生僻词、专有名词和缩写查不到音标，这个页面建不了；'
+            + '如果你在用能读写文件的 AI，可以让它带上音标替你录进这个库。',
+        });
         return;
       }
+      setLookupError(null);
       load();
       setKw('');
       navigate(`/word/${encodeURIComponent(d.text)}`);
@@ -110,7 +138,7 @@ export default function HomePage() {
     } finally {
       setAddingWord(null);
     }
-  }, [kw, addingWord, load, navigate]);
+  }, [kw, addingWord, entries, load, navigate]);
 
   useEffect(() => {
     load();
@@ -125,7 +153,16 @@ export default function HomePage() {
   if (error) return <LoadFailed what="单词列表" />;
   if (!entries) return <Spin style={{ marginTop: 48 }} />;
 
-  const filtered = kw ? entries.filter((e) => e.text.includes(kw)) : entries;
+  // 大小写不敏感：词条在库里一律小写，而手机键盘默认首字母大写、用户也会直接贴
+  // 带大写的词。按原样 includes 的话，输入 Light 会得到"库里还没有 Light"——
+  // 而按按钮又能打开 light，同一屏两句相反的话。
+  const q = kw.trim().toLowerCase();
+  const filtered = q ? entries.filter((e) => e.text.toLowerCase().includes(q)) : entries;
+  const exact = q ? entries.find((e) => e.text.toLowerCase() === q) : undefined;
+  // 1–3 个字符还会先走音素分支：按钮不一定是「新建」，不能把话说死。
+  const shortQuery = q.length > 0 && q.length <= 3;
+  // 服务端会规范化大小写，所以按不区分大小写比对；改了输入就不再是这个失败。
+  const lookupFailed = lookupError && lookupError.text.toLowerCase() === q ? lookupError : null;
 
   const columns: TableColumnsType<EntryListItem> = [
     {
@@ -197,15 +234,22 @@ export default function HomePage() {
       title: '操作',
       key: 'actions',
       render: (_, record) => (
-        // 删词条会连带清掉它的复习进度（server 端 /api/entries/:text DELETE 里
-        // deps.review.removeCard），不是无关紧要的小事，所以必须过一道确认。
+        // 删词条会连带清掉它的练习记录和复习进度（server 端 /api/entries/:text DELETE），
+        // 不是无关紧要的小事，所以必须过一道确认，而且确认里要说的和实际删的一致。
         <Popconfirm
           title="删除这个词？"
-          description="会同时清除它的复习进度，不可恢复"
+          description="会同时清除它的练习记录和复习进度，不可恢复"
           okText="删除"
           okType="danger"
           cancelText="取消"
-          onConfirm={() => api.deleteEntry(record.text).then(load).catch(() => message.error('没能删除，再试一次；还是不行就看启动窗口里的报错'))}
+          onConfirm={() => api.deleteEntry(record.text).then(() => {
+            load();
+            // 这个词的练习记录和复习卡都被删了；首页自己的「怎么用」判据（attempts）
+            // 也读同一份统计，别留在删之前的值上。
+            api.stats().then((s) => setAttempts(s.overall.attempts)).catch(() => {});
+            // 侧栏的「已评测」「复习 N」和「卡住的地方」都听这个事件。
+            window.dispatchEvent(new Event(STATS_CHANGED));
+          }).catch(() => message.error('没能删除，再试一次；还是不行就看启动窗口里的报错'))}
         >
           {/* 红留给它，但**不是一直亮着**。删词条很少做，却在右边排成一列红字，
               是整页最重的一块颜色。压成弱文字，指过去/键盘落上去才变红——
@@ -305,11 +349,33 @@ export default function HomePage() {
           style={{ width: 340, maxWidth: '100%' }}
         />
         {kw.trim() && filtered.length > 0 && (
-          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>
-            库里有 {filtered.length} 个匹配，下面列着
+          <Typography.Text type="secondary" style={{ fontSize: 12.5, minWidth: 0, overflowWrap: 'anywhere' }}>
+            {exact
+              ? <>库里已有「{exact.text}」，按「查这个词」会打开它</>
+              : lookupFailed
+                /* 刚试过新建、失败了。再说「会新建」就跟下面那条「建不了」打架。 */
+                ? <>库里有 {filtered.length} 个匹配，点词名打开</>
+                : shortQuery
+                  /* 这几个字可能是音标；按钮会先去问音素页。中性说法，别许空诺。 */
+                  ? <>库里有 {filtered.length} 个匹配，点词名打开；按「查这个词」查「{kw.trim()}」</>
+                  : <>库里有 {filtered.length} 个匹配，点词名打开；按「查这个词」会新建「{kw.trim()}」</>}
           </Typography.Text>
         )}
       </div>
+
+      {/* ── 查词失败留在原地 ──
+          上一版把它放在「没有匹配」那个分支里，而失败的那次输入恰恰常常**有**匹配
+          （打 ligh、dopa… 时下面已经列着 light、dopamine）：于是点了按钮什么都不发生，
+          既没导航也没提示。失败提示必须独立于列表是否为空。 */}
+      {lookupFailed && (
+        /* 原来这里是 antd 的 toast（自带 role=alert）；换成常驻 Notice 后得自己
+           补一个播报区域，否则点按钮失败时读屏那边听不到任何变化。 */
+        <div role="status" aria-live="polite">
+          <Notice tone="warn" label="查不到" title={`词典里没有「${lookupFailed.text}」`}>
+            {lookupFailed.msg}
+          </Notice>
+        </div>
+      )}
 
       {/* ── 起步词紧跟查词框，别排在最后 ──
           标题是「先查一个词」，而新用户当场卡住的正是**查哪个**——他不知道自己
@@ -353,11 +419,16 @@ export default function HomePage() {
         /* 不用 antd 的 Empty：它不传 image 就会画自带的那张空盒子插画，
            而这套视觉里没有插画。下面那条「空库时别渲染一张 antd 空表格」是同一个判断，
            当时只处理了表格、漏了这儿。Notice 的 quiet 档是一条中性细线，正合空状态。 */
-        <Notice tone="quiet" title={`库里还没有「${kw.trim()}」`}>
-          按「查这个词」就能建：音标、真人录音、音素条、评测都会自动配好。
-          <br />
-          「为什么会错」那种讲解要去问 AI，它写完会自动出现在这个词的页面上。
-        </Notice>
+        lookupFailed ? null : (
+          /* 失败时上面已经有那条常驻的「查不到」；这里再摆一份就是同一句话说两遍。 */
+          <Notice tone="quiet" title={`库里还没有「${kw.trim()}」`}>
+            {shortQuery
+              ? <>按「查这个词」查一下「{kw.trim()}」：是音标就打开那个音的页面，不是就现建词条。</>
+              : <>按「查这个词」就能建：音标、真人录音、音素条、评测都会自动配好。</>}
+            <br />
+            「为什么会错」那种讲解要去问 AI，它写完会自动出现在这个词的页面上。
+          </Notice>
+        )
       ) : entries.length === 0 ? (
         // 空库时别渲染一张 antd 空表格（"暂无数据" + 一排表头），那是纯死空间。
         // 起步词已经摆在查词框底下了，这儿什么都不要。

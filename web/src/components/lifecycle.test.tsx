@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { STATS_CHANGED } from '../lib/events';
 
 /**
  * 资源生命周期。这是这个前端**唯一还没有网**的高风险区，而且是类型检查天生兜不住的一类：
@@ -54,6 +55,18 @@ function fakeStream() {
 }
 
 const CLIP = { samples: new Float32Array(16000), sampleRate: 16000, peak: 0.5, noiseFloor: 0.01, snrDb: 34 };
+const OK_RESULT = {
+  target: 'book', targetIpa: ['b', 'ʊ', 'k'], words: [{ word: 'book', ipa: ['b', 'ʊ', 'k'] }],
+  heardIpa: ['b', 'ʊ', 'k'], rawIpa: 'b ʊ k', comparedWith: 'reference',
+  referenceIpa: ['b', 'ʊ', 'k'], baselineDrift: [], baselineRepaired: [],
+  recorded: true, notRecordedReason: null,
+  align: [
+    { kind: 'match', targetIpa: 'b', heardIpa: 'b', conf: 0.97, sure: true },
+    { kind: 'match', targetIpa: 'ʊ', heardIpa: 'ʊ', conf: 0.81, sure: true },
+    { kind: 'match', targetIpa: 'k', heardIpa: 'k', conf: 0.95, sure: true },
+  ],
+  notes: [],
+};
 
 // wav 那一层被换掉：这里测的是生命周期，不是解码。真去解码要喂真实音频数据，
 // 而且 jsdom 没有 decodeAudioData。
@@ -256,6 +269,57 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
     await act(async () => { letGo?.(); });
     await waitFor(() => expect(btn('停止录音')).toBeTruthy());
     expect(gumCalls).toBe(1);
+  }, 15000);
+
+  /**
+   * 首次点「录音」时，浏览器把权限气泡摆在地址栏那头，页面里不说明白
+   * 就像点了没反应——而这是核心任务的第一步。
+   */
+  it('浏览器在问要不要允许麦克风时，页面要说出这件事', async () => {
+    let release: (() => void) | null = null;
+    gumStub.impl = () => new Promise((res) => { release = () => res(fakeStream()); });
+    mount();
+    const b = btn('录音');
+    await act(async () => { b.click(); });
+    await waitFor(() => expect(document.body.textContent).toMatch(/允许麦克风/));
+    // 读屏那边也要听到「在等权限」，不能只有按钮和页面里的那句可见文字
+    expect(document.querySelector('[role="status"]')?.textContent, '等待权限没进播报区').toContain('允许麦克风');
+    // 按钮自己也不能还写着「录音」——那正是"看起来没反应"的样子
+    expect(screen.queryByRole('button', { name: (n: string) => n.replace(/\s/g, '').replace(/^[a-z]+/, '') === '录音' })).toBeNull();
+
+    await act(async () => { release?.(); });
+    await waitFor(() => expect(btn('停止录音')).toBeTruthy());
+  }, 15000);
+
+  /**
+   * 侧栏的「已评测」靠这个事件重拉。只有这次真的写进了统计（recorded）才该发，
+   * 太吵没记入的那次不能把计数推上去——服务端也没记。
+   */
+  it('评测记入统计才发 STATS_CHANGED；没记入不发', async () => {
+    let got = 0;
+    const onChange = () => { got += 1; };
+    window.addEventListener(STATS_CHANGED, onChange);
+    try {
+      pronounceStub.impl = () => Promise.resolve({ ok: true, data: { ...OK_RESULT } });
+      mount();
+      await startRecording();
+      await act(async () => { btn('停止录音').click(); });
+      await waitFor(() => expect(got).toBe(1));
+      expect(btn('重新录')).toBeTruthy();
+
+      got = 0;
+      pronounceStub.impl = () => Promise.resolve({
+        ok: true,
+        data: { ...OK_RESULT, recorded: false, notRecordedReason: '背景噪音偏大' },
+      });
+      await act(async () => { btn('重新录').click(); });
+      await waitFor(() => expect(btn('停止录音')).toBeTruthy());
+      await act(async () => { btn('停止录音').click(); });
+      await waitFor(() => expect(document.body.textContent).toContain('没计入'));
+      expect(got, '没记入统计也把侧栏计数推上去了').toBe(0);
+    } finally {
+      window.removeEventListener(STATS_CHANGED, onChange);
+    }
   }, 15000);
 
   it('录音中状态行带计时——10 秒的自动上限不许让人靠猜', async () => {

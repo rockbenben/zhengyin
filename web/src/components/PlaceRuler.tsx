@@ -50,7 +50,8 @@ function difference(t: Articulation, h: Articulation): string | null {
 function HowTo({ ipa, text }: { ipa: string; text: string }) {
   return (
     <div style={{ marginTop: 18, borderTop: '1px solid var(--rule)', paddingTop: 14 }}>
-      <span className="slug">{phonemic(ipa)} 怎么发</span>
+      {/* nocaps：音标里的大小写有意义，`.slug` 的 uppercase 会把 /l/ 显示成 /L/ */}
+      <span className="slug nocaps">{phonemic(ipa)} 怎么发</span>
       <Typography.Paragraph className="measure" style={{ margin: '6px 0 0', lineHeight: 1.9 }}>
         {text}
       </Typography.Paragraph>

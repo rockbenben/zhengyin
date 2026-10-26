@@ -254,7 +254,7 @@ export default function StatsPage() {
 
       <Typography.Text type="secondary" className="measure" style={{ fontSize: 12.5 }}>
         这些数字只反映音素层面对没对上。音色、时长、重音测不了——那部分靠 A/B 对比自己听。
-        {'同一份统计也写在 '}<code>{'data/users/<当前用户>/发音档案.md'}</code>{' 里。'}
+        {'同一份统计也会整理成发音档案，给 AI 看。'}
       </Typography.Text>
     </Space>
   );

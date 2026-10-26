@@ -12,6 +12,7 @@ import AsrStatus from '../components/AsrStatus';
 import PhonemeBar from '../components/PhonemeBar';
 import NoteHits from '../components/NoteHits';
 import { gradeOf } from '../lib/align';
+import { STATS_CHANGED } from '../lib/events';
 import Recorder from '../components/Recorder';
 
 /**
@@ -68,6 +69,11 @@ export default function ReviewPage() {
   /** 最近一次评测结果。tried 为真而这里是 null = 测过但测不出来（边车没起、没听出音） */
   const [judged, setJudged] = useState<PronounceResult | null>(null);
   const [tried, setTried] = useState(false);
+  /**
+   * 这次打开复习、跳过了几张（没评分、也没移出队列）。
+   * 不用它的话，跳完最后一张会看到「复习完了」，而角标还挂着 1、下次打开它又回来。
+   */
+  const [skipped, setSkipped] = useState(0);
 
   useEffect(() => {
     api.reviewDue()
@@ -121,6 +127,10 @@ export default function ReviewPage() {
       if (g) {
         const r = await api.reviewGrade(card.text, g);
         if (r.graduated) message.success(`「${card.text}」你会了，已从复习队列移出`);
+        // 到期数变了；侧栏的「复习 N」和「已评测」不必等下一次换页。
+        window.dispatchEvent(new Event(STATS_CHANGED));
+      } else {
+        setSkipped((n) => n + 1);
       }
       advance();
     } catch (e) {
@@ -175,9 +185,16 @@ export default function ReviewPage() {
     // 的人正是从那个按钮走过来的：新卡默认明天到期（review.ts 的 addCard），
     // 他加了四个词，页面却说得像什么都没有。这不是措辞问题，是句假话。
     if (total > 0) {
+      // 跳过 = 没评分、没移出队列；说「复习完了」会让侧栏还亮着的角标变成谎话。
+      // 说清它还会回来，比假装这一轮全做完了好。
       return (
-        <PageResult slug="复习" title={`复习完了，${total} 张`}>
-          今天这一轮做完了。练的是舌头的动作，隔一天再来比今天多做几遍管用。
+        <PageResult
+          slug="复习"
+          title={skipped > 0 ? `今天这一轮结束了，${total} 张` : `复习完了，${total} 张`}
+        >
+          {skipped > 0
+            ? `你跳过了 ${skipped} 张，它们没有评分，下次打开还会出现。`
+            : '今天这一轮做完了。练的是舌头的动作，隔一天再来比今天多做几遍管用。'}
         </PageResult>
       );
     }

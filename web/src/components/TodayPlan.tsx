@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { Typography } from 'antd';
 import { api } from '../api';
+import { STATS_CHANGED } from '../lib/events';
 import { describeError, errorPhoneme } from '../lib/notation';
 import type { StatsResult } from '../types';
 
@@ -30,8 +31,12 @@ export default function TodayPlan() {
 
   useEffect(() => {
     let alive = true;
-    api.stats().then((s) => { if (alive) setStats(s); }).catch(() => {});
-    return () => { alive = false; };
+    const load = () => api.stats().then((s) => { if (alive) setStats(s); }).catch(() => {});
+    load();
+    // 删词条会连带删掉它的练习记录；这一块是页面挂载时取的一次快照，
+    // 不听这个事件的话，删完还挂着点进去 404 的「卡住的词」。
+    window.addEventListener(STATS_CHANGED, load);
+    return () => { alive = false; window.removeEventListener(STATS_CHANGED, load); };
   }, []);
 
   const allStuck = stats?.stuck ?? [];

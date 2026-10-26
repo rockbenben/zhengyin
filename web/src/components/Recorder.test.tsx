@@ -12,14 +12,17 @@ const ART = {
     { id: 'bilabial', label: '双唇' },
     { id: 'near-front', label: '偏前' },
     { id: 'near-back', label: '偏后' },
+    { id: 'alveolar', label: '齿龈' },
     { id: 'velar', label: '软腭' },
   ],
-  manners: { stop: '塞音', vowel: '元音' },
+  manners: { stop: '塞音', vowel: '元音', lateral: '边音', nasal: '鼻音' },
   phones: [
     { kind: 'consonant', ipa: 'b', place: 'bilabial', manner: 'stop', voiced: true, nasal: false, howTo: '双唇闭合再放开' },
     { kind: 'vowel', ipa: 'ʊ', place: 'near-back', manner: 'vowel', voiced: true, nasal: false, howTo: '舌位偏后偏高，唇微圆' },
     { kind: 'vowel', ipa: 'æ', place: 'near-front', manner: 'vowel', voiced: true, nasal: false, howTo: '嘴角向两侧拉开，下巴放低' },
     { kind: 'consonant', ipa: 'k', place: 'velar', manner: 'stop', voiced: false, nasal: false, howTo: '舌根顶软腭再放开' },
+    { kind: 'consonant', ipa: 'l', place: 'alveolar', manner: 'lateral', voiced: true, nasal: false, howTo: '舌尖顶住上齿龈，两侧出气' },
+    { kind: 'consonant', ipa: 'n', place: 'alveolar', manner: 'nasal', voiced: true, nasal: true, howTo: '舌尖顶住上齿龈，气流走鼻腔' },
   ],
 };
 
@@ -561,5 +564,26 @@ describe('结果出来时，读屏那边也得知道', () => {
     expect(new Set([全对, 有错, 没把握, 没听出]).size, '有两种结果说的是同一句话').toBe(4);
     expect(没听出).toMatch(/再录一次/);
     expect(没把握).toMatch(/没测准|再念一遍/);
+  });
+});
+
+/**
+ * 音标里的大小写有意义：/l/ 和 /L/ 不是同一个写法。
+ * `.slug` 是「疏排 + 全大写」的小标签，标题里带音标时得挂 `.nocaps`——
+ * 分贝的 dB 已经踩过一次同样的坑（见 styles.css 那条注释）。
+ */
+describe('部位尺的「怎么发」标题不改音标的大小写', () => {
+  it('含音标的标签带 nocaps', async () => {
+    const c = drawEl({
+      align: [
+        { kind: 'sub', targetIpa: 'l', heardIpa: 'n', conf: 0.99, sure: true },
+        { kind: 'match', targetIpa: 'aɪ', heardIpa: 'aɪ', conf: 0.9, sure: true },
+      ],
+      targetIpa: ['l', 'aɪ'], heardIpa: ['n', 'aɪ'],
+    });
+    await waitFor(() => expect(c.textContent).toContain('怎么发'));
+    const title = [...c.querySelectorAll('.slug')].find((e) => e.textContent?.includes('/l/'));
+    expect(title, '没找到带音标的「怎么发」标题').toBeDefined();
+    expect(title!.className, 'UPPERCASE 会把 /l/ 显示成 /L/').toContain('nocaps');
   });
 });

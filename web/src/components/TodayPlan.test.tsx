@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { STATS_CHANGED } from '../lib/events';
 import type { StatsResult } from '../types';
 
 const stub = vi.hoisted(() => ({ stats: null as StatsResult | null }));
@@ -54,6 +55,20 @@ describe('卡住的地方', () => {
     await waitFor(() => expect(c.textContent).toContain('dopamine detox'));
     expect([...c.querySelectorAll('a')]
       .some((a) => a.getAttribute('href') === '/word/dopamine%20detox')).toBe(true);
+  });
+
+  /**
+   * 删词条会连同练习流水一起删。这一块只在挂载时取一次统计，不听事件的话，
+   * 删完还挂着那个词的链接，点进去 404——正是 S3 要消掉的症状。
+   */
+  it('删词后收到 STATS_CHANGED → 重拉，卡住的词立刻消失', async () => {
+    stub.stats = stats({ stuck: STUCK });
+    const { container } = render(<MemoryRouter><TodayPlan /></MemoryRouter>);
+    await waitFor(() => expect(container.textContent).toContain('dopamine detox'));
+
+    stub.stats = stats({ stuck: [] });
+    await act(async () => { window.dispatchEvent(new Event(STATS_CHANGED)); });
+    await waitFor(() => expect(container.textContent).not.toContain('dopamine detox'));
   });
 
   /**

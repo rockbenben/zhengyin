@@ -8,6 +8,7 @@ import { blobToClip, clipToWavBlob, type Clip } from '../lib/wav';
 import { detectEndOfSpeech, type Endpointer } from '../lib/endpoint';
 import { phonetic } from '../lib/notation';
 import { localAppUrl } from '../lib/brand';
+import { STATS_CHANGED } from '../lib/events';
 import { onPlayFailure } from '../lib/playback';
 import { isNoise, isWrong, UNSURE } from '../lib/align';
 import Markdown from 'react-markdown';
@@ -141,6 +142,12 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   const starting = useRef(false);
 
   const [recording, setRecording] = useState(false);
+  /**
+   * 正卡在浏览器那句「要不要允许麦克风」上。首次使用一定会经过这里，
+   * 而权限气泡在地址栏一侧，不在页面里——原来这段时间按钮一动不动，
+   * 看起来就是「点了没反应」。等用户处理完（允许或拒绝）就落回正常状态。
+   */
+  const [asking, setAsking] = useState(false);
   /** 已录秒数。10 秒的自动上限不写出来的话，念得长的人只能靠猜它停没停 */
   const [recSeconds, setRecSeconds] = useState(0);
   const [preparing, setPreparing] = useState(false);
@@ -295,6 +302,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
     // 评测作废，用户等的结果凭空消失。UI 上按钮已经禁用，但键盘和程序化调用绕得过 disabled。
     if (starting.current || preparing || busy) return;
     starting.current = true;
+    setAsking(true);
     stopAb();
     try {
       // 显式接管 Chrome 的三项默认处理，别让它替我们做主：
@@ -369,6 +377,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       );
     } finally {
       starting.current = false;
+      setAsking(false);
     }
   }
 
@@ -423,6 +432,8 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       if (res.ok) {
         setListened({ engine: 'phoneme', result: res.data });
         onResult?.(res.data);
+        // 这次真的写进了统计，侧栏的「已评测」得跟上。太吵没记入的那次不算。
+        if (res.data.recorded) window.dispatchEvent(new Event(STATS_CHANGED));
         return;
       }
       if (!res.sidecarDown) {
@@ -490,10 +501,11 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
              **必须常驻**：节点和内容同时出现的话，读屏未必会念；这里节点一直在，
              只有文字变。视觉上不占位（.sr-only），说的话跟屏幕上那几句同源。 */}
       <span className="sr-only" role="status">
-        {recording ? '在听着，念出来'
-          : busy ? '在评测'
-            : listened?.engine === 'phoneme' ? headline(listened.result)
-              : ''}
+        {asking ? '正在等浏览器允许麦克风'
+          : recording ? '在听着，念出来'
+            : busy ? '在评测'
+              : listened?.engine === 'phoneme' ? headline(listened.result)
+                : ''}
       </span>
       <Space wrap>
         {/* ── 自动停之后那一小段，这个按钮**不能是活的** ──
@@ -508,14 +520,14 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
           icon={<AudioOutlined />}
           danger={recording}
           onClick={recording ? stop : start}
-          disabled={!micSupported || working}
-          loading={working}
+          disabled={!micSupported || working || asking}
+          loading={working || asking}
         >
           {/* 「录音」是惯用词，谁都懂，这里机制就是动作（跟「保存」一样）——不必替它改名。
               真正含糊的只有「停止」：停什么？而且现在停下来会顺带触发评测。
               所以补全宾语叫「停止录音」，同时上了说完自动停——这一下基本不用按。
               试过「开始念 / 念完了」，更糟：后者是第一人称陈述，读起来像聊天回复不像控件。 */}
-          {recording ? '停止录音' : working ? '处理中' : clip ? '重新录' : '录音'}
+          {recording ? '停止录音' : working ? '处理中' : asking ? '等你允许麦克风…' : clip ? '重新录' : '录音'}
         </Button>
         {/* 「对比播放」照旧摆着（没录音时它灰得一目了然：拿什么去对比）。
             referenceUrl 为 null 那种灰不一目了然，下面有常驻说明专门讲它。 */}
@@ -536,6 +548,12 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
           <Button disabled={working} onClick={() => void listen(clip)}>
             {listened ? '重新评测' : '评测'}
           </Button>
+        )}
+        {/* 首次点录音时，浏览器把权限气泡摆在地址栏那头，页面里不说明白就像点了没反应 */}
+        {asking && (
+          <Typography.Text style={{ fontSize: 12.5, color: 'var(--blue)' }}>
+            浏览器正在问要不要允许麦克风——点弹窗里的「允许」就开始录。
+          </Typography.Text>
         )}
         {/* 录音中必须有反馈：既让人知道它在听，也说清不用自己按停 */}
         {recording && (
@@ -611,7 +629,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
              sidecar 这个 state 留着，只因为它还管着下面那行操作说明的出现时机。 */}
       {/* 复习流里一次要过七八张卡，每张都摊开同样几行灰字就只是噪音——
              那时人在做题，不是在学怎么用。所以复习页（brief）只留操作那一句。 */}
-      {sidecar === 'up' && !listened && !busy && (
+      {sidecar === 'up' && !listened && !busy && !asking && (
         <Typography.Text type="secondary" className="measure">
           {hint === 'brief' ? (
             <>点「录音」念出来——<strong>念完它自己停</strong>，然后自动评测。</>

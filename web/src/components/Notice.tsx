@@ -33,7 +33,7 @@ export default function Notice({ tone = 'note', label, labelKeepsCase, title, ch
     <div style={{ borderLeft: `3px solid ${RULE[tone]}`, paddingLeft: 18 }}>
       {label && <span className={labelKeepsCase ? 'slug nocaps' : 'slug'} style={{ color: RULE[tone] === 'var(--rule)' ? undefined : RULE[tone] }}>{label}</span>}
       {title && (
-        <div style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.5, margin: label ? '5px 0 0' : 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.5, margin: label ? '5px 0 0' : 0, overflowWrap: 'anywhere' }}>
           {title}
         </div>
       )}
