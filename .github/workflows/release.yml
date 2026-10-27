@@ -69,6 +69,8 @@ jobs:
       - run: npm run smoke:package
       - run: npm run pack:desktop
       - run: npm run pack:desktop:zip
+      # 两个 artifact 分开：upload-artifact 会把多路径压到共同父目录 `desktop/`，
+      # 到 publish 那边 latest.yml 就落在 dist/release/ 而不是 dist/ 根上。
       - uses: actions/upload-artifact@v7
         with:
           name: dist-win
@@ -77,7 +79,11 @@ jobs:
             desktop/release/*.exe
             desktop/release/latest.yml
             desktop/release/*.blockmap
-            desktop/release-zip/*.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-zip
+          if-no-files-found: error
+          path: desktop/release-zip/*.zip
 
   publish:
     needs: [validate, build]
