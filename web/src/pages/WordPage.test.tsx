@@ -44,6 +44,11 @@ vi.mock('../api', () => ({
     pronounce: () => Promise.reject(new Error('本测试不评测')),
     asr: () => Promise.reject(new Error('本测试不转写')),
     star: () => Promise.resolve({ starred: false, card: null }),
+    // 词条页底部挂着 AiCoach，它挂载时问一次状态。这里给「没配」——
+    // 这些用例关心的是页面别的内容，不该顺手发一个真请求。
+    aiStatus: () => Promise.resolve({
+      configured: false, consent: false, mode: 'api' as const, provider: null, reason: '还没选接口',
+    }),
   },
   // 桩必须把 isOffline 也给出来：页面靠它区分"连不上服务"和"库里没有这个词"，
   // 漏了的话 catch 里自己抛异常，错误状态根本设不上——这一条就是这么红的。

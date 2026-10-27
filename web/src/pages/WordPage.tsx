@@ -8,6 +8,7 @@ import AudioPlayer from '../components/AudioPlayer';
 import AsrStatus from '../components/AsrStatus';
 import PhonemeBar from '../components/PhonemeBar';
 import NoteHits from '../components/NoteHits';
+import AiCoach from '../components/AiCoach';
 import Recorder from '../components/Recorder';
 import StarButton from '../components/StarButton';
 import Offline from '../components/Offline';
@@ -206,6 +207,23 @@ export default function WordPage() {
       <AsrStatus />
 
       <NoteHits notes={entry.notes} />
+
+      {/* 短语是逐词录的，传整条词条会让「最近一次录音」对不上正在讲的词；
+          单词页才把 target 传进去。词典查不到的词没有音素可讲，交给 enabled 挡。 */}
+      <AiCoach
+        key={entry.text}
+        text={entry.text}
+        target={phrase ? undefined : entry.words[0]?.word}
+        enabled={entry.words.every((w) => w.found)}
+        onNoteSaved={() => {
+          const requested = entry.text;
+          void api.getEntry(requested)
+            .then((fresh) => {
+              if (currentText.current === requested) setEntry(fresh);
+            })
+            .catch(() => {});
+        }}
+      />
     </Space>
   );
 }

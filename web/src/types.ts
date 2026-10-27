@@ -418,3 +418,27 @@ export interface AiTestResult {
   provider?: string;
   error?: string;
 }
+
+export interface AiSource { id: string; title: string }
+
+/** POST /api/ai/explain */
+export interface AiExplainResult {
+  markdown: string;
+  sources: AiSource[];
+  provider: string;
+}
+
+/** 笔记草稿：AI 生成、用户改过、最后由 POST /api/notes 落盘的都是这个形状 */
+export type NoteScope = 'phoneme' | 'word';
+export interface NoteDraft {
+  title: string;
+  scope: NoteScope;
+  /** scope=phoneme 时是 IPA 符号；scope=word 时是词本身 */
+  values: string[];
+  /** 这篇还教了念成什么（只放 IPA 符号） */
+  contrasts: string[];
+  body: string;
+}
+
+/** POST /api/notes */
+export interface SavedNote { id: string; title: string; file: string }

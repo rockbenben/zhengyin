@@ -202,4 +202,23 @@ export const api = {
   })),
   aiStatus: () => j<T.AiStatusInfo>(fetch('/api/ai/status')),
   aiTest: () => jx<T.AiTestResult>(fetch('/api/ai/test', { method: 'POST' })),
+  aiExplain: (word: string, target?: string, signal?: AbortSignal) => jx<T.AiExplainResult>(
+    fetch('/api/ai/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target ? { word, target } : { word }),
+      signal,
+    }),
+  ),
+  aiNoteDraft: (word: string, target?: string, signal?: AbortSignal) => jx<T.NoteDraft & {
+    provider?: string; sources?: T.AiSource[];
+  }>(fetch('/api/ai/note-draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target ? { word, target } : { word }),
+    signal,
+  })),
+  saveNote: (draft: T.NoteDraft) => jx<T.SavedNote>(fetch('/api/notes', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft),
+  })),
 };
