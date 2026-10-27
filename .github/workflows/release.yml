@@ -99,6 +99,12 @@ jobs:
       REPO: ${{ github.repository }}
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
+      # 发布说明是**仓库里的文件**（docs/releases/<tag>.md），所以这一份必须 checkout。
+      # 少了这一步，工作目录里只有 dist/，下面那句「缺发布说明就停」每次都命中——
+      # 发版 100% 失败，而且报错看着像"说明没写"，其实只是仓库没取下来。
+      # 取的是**被打 tag 的那个提交**（ref: $TAG），不是默认分支。
+      - uses: actions/checkout@v7
+        with: { ref: '${{ env.TAG }}' }
       - uses: actions/download-artifact@v8
         with: { pattern: 'dist-*', merge-multiple: true, path: dist }
       - name: 校验 latest.yml 与它指向的文件
