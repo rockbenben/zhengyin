@@ -112,14 +112,16 @@ describe('buildAgentPrompt', () => {
   it('说明路径与可写范围，并带上任务和补充要求', () => {
     const { db, noteStore, profileFile } = fixture();
     const appRoot = join(tmpdir(), 'app');
+    const localNotes = join(tmpdir(), 'local-notes');
     const prompt = buildAgentPrompt({
-      db, noteStore, profileFile, appRoot,
+      db, noteStore, profileFile, appRoot, localNotes,
       workflowsDir: join(appRoot, 'workflows'), userName: '小明',
     }, '把 l/n 的笔记补好', '别覆盖别人的档案');
 
     expect(prompt).toContain('小明');
-    expect(prompt).toContain(join(appRoot, 'data', 'notes'));
+    expect(prompt).toContain(localNotes);
     expect(prompt).toContain(profileFile);
+    expect(prompt).toContain(join(appRoot, '.ai-reference', 'workflows', 'agent.md'));
     expect(prompt).toContain('已确认的习惯问题');
     expect(prompt).toContain('把 l/n 的笔记补好');
     expect(prompt).toContain('别覆盖别人的档案');

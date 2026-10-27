@@ -124,6 +124,8 @@ export function buildChatContext(deps: AiContextDeps, message: string): AiContex
 export interface AgentPromptDeps extends AiContextDeps {
   appRoot: string;
   workflowsDir: string;
+  /** 本机可写笔记目录。不能用 appRoot/data/notes 硬拼：DATA_DIR 可以指到别处 */
+  localNotes: string;
   userName: string;
 }
 
@@ -134,12 +136,11 @@ export interface AgentPromptDeps extends AiContextDeps {
  * 用户能读、能改的正本，提示词里再抄一遍就会跟它分叉。
  */
 export function buildAgentPrompt(deps: AgentPromptDeps, task: string, note?: string): string {
-  const localNotes = join(deps.appRoot, 'data', 'notes');
   const reference = join(deps.appRoot, '.ai-reference');
   return [
     `你在为正音做一次「AI 整理」。当前用户：${deps.userName}。`,
-    `先读 ${join(deps.workflowsDir, 'agent.md')}，再读它的参考副本 ${join(reference, 'agent.md')}。`,
-    `可用：当前用户档案 ${deps.profileFile}、本机笔记 ${localNotes}、参考笔记 ${join(reference, 'notes')}。`,
+    `先读 ${join(deps.workflowsDir, 'agent.md')}，再读它的参考副本 ${join(reference, 'workflows', 'agent.md')}。`,
+    `可用：当前用户档案 ${deps.profileFile}、本机笔记 ${deps.localNotes}、参考笔记 ${join(reference, 'notes')}。`,
     '只允许写本机笔记，以及当前用户档案的「已确认的习惯问题」「待观察」两节；不要改 AUTO 统计块，不要动词条库、录音记录、复习进度。',
     `任务：${task}${note ? `\n补充要求：${note}` : ''}`,
   ].join('\n\n');

@@ -33,6 +33,8 @@ review-state.json.*
 .decisions/
 .claude/
 .superpowers/
+# AI 整理代理每次运行前铺的只读参考副本（随附笔记与提示词的拷贝）
+.ai-reference/
 web/design-preview/
 *.bak
 .qoder*
