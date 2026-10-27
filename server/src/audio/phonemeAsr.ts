@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 // 调本地音素识别边车（asr-service）。
 //
 // 边车是哑服务：音频进，原始 eSpeak IPA 串出。归一化、跟目标词对齐、挂笔记全在 Node 侧，
@@ -81,44 +80,6 @@ export async function recognizePhonemes(
       phones: null,
       reason: aborted ? `音素识别超过 ${Math.round(timeoutMs / 1000)}s 还没结果` : '音素识别服务没启动',
     };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 边车在不在。超时给得很短（2s）：这是给页面判断"该提示什么"用的，不能让它拖慢首屏；
- * 而且边车没起时 connect 会立刻失败，根本用不到超时。
- *
- * 注意它只说明进程在监听，**不代表模型加载完了**——边车冷启动要十几秒，那段时间
- * /health 会回 ok:false。据此提示"还在加载"比提示"没启动"准确。
- */
-/**
- * 这台机器上有没有 uv。**没有的话边车永远起不来**，不是"还在加载"。
- *
- * 为什么值得单独报出来：界面在边车没就绪时说的是「正在加载模型，稍等十几秒」，
- * 熬满 90 秒才改口说"去看启动服务那个终端窗口"。而对一个**从没装过 uv/Python**
- * 的新用户，那 90 秒是纯粹的空等——答案启动时就知道，而且他多半是双击启动的，
- * 本来就是为了不碰终端，让他回去翻终端等于把他推开。
- *
- * 只在启动时查一次（index.ts），不每次请求都查：边车是被启动脚本拉起来的，
- * 中途装上 uv 也得重启才有用。判据跟 scripts/check-uv.mjs 一模一样。
- */
-export function hasUv(): boolean {
-  // 命令整串传，别写成 ('uv', ['--version'])——理由见 web/src/lib/spawnShell.test.ts
-  return spawnSync('uv --version', { stdio: 'ignore', shell: true }).status === 0;
-}
-
-export async function checkPhonemeAsr(fetchFn: typeof fetch = fetch, timeoutMs = 2_000, port = DEFAULT_ASR_PORT): Promise<boolean> {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const res = await fetchFn(`${asrEndpoint(port)}/health`, { signal: ctl.signal });
-    if (!res.ok) return false;
-    const body = await res.json() as { ok?: unknown };
-    return body.ok === true;
-  } catch {
-    return false;
   } finally {
     clearTimeout(timer);
   }

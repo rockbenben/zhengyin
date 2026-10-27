@@ -14,7 +14,8 @@ import { articulationTable, PLACES, MANNERS, VOWEL_ROWS, VOWEL_COLS, vowelCell }
 import { confusionContrasts } from './analysis/confusions.js';
 import type { NoteStore, Note } from './notes.js';
 import type { fetchMwAudio, verifyMwKey } from './audio/mw.js';
-import type { recognizePhonemes, checkPhonemeAsr } from './audio/phonemeAsr.js';
+import type { recognizePhonemes } from './audio/phonemeAsr.js';
+import type { AsrStatus } from './audio/asrManager.js';
 import type { synthesizeTts } from './audio/tts.js';
 import * as store from './db.js';
 import { syncProfile, worthANote, severityOf, notesCovering } from './profile.js';
@@ -57,9 +58,8 @@ export interface AppDeps {
   verifyMw: typeof verifyMwKey;
   /** 本地音素识别边车客户端（asr-service），连不上时返回 reachable:false */
   recognizePhonemes: typeof recognizePhonemes;
-  checkPhonemeAsr: typeof checkPhonemeAsr;
-  /** 这台机器有没有 uv。没有的话边车永远起不来，界面据此直接给装法而不是让人等 */
-  hasUv: boolean;
+  /** 边车状态与重启。服务端是唯一知道它起没起、端口是多少的地方 */
+  asr: { status: () => AsrStatus; restart: () => Promise<void> };
   /** 发音档案 Markdown 的路径。发音统计会写进它的 AUTO 标记块，手写部分不动 */
   profileFile: string;
   /** 多用户。实现是 users.ts 的 UserManager，index.ts 接线；测试里给 stub */
@@ -213,7 +213,7 @@ async function referenceBaseline(
     } catch {
       return null;                       // 音频文件不在了：退回词典，不是错误
     }
-    const res = await deps.recognizePhonemes(bytes);
+    const res = await deps.recognizePhonemes(bytes, fetch, 60_000, deps.asr.status().port ?? 30032);
     if (res.ipa === null) return null;   // 边车这会儿不行：退回词典
     raw = res.ipa;
     try {
@@ -698,12 +698,20 @@ export function createApp(deps: AppDeps) {
   //
   // 录音只在本机两个进程之间走（浏览器 → 30031 → 127.0.0.1:30032），不落盘、不出这台机器。
   // 页面据此决定提示什么：边车在的话，vosk 模型装没装根本不重要，不该弹"模型未安装"。
-  // uv 装没装是**启动时就知道**的事实（deps.hasUv），跟边车这一刻起没起来是两件事：
+  // uv 装没装是边车状态里的事实（deps.asr.status().uvFound），跟边车这一刻起没起来是两件事：
   //   ok=false, uv=true  → 真的在加载模型，等着就好
   //   ok=false, uv=false → 永远不会起来，别让人干等，直接给装法
-  app.get('/api/pronounce/health', async (c) => c.json({
-    ok: await deps.checkPhonemeAsr(), uv: deps.hasUv,
-  }));
+  app.get('/api/pronounce/health', async (c) => {
+    const s = deps.asr.status();
+    return c.json({ ok: s.state === 'ready', uv: s.uvFound });
+  });
+
+  app.get('/api/asr/status', (c) => c.json(deps.asr.status()));
+
+  app.post('/api/asr/restart', async (c) => {
+    await deps.asr.restart();
+    return c.json(deps.asr.status());
+  });
 
   app.post('/api/pronounce', async (c) => {
     const target = (c.req.query('target') ?? '').trim().toLowerCase();
@@ -733,7 +741,11 @@ export function createApp(deps: AppDeps) {
     const audio = new Uint8Array(await c.req.arrayBuffer());
     if (audio.length === 0) return c.json({ error: '没收到音频' }, 400);
 
-    const asr = await deps.recognizePhonemes(audio);
+    const asrState = deps.asr.status();
+    if (asrState.state === 'no-uv') {
+      return c.json({ error: '这台机器没有可用的 uv，逐音素评测起不来。装一个 uv 再重启服务。' }, 503);
+    }
+    const asr = await deps.recognizePhonemes(audio, fetch, 60_000, asrState.port ?? 30032);
     if (asr.ipa === null) {
       return c.json({ error: asr.reason ?? '音素识别失败', reachable: asr.reachable }, 503);
     }

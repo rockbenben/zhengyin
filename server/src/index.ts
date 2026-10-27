@@ -11,7 +11,9 @@ import { createApp } from './app.js';
 import { getEntry, pruneOrphanAttempts } from './db.js';
 import { NoteStore } from './notes.js';
 import { fetchMwAudio, verifyMwKey } from './audio/mw.js';
-import { recognizePhonemes, checkPhonemeAsr, hasUv } from './audio/phonemeAsr.js';
+import { recognizePhonemes } from './audio/phonemeAsr.js';
+import { AsrManager } from './audio/asrManager.js';
+import { probeUv } from './audio/asrCommand.js';
 import { synthesizeTts } from './audio/tts.js';
 import { UserManager, type UserSession } from './users.js';
 import { readEnvFile, readEnvValue } from './envfile.js';
@@ -39,9 +41,6 @@ try {
   }
   throw e;
 }
-process.on('exit', () => lock.release());
-process.on('SIGINT', () => { lock.release(); process.exit(0); });
-process.on('SIGTERM', () => { lock.release(); process.exit(0); });
 
 // 发音部位表漏了音素的话，界面上那个音的部位尺会静静地不画——不报错、不崩，只是空着。
 // 跟 notes.ts 的 validateTriggers 一样，把这种无声失效在启动时喊出来。
@@ -124,6 +123,27 @@ const um = new UserManager({
 });
 console.log(`[users] 当前用户：${um.current().name}`);
 
+const envText = readEnvFile(runtime.envFile);
+const modelSource = readEnvValue(envText, 'MODEL_SOURCE');
+const hfEndpoint = readEnvValue(envText, 'HF_ENDPOINT');
+const asr = new AsrManager({
+  projectDir: runtime.asrProjectDir,
+  uvPath: runtime.uvPath,
+  dataDir: runtime.dataDir,
+  explicitPort: runtime.asrPort,
+  autostart: runtime.asrAutostart,
+  baseEnv: {
+    ...process.env,
+    ...(modelSource ? { MODEL_SOURCE: modelSource } : {}),
+    ...(hfEndpoint ? { HF_ENDPOINT: hfEndpoint } : {}),
+  },
+  probeUv: () => probeUv(runtime.uvPath),
+});
+
+process.on('exit', () => { asr.stop(); lock.release(); });
+process.on('SIGINT', () => { asr.stop(); lock.release(); process.exit(0); });
+process.on('SIGTERM', () => { asr.stop(); lock.release(); process.exit(0); });
+
 /**
  * 把评测统计同步进发音档案。
  *
@@ -158,7 +178,7 @@ const app = createApp({
   audioDir: join(dataDir, 'audio'),
   // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的
   // envFile 再兜一次，避免"明明配了却说没配"。
-  mwKey: process.env.MW_API_KEY || readEnvValue(readEnvFile(runtime.envFile), 'MW_API_KEY') || undefined,
+  mwKey: process.env.MW_API_KEY || readEnvValue(envText, 'MW_API_KEY') || undefined,
   fetchMw: fetchMwAudio,
   synthTts: synthesizeTts,
   now: () => new Date().toISOString(),
@@ -168,9 +188,10 @@ const app = createApp({
   root: runtime.shippedRoot,
   verifyMw: verifyMwKey,
   recognizePhonemes,
-  checkPhonemeAsr,
-  // 启动时查一次就够：边车是启动脚本拉起来的，中途装上 uv 也得重启
-  hasUv: hasUv(),
+  asr: {
+    status: () => asr.status(),
+    restart: () => asr.restart(),
+  },
 });
 
 // 生产单进程托管：npm run build 产出 web/dist 后，同一个进程既提供 /api/* 又直接
@@ -235,6 +256,8 @@ async function alreadyOurs(): Promise<boolean> {
 // 必须挂在返回的 server 上。
 const server = serve({ fetch: app.fetch, port, hostname: runtime.host }, () => {
   console.log(`正音 ${url}`);
+  // 服务真在听之后再起边车：端口被别的程序占着时不该白起一个 Python。
+  if (runtime.asrAutostart) void asr.start();
   // ── 「怎么停」必须在这儿说，不能交给启动脚本 ──
   //
   // 写在启动脚本里要维护三份，还盖不住 `npm start` 之外的用法。而且原来那句只在

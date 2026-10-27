@@ -96,9 +96,12 @@ function main() {
 
   // 命令整串传，别写成 ('uv', [...])——理由见 web/src/lib/spawnShell.test.ts。
   // 这里每个词都是写死的字面量、没空格，拼一串不用管引号；带空格的 cwd 是单独传的。
+  // 端口由 ASR_PORT 决定：npm start 的服务自己拉起边车时用动态端口，这一层只在
+  // 开发模式（ASR_AUTOSTART=0）或手工单跑时用，默认仍是 30032。
+  const port = process.env.ASR_PORT || 30032;
   const child = spawn(
     'uv run --project asr-service uvicorn main:app'
-    + ' --app-dir asr-service --host 127.0.0.1 --port 30032',
+    + ` --app-dir asr-service --host 127.0.0.1 --port ${port}`,
     { cwd: root, env, stdio: ['ignore', 'inherit', 'pipe'], shell: true },
   );
 

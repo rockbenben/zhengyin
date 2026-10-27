@@ -73,11 +73,10 @@ severity: confirmed
     root: process.cwd(),
     verifyMw: vi.fn().mockResolvedValue({ ok: true }),
     recognizePhonemes: vi.fn().mockResolvedValue({ reachable: true, ipa: 'n aɪ t', phones: null, reason: null }),
-    checkPhonemeAsr: vi.fn().mockResolvedValue(true),
-    // AppDeps 上这是必填的，漏了一直没人发现——server/tsconfig.json 把测试文件
-    // exclude 掉了，于是服务端的测试**任何地方都不做类型检查**
-    // （见 server/tsconfig.typecheck.json 那段注释）
-    hasUv: true,
+    asr: {
+      status: () => ({ state: 'ready' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] }),
+      restart: vi.fn().mockResolvedValue(undefined),
+    },
     profileFile: join(mkdtempSync(join(tmpdir(), 'profile-')), '发音档案.md'),
     users: {
       current: () => '默认',
@@ -1938,18 +1937,42 @@ severity: confirmed
   // 界面据此立刻给装法而不是让人干等（Recorder 里 sidecar === 'no-uv' 那一档）。
   //
   // 这条测试原来只写 `toEqual({ ok: true })`，而它能过**恰恰是因为 testDeps 漏了
-  // hasUv**：undefined 被 JSON.stringify 丢掉，响应里根本没有 uv 这个键。
-  // 于是 uv 这个字段从来没被任何测试碰过。补上 hasUv 之后这条当场红了。
+  // uv 字段**：undefined 被 JSON.stringify 丢掉，响应里根本没有 uv 这个键。
+  // 于是 uv 这个字段从来没被任何测试碰过。补全之后这条当场红了。
   it('GET /api/pronounce/health 两个字段都透传：边车起没起、有没有 uv', async () => {
-    const up = testDeps(); up.checkPhonemeAsr = vi.fn().mockResolvedValue(true);
+    const up = testDeps();
     expect(await (await createApp(up).request('/api/pronounce/health')).json()).toEqual({ ok: true, uv: true });
 
-    const down = testDeps(); down.checkPhonemeAsr = vi.fn().mockResolvedValue(false);
+    const down = testDeps();
+    const downBase = down.asr;
+    down.asr = {
+      status: () => ({ ...downBase.status(), state: 'starting' as const }),
+      restart: downBase.restart,
+    };
     expect(await (await createApp(down).request('/api/pronounce/health')).json()).toEqual({ ok: false, uv: true });
 
     // 没装 uv：边车永远起不来，这一档界面要直接给装法
-    const noUv = testDeps(); noUv.hasUv = false; noUv.checkPhonemeAsr = vi.fn().mockResolvedValue(false);
+    const noUv = testDeps();
+    const noUvBase = noUv.asr;
+    noUv.asr = {
+      status: () => ({ ...noUvBase.status(), state: 'no-uv' as const, uvFound: false }),
+      restart: noUvBase.restart,
+    };
     expect(await (await createApp(noUv).request('/api/pronounce/health')).json()).toEqual({ ok: false, uv: false });
+  });
+
+  it('GET /api/asr/status 原样给状态与日志', async () => {
+    const deps = testDeps();
+    const res = await createApp(deps).request('/api/asr/status');
+    expect(res.status).toBe(200);
+    expect((await res.json()).state).toBe('ready');
+  });
+
+  it('POST /api/asr/restart 调管理器，不在接口里起进程', async () => {
+    const deps = testDeps();
+    const res = await createApp(deps).request('/api/asr/restart', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(deps.asr.restart).toHaveBeenCalledOnce();
   });
 });
 
