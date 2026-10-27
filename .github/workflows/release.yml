@@ -2,7 +2,7 @@
 #
 # validate（版本对账 + 全量测试 + uv lock）→ Windows 打包（NSIS + zip，--publish never）
 # → 单一 publish（校验 feed / SHA256 / attestation / 人工审批 / 匿名核验）。
-# 发布说明由 GitHub 自动生成提交笔记，前面补一段固定的未签名 / SmartScreen 说明。
+# 发布说明用**仓库里的中文文件** `docs/releases/<tag>.md`；缺文件就停，不发半成品。
 #
 # 平台首发只有 Windows x64，见 .desktop-policy.json；mac/Linux 的偏离和复查条件也写在那里。
 # 本文件必须留在默认分支：tag 触发跑的是被打 tag 那个提交里的 workflow。
@@ -118,20 +118,19 @@ jobs:
       - uses: actions/attest@v4
         with: { subject-checksums: dist/SHA256SUMS }
       - name: 建/复用草稿并上传
-        env:
-          # 不用 CHANGELOG：自动生成提交笔记，这里只补发布前必须让用户看到的事。
-          RELEASE_NOTICE: |
-            **Windows 安装版 / installer**：`zhengyin-<版本>-win-setup.exe`，之后可自动更新。
-            **Windows 免安装版 / portable**：`zhengyin-<版本>-win.zip`，解压覆盖更新，不自动更新。
-            **未签名 / unsigned**：首次运行会出现 SmartScreen 警告，点「更多信息 → 仍要运行」/ “More info → Run anyway”。
-            完整改动由 GitHub 根据本次 tag 的提交记录自动生成（见下方）；更新前请先备份数据。
         run: |
           if gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
             echo "::error::$TAG 已经发布过了，改版本号"; exit 1
           fi
+          # 发布说明是**仓库里的中文文件**，不是 GitHub 自动生成的提交笔记。
+          # 后者是从英文 commit 生成的，等于在一份中文说明里塞一段英文——
+          # 本项目只有中文，说明也就只该有中文。缺文件就停：宁可发布失败，
+          # 也不要发出一份说明不全的版本。
+          notes="docs/releases/$TAG.md"
+          [ -f "$notes" ] || { echo "::error::缺发布说明 $notes，先写好这一版的中文说明再打 tag"; exit 1; }
           gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || \
             gh release create "$TAG" -R "$REPO" --draft --verify-tag --title "$TAG" \
-              --generate-notes --fail-on-no-commits --notes "$RELEASE_NOTICE"
+              --notes-file "$notes" --fail-on-no-commits
           gh release upload "$TAG" -R "$REPO" dist/* --clobber
       - name: 发布并设 latest
         run: |
