@@ -1,6 +1,7 @@
 {
   "schemaVersion": 2,
   "status": "project-deviations",
+  "verifiedOn": "2026-10-27",
   "framework": "electron",
   "channel": "stable",
   "platforms": ["windows-x64"],
@@ -8,9 +9,32 @@
   "node": "24 for desktop builds; server floor 20.19.0 (CI matrix 20.19/22/24)",
   "distribution": {
     "primary": "github-releases",
-    "windows": "nsis + zip"
+    "windows": "nsis (updatable) + zip (manual update)"
   },
-  "updater": "electron-updater on NSIS only; zip is manual-update",
-  "versionSource": "git tag vX.Y.Z; desktop/package.json asserted equal",
-  "deviations": []
+  "updater": "electron-updater on NSIS only; the zip build never initializes it",
+  "signing": {
+    "windows": "unsigned; SmartScreen warning documented in README"
+  },
+  "versionSource": "git tag vX.Y.Z; root and desktop/package.json asserted equal",
+  "release": "validate (tests + uv lock) -> Windows build -> single draft -> verify feed -> SHA256SUMS + attestation -> release environment approval -> publish + make_latest -> anonymous feed check",
+  "actionPins": "major tags; no Dependabot",
+  "immutableReleases": "not enabled yet",
+  "deviations": [
+    {
+      "rule": "platforms",
+      "value": ["windows-x64"],
+      "reason": "the phoneme sidecar needs Python and a 1.2GB model; no macOS/Linux hardware to verify the packaged sidecar",
+      "revisitWhen": "first macOS/Linux user report, or 2027-06-30"
+    },
+    {
+      "rule": "windows-unsigned",
+      "reason": "personal project without a code-signing certificate; README documents the SmartScreen step",
+      "revisitWhen": "wider public distribution or Azure Artifact Signing becomes available"
+    },
+    {
+      "rule": "zip-no-updater",
+      "reason": "the zip has no install root to replace; updater metadata is produced only by the NSIS build",
+      "revisitWhen": "a portable update path is implemented and verified on a real machine"
+    }
+  ]
 }

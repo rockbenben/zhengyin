@@ -1,0 +1,127 @@
+# 桌面版发布：tag 是唯一版本源。
+#
+# validate（版本对账 + 全量测试 + uv lock）→ Windows 打包（NSIS + zip，--publish never）
+# → 单一 publish（校验 feed / SHA256 / attestation / 人工审批 / 匿名核验）。
+#
+# 平台首发只有 Windows x64，见 .desktop-policy.json；mac/Linux 的偏离和复查条件也写在那里。
+# 本文件必须留在默认分支：tag 触发跑的是被打 tag 那个提交里的 workflow。
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag: { description: 'Existing tag to rebuild, e.g. v1.0.0', required: true }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: '${{ env.TAG }}' }
+      - id: version
+        name: tag 与两份 package.json 对账
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$TAG 不是 vX.Y.Z"; exit 1; }
+          v="${TAG#v}"
+          root=$(node -p "require('./package.json').version")
+          desk=$(node -p "require('./desktop/package.json').version")
+          [ "$root" = "$v" ] || { echo "::error::root package.json $root != $v"; exit 1; }
+          [ "$desk" = "$v" ] || { echo "::error::desktop/package.json $desk != $v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - name: uv lock 与 pyproject 同步
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          "$HOME/.local/bin/uv" lock --check --project asr-service
+
+  build:
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: '${{ env.TAG }}' }
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npx install-electron
+      - run: npm run build
+      - run: npm run fetch-runtime
+      - run: npm run check:package
+      - run: npm run dist:desktop
+      - run: npm run dist:desktop:zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-win
+          if-no-files-found: error
+          path: |
+            desktop/release/*.exe
+            desktop/release/latest.yml
+            desktop/release/*.blockmap
+            desktop/release-zip/*.zip
+
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { pattern: 'dist-*', merge-multiple: true, path: dist }
+      - name: 校验 latest.yml 与它指向的文件
+        run: |
+          cd dist
+          [ -f latest.yml ] || { echo "::error::缺 latest.yml"; exit 1; }
+          grep -q "^version: $VERSION$" latest.yml || { echo "::error::latest.yml 版本不对"; exit 1; }
+          while read -r u; do
+            [ -f "$u" ] || { echo "::error::latest.yml 指向不存在的 $u"; exit 1; }
+          done < <(grep -E '^\s*-?\s*url:' latest.yml | awk '{print $NF}')
+      - name: SHA256SUMS（LF）
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest@v4
+        with: { subject-checksums: dist/SHA256SUMS }
+      - name: 建/复用草稿并上传
+        run: |
+          if gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
+            echo "::error::$TAG 已经发布过了，改版本号"; exit 1
+          fi
+          gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$REPO" --draft --verify-tag --title "$TAG" --notes "见 CHANGELOG.md"
+          gh release upload "$TAG" -R "$REPO" dist/* --clobber
+      - name: 发布并设 latest
+        run: |
+          id=$(gh api "repos/$REPO/releases?per_page=100" --jq ".[] | select(.tag_name==\"$TAG\" and .draft) | .id")
+          gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -f make_latest=true >/dev/null
+      - name: 匿名核验（像真实用户）
+        run: |
+          [ "$(gh api "repos/$REPO/releases/latest" --jq .tag_name)" = "$TAG" ] || { echo "::error::releases/latest 不是 $TAG"; exit 1; }
+          ok=
+          for _ in $(seq 1 10); do
+            curl -fsSL "https://github.com/$REPO/releases/latest/download/latest.yml" | grep -q "^version: $VERSION$" && { ok=1; break; }
+            sleep 60
+          done
+          [ -n "$ok" ] || { echo "::error::公开的 latest.yml 十分钟后仍不是 $VERSION"; exit 1; }

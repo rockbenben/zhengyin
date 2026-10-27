@@ -78,5 +78,41 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm test          # 里面含类型检查（web + server）
+      - run: npm test          # 里面含类型检查（web + server + desktop）
       - run: npm run build
+
+  asr-lock:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: 只装 uv，不下模型、不起边车
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: uv lock --check --project asr-service
+
+  desktop-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx install-electron
+      - run: npm run build
+      - run: npm run fetch-runtime
+      - run: npm run check:package
+      - run: npm run smoke:package
+      - run: npm run dist:desktop
+      - run: npm run dist:desktop:zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-package
+          if-no-files-found: error
+          path: |
+            desktop/release/*.exe
+            desktop/release/latest.yml
+            desktop/release/*.blockmap
+            desktop/release-zip/*.zip
