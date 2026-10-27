@@ -109,6 +109,29 @@ describe('AgentRunner', () => {
     expect(runner.status().state).toBe('undone');
   });
 
+  it('磁盘快照被代理改过也不影响撤销：用的是运行时那份', async () => {
+    const deps = agentDeps();
+    const runner = new AgentRunner(deps, {
+      runAgent: async ({ cwd }) => {
+        writeFileSync(join(cwd, 'data', 'notes', 'ai-test.md'), noteMd('ai-test', '新笔记'), 'utf8');
+        return { code: 0, output: '' };
+      },
+    });
+    await runner.run('organize');
+    const runId = runner.status().runId!;
+    expect(runId).toBeTruthy();
+
+    writeFileSync(join(deps.dataDir, 'ai-runs', runId, 'snapshot.json'), JSON.stringify({
+      createdAt: '', appRoot: deps.appRoot, dataDirRel: 'data',
+      profileRel: 'data/users/测试/发音档案.md', localNotesRel: 'data/notes',
+      profile: null, notes: {}, data: {},
+    }), 'utf8');
+
+    runner.undo();
+    expect(existsSync(join(deps.localNotes, 'ai-test.md'))).toBe(false);
+    expect(readFileSync(deps.profileFile, 'utf8')).toContain('（还没有）');
+  });
+
   it('改了不该改的文件会被点名，撤销不碰它', async () => {
     const deps = agentDeps();
     const runner = new AgentRunner(deps, {

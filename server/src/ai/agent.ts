@@ -208,14 +208,15 @@ const safeRel = (rel: string): boolean =>
 /**
  * 用快照恢复档案和本机笔记。
  *
- * **快照文件是代理够得着的**（它在 data/ai-runs 下，而代理的 cwd 是 appRoot），
- * 所以里面的路径不能照单全收：档案路径必须仍在 appRoot 内，笔记相对路径不许带 `..`。
- * 档案写回**快照里那个用户**的位置，不是「现在切到的用户」——切了人再撤销，
- * 也不该把旧内容盖到新用户的档案上。
+ * **不读 `data/ai-runs` 下的 snapshot.json**：代理的 cwd 就是 appRoot，它够得着那个文件。
+ * 拿磁盘上的 JSON 决定「删哪些笔记、还原哪份档案」，等于把撤销交给被撤销的对象。
+ * 撤销只用进程里这份（`AgentRunner.lastSnapshot`）——重启后本来也没有撤销入口。
+ *
+ * 档案路径仍然要校验在 appRoot 内、笔记相对路径不许带 `..`；写回**快照里那个用户**
+ * 的位置，不是「现在切到的用户」——切了人再撤销，也不该把旧内容盖到新用户的档案上。
  */
-export function restoreSnapshot(runDir: string, deps: AgentSnapshotDeps): void {
-  const raw = JSON.parse(readFileSync(join(runDir, 'snapshot.json'), 'utf8')) as Snapshot;
-  const profilePath = resolve(deps.appRoot, raw.profileRel);
+function restoreFromSnapshot(snapshot: Snapshot, deps: AgentSnapshotDeps): void {
+  const profilePath = resolve(deps.appRoot, snapshot.profileRel);
   const rel = relative(deps.appRoot, profilePath);
   if (rel.startsWith('..') || resolve(deps.appRoot, rel) !== profilePath) {
     throw new Error('快照里的档案路径不在应用目录里，拒绝撤销');
@@ -223,18 +224,18 @@ export function restoreSnapshot(runDir: string, deps: AgentSnapshotDeps): void {
 
   rmSync(deps.localNotes, { recursive: true, force: true });
   mkdirSync(deps.localNotes, { recursive: true });
-  for (const [noteRel, text] of Object.entries(raw.notes)) {
+  for (const [noteRel, text] of Object.entries(snapshot.notes)) {
     if (!safeRel(noteRel)) throw new Error(`快照里的笔记路径不安全：${noteRel}`);
     const p = join(deps.localNotes, ...noteRel.split('/'));
     mkdirSync(dirname(p), { recursive: true });
     writeFileAtomic(p, text);
   }
 
-  if (raw.profile === null) {
+  if (snapshot.profile === null) {
     if (existsSync(profilePath)) unlinkSync(profilePath);
   } else {
     mkdirSync(dirname(profilePath), { recursive: true });
-    writeFileAtomic(profilePath, raw.profile);
+    writeFileAtomic(profilePath, snapshot.profile);
   }
 }
 
@@ -290,7 +291,6 @@ export class AgentRunner implements AgentController {
   private childPid: number | undefined;
   private counter = 0;
   private lastSnapshot: Snapshot | null = null;
-  private lastRunDir: string | null = null;
   private lastDb: Database.Database | null = null;
 
   constructor(private deps: AgentDeps, private opts: AgentRunnerOptions = {}) {}
@@ -360,7 +360,6 @@ export class AgentRunner implements AgentController {
       mkdirSync(runDir, { recursive: true });
       writeFileAtomic(join(runDir, 'snapshot.json'), `${JSON.stringify(before, null, 2)}\n`);
       this.lastSnapshot = before;
-      this.lastRunDir = runDir;
       this.state.runId = runId;
 
       this.log('正在铺参考副本');
@@ -451,7 +450,7 @@ export class AgentRunner implements AgentController {
 
   undo(): void {
     if (this.running) throw new Error('整理还在跑，等它结束再撤销。');
-    if (!this.lastRunDir || !this.lastSnapshot) throw new Error('这一次还没有可撤销的整理。');
+    if (!this.lastSnapshot) throw new Error('这一次还没有可撤销的整理。');
     const snap = this.lastSnapshot;
     const profilePath = resolve(this.deps.appRoot, snap.profileRel);
     // 撤销之后，上一次运行留下的笔记告警已经随着文件一起回滚了；
@@ -459,7 +458,7 @@ export class AgentRunner implements AgentController {
     this.state.noteWarnings = [];
     this.state.error = null;
 
-    restoreSnapshot(this.lastRunDir, {
+    restoreFromSnapshot(snap, {
       appRoot: this.deps.appRoot,
       dataDir: this.deps.dataDir,
       localNotes: this.deps.localNotes,
