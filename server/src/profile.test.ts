@@ -19,7 +19,7 @@ severity: confirmed
 ---
 舌尖抵上齿龈。
 `, 'utf8');
-  const notes = new NoteStore(notesDir);
+  const notes = new NoteStore([{ dir: notesDir, source: 'shipped' }]);
   notes.load();
   return { db, notes, dir: notesDir, file: join(mkdtempSync(join(tmpdir(), 'prof-')), '发音档案.md') };
 }
@@ -171,7 +171,7 @@ describe('renderBlock 的内容', () => {
     attempt(db, 'thought', [{ kind: 'sub', targetIpa: 'θ', heardIpa: 's' }]);
     const block = renderBlock(db, notes, NOW);
 
-    expect(block).toContain('[l / n 不分](notes/l-vs-n.md)');
+    expect(block).toContain('[l / n 不分](http://localhost:30031/notes/l-vs-n)');
     expect(block).toContain('### 该补的笔记');
     expect(block).toContain('把 /θ/ 发成了 /s/');
     // 已经有笔记的那条不该出现在"该补"里
@@ -222,7 +222,7 @@ describe('renderBlock 的内容', () => {
         for (let i = 0; i < 2; i++) attempt(db, w, [{ kind: 'sub', targetIpa: 'l', heardIpa: 'n' }]);
       }
       const block = renderBlock(db, notes, NOW);
-      expect(block).toContain('[l / n 不分](notes/l-vs-n.md)');
+      expect(block).toContain('[l / n 不分](http://localhost:30031/notes/l-vs-n)');
       const i = block.indexOf('### 该补的笔记');
       if (i >= 0) expect(block.slice(i)).not.toContain('把 /l/ 发成了 /n/');
     });
@@ -233,7 +233,7 @@ describe('renderBlock 的内容', () => {
       for (const w of ['click', 'glass']) {
         for (let i = 0; i < 2; i++) attempt(db, w, [{ kind: 'ins', heardIpa: 'n' }]);
       }
-      expect(renderBlock(db, notes, NOW)).toContain('[l / n 不分](notes/l-vs-n.md)');
+      expect(renderBlock(db, notes, NOW)).toContain('[l / n 不分](http://localhost:30031/notes/l-vs-n)');
     });
 
     it('漏音只涉及一个音素，规则不变', () => {
@@ -242,7 +242,7 @@ describe('renderBlock 的内容', () => {
         for (let i = 0; i < 2; i++) attempt(db, w, [{ kind: 'del', targetIpa: 'n' }]);
       }
       const block = renderBlock(db, notes, NOW);
-      expect(block).toContain('[l / n 不分](notes/l-vs-n.md)');
+      expect(block).toContain('[l / n 不分](http://localhost:30031/notes/l-vs-n)');
     });
   });
 

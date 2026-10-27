@@ -58,7 +58,7 @@ describe('一篇笔记落在哪一格书架上', () => {
  * 它会静默落成 place=null，在界面上掉出所有部位小标题，而没有任何东西会报警。
  */
 describe('真实的 notes/ 全都摆得进去', () => {
-  const store = new NoteStore(join(import.meta.dirname, '..', '..', 'notes'));
+  const store = new NoteStore([{ dir: join(import.meta.dirname, '..', '..', 'notes'), source: 'shipped' }]);
   store.load();
   const all = store.all();
 

@@ -14,7 +14,7 @@ import type { Note } from './notes.js';
 function note(over: Partial<Note>): Note {
   return {
     id: 'n', title: 't', triggers: [], contrasts: [], words: [],
-    severity: 'info', markdown: '', file: 'n.md', ...over,
+    severity: 'info', markdown: '', file: 'n.md', source: 'shipped', ...over,
   };
 }
 

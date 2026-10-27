@@ -56,7 +56,7 @@ severity: confirmed
 ---
 词尾两个辅音之间不许有元音。
 `, 'utf8');
-  const noteStore = new NoteStore(notesDir);
+  const noteStore = new NoteStore([{ dir: notesDir, source: 'shipped' }]);
   noteStore.load();
   return {
     db: openDb(':memory:'),
@@ -1058,7 +1058,7 @@ describe('笔记档次按使用者自己的记录推', () => {
   // 素材库那行「还没在你身上出现过，或者出现得还不够」——那句话是假的。
   it('讲词的笔记：≥3 次就算，不要求跨词', async () => {
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'byword.md'), `---
 id: byword
 title: night 这个词自己的坑
@@ -1077,7 +1077,7 @@ words: [night]
 
   it('讲词的笔记不够 3 次照样只是待观察——放宽的只有跨词那一半', async () => {
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'byword.md'), `---
 id: byword
 title: night 这个词自己的坑
@@ -1096,7 +1096,7 @@ words: [night]
 
   it('frontmatter 里写 severity 也没用，不读它', async () => {
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'liar.md'), `---
 id: liar
 title: 自称已确认
@@ -1168,7 +1168,7 @@ describe('GET /api/stats 的 worthANote', () => {
     // **替换错要两边都覆盖到**（profile.ts 的 notesCovering）。testDeps 里的
     // l-vs-n 只声明了 phoneme:n（那是为了不误伤用 click 的其他用例），
     // 所以这里另写一篇真的把 l 和 n 都讲到的——真实的 l-vs-n 笔记正是这样。
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'ln-pair.md'), `---
 id: ln-pair
 title: l 和 n
@@ -1290,7 +1290,7 @@ describe('笔记跟这个词有没有关系', () => {
 
   async function setup() {
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'ng.md'), `---
 id: n-vs-ng
 title: 前后鼻音
@@ -1399,7 +1399,7 @@ triggers: [phoneme:n, phoneme:ŋ]
 
   it('讲这个词自己的笔记永远相关', async () => {
     const deps = await setup();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'w.md'), `---
 id: about-night
 title: night 这个词
@@ -1552,7 +1552,7 @@ describe('POST /api/pronounce（音素级听辨）', () => {
    */
   it('替换错只挂两边都讲到的那篇，不挂只沾上一个音的', async () => {
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'ng.md'), `---
 id: n-vs-ng
 title: 前后鼻音
@@ -1574,7 +1574,7 @@ triggers: [phoneme:n, phoneme:ŋ]
     // 拍平成一个标签池的话，"某处错涉及 A、另一处错涉及 B"会让一篇讲 A+B 的笔记命中，
     // 而根本没有哪一处错同时涉及 A 和 B。dopamine 有 7 处错，池子大到什么都能沾上。
     const deps = testDeps();
-    const dir = (deps.noteStore as unknown as { dir: string }).dir;
+    const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'cross.md'), `---
 id: cross
 title: 讲 l 和 t 的
@@ -1714,7 +1714,7 @@ severity: confirmed
 ---
 越轻越对。
 `, 'utf8');
-    const noteStore = new NoteStore(notesDir);
+    const noteStore = new NoteStore([{ dir: notesDir, source: 'shipped' }]);
     noteStore.load();
     const deps = { ...testDeps(), noteStore };
     deps.recognizePhonemes = vi.fn().mockResolvedValue({
@@ -2016,7 +2016,7 @@ describe('音素 vs 词：两种笔记范围不许混', () => {
   function withNotes(files: Record<string, string>) {
     const dir = mkdtempSync(join(tmpdir(), 'notes-scope-'));
     for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body, 'utf8');
-    const noteStore = new NoteStore(dir);
+    const noteStore = new NoteStore([{ dir, source: 'shipped' }]);
     noteStore.load();
     return { ...testDeps(), noteStore };
   }
@@ -2368,7 +2368,7 @@ ${front.join('\n')}
 ---
 舌尖轻轻探出上下门齿之间。
 `, 'utf8');
-    const noteStore = new NoteStore(notesDir);
+    const noteStore = new NoteStore([{ dir: notesDir, source: 'shipped' }]);
     noteStore.load();
     return { ...testDeps(), noteStore };
   }

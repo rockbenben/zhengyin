@@ -19,7 +19,7 @@ import { NoteStore, validateShape, type Note } from './notes.js';
 function note(markdown: string): Note {
   return {
     id: 'n', title: 't', triggers: ['phoneme:l'], contrasts: [], words: [],
-    severity: 'info', markdown, file: 'n.md',
+    severity: 'info', markdown, file: 'n.md', source: 'shipped',
   };
 }
 
@@ -94,7 +94,7 @@ describe('validateShape：自检法和对比训练是硬性的', () => {
   // 仓库自带的这几篇必须自己过关。模板点着它们当范例，而范例不合模板
   // 正是这次要修的病——只写一条规则、不修既有的笔记，等于把病留在样板里。
   it('仓库里现有的笔记全部合格', () => {
-    const store = new NoteStore(join(import.meta.dirname, '..', '..', 'notes'));
+    const store = new NoteStore([{ dir: join(import.meta.dirname, '..', '..', 'notes'), source: 'shipped' }]);
     // **构造函数不读盘**（只存 dir），得显式 load()。少这一句 all() 就是空数组，
     // validateShape([]) 恒等于 []，这条用例就永远绿——第一版正是这么写的，
     // 变异测试（把 kl-cluster 的自检法整节删掉）照样全过才发现。

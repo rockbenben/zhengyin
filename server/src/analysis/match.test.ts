@@ -3,7 +3,7 @@ import { matchNotes } from './match.js';
 import type { Note } from '../notes.js';
 
 function note(id: string, triggers: string[], severity: Note['severity']): Note {
-  return { id, title: id, triggers, words: [], contrasts: [], severity, markdown: '', file: `${id}.md` };
+  return { id, title: id, triggers, words: [], contrasts: [], severity, markdown: '', file: `${id}.md`, source: 'shipped' };
 }
 
 describe('matchNotes', () => {

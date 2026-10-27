@@ -5,7 +5,7 @@ import type { Note } from '../notes.js';
 function note(id: string, triggers: string[]): Note {
   // words / contrasts 不能省：Note 上是必填的。省了一直没人发现，是因为
   // server/tsconfig.json 把测试文件 exclude 掉了——见 tsconfig.typecheck.json
-  return { id, title: id, triggers, words: [], contrasts: [], severity: 'confirmed', markdown: '', file: `${id}.md` };
+  return { id, title: id, triggers, words: [], contrasts: [], severity: 'confirmed', markdown: '', file: `${id}.md`, source: 'shipped' };
 }
 
 const lVsN = [note('l-vs-n', ['phoneme:l', 'phoneme:n'])];

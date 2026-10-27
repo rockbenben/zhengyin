@@ -7,6 +7,13 @@ import { LEGAL_ONSETS } from './analysis/syllables.js';
 
 export type Severity = 'confirmed' | 'watch' | 'info';
 
+/** 笔记来自哪一根：随应用发布的 / 旧文件夹 / 本机可写 */
+export type NoteSource = 'shipped' | 'legacy' | 'local';
+export interface NoteRoot {
+  dir: string;
+  source: NoteSource;
+}
+
 export interface Note {
   id: string; title: string; triggers: string[];
   /**
@@ -55,6 +62,8 @@ export interface Note {
    */
   severity: Severity;
   markdown: string; file: string;
+  /** 这篇笔记来自哪一根。同名时高优先级胜出，界面上也据此标「随附 / 本机」。 */
+  source: NoteSource;
 }
 
 const SEVERITIES = new Set(['confirmed', 'watch', 'info']);
@@ -285,82 +294,84 @@ export class NoteStore {
    */
   warnings: string[] = [];
   private warn(msg: string): void { console.warn(msg); this.warnings.push(msg); }
-  constructor(private dir: string) {}
+
+  constructor(private roots: NoteRoot[]) {}
+
+  /** 三根的目录，按优先级从低到高。测试与启动日志要用 */
+  get dirs(): string[] { return this.roots.map((r) => r.dir); }
 
   load(): void {
-    // 先把目录读出来再动 this.notes：readdirSync 在 per-file try 之外，它抛错（目录被删/
-    // 改名/权限）会直接冲出 load()，而 load() 是 chokidar 'all' 事件的处理器（见 watch()），
-    // 事件处理器里抛出去就是未捕获异常——正在跑的 dev server 当场挂掉。
-    // 顺序也要紧：clear() 必须在读成功之后。反过来的话读失败时笔记已经被清空了，虽然没崩，
-    // 但内存里一篇笔记都不剩，效果跟崩了差不多。
-    let files: string[];
-    try {
-      files = readdirSync(this.dir).filter((f) => f.endsWith('.md'));
-    } catch (e) {
-      console.warn(`[notes] 读不到笔记目录 ${this.dir}（${(e as Error).message}），本次跳过重扫，保持上一次加载的结果`);
-      return;
-    }
+    // 随附根读不到说明安装坏了：保持上一次的结果，别把本机笔记一起清空。
+    // legacy / local 不存在是正常状态（没选旧文件夹、本机还没写过），跳过即可。
+    // 先把三根扫进一个临时 Map 再整体替换：扫到一半失败时内存里仍是上一份完整数据。
+    const next = new Map<string, Note>();
+    const warnings: string[] = [];
+    // id -> 声明了这个 id 的所有文件（含来自哪一根）
+    const seen = new Map<string, Array<{ file: string; source: NoteSource }>>();
 
-    this.notes.clear();
-    this.warnings = [];
-    // id -> 声明了这个 id 的所有文件（按读取顺序）
-    const seenFiles = new Map<string, string[]>();
-
-    for (const file of files) {
+    for (const root of this.roots) {
+      let files: string[];
       try {
-        const { data, content } = matter(readFileSync(join(this.dir, file), 'utf8'));
-        // triggers 和 words 都可以缺省（缺省即空数组），但**至少要有一个非空**，
-        // 否则这篇笔记永远匹配不上任何词条——文件躺在 notes/ 里却从不出现，最难查的那种。
-        const rawTriggers = Array.isArray(data.triggers) ? data.triggers : [];
-        const rawWords = Array.isArray(data.words) ? data.words : [];
-        if (!data.id || !data.title) {
-          this.warn(`[notes] 跳过（frontmatter 缺 id 或 title）: ${file}`);
-          continue;
-        }
-        if (rawTriggers.length === 0 && rawWords.length === 0) {
-          this.warn(`[notes] ${file}：triggers 和 words 都是空的，这篇笔记永远匹配不上任何词条。讲音的写 triggers，讲词的写 words。`);
-        }
-        // 笔记按 id 存进 Map，id 撞了后一篇会把前一篇顶掉。这在正常工作流里很容易发生
-        // ——照着已有笔记复制一份当模板、忘了改 id（AGENTS.md 本来就让人从已有笔记里
-        // 复制粘贴 IPA）。以前顶掉是完全静默的：文件躺在 notes/ 里，但既不出现在笔记页、
-        // 也永远匹配不上任何词，用户无从知道为什么。
-        //
-        // 冲突只在这里记账，不在这里告警：扫描进行到一半时"谁最终生效"还没定——三篇
-        // 同 id 的话，边扫边报会先报一个 b.md 生效，可 b.md 随后又被 c.md 顶掉，用户
-        // 照着这条告警去改 b.md，改的其实是一份同样被忽略的副本。等整轮扫完再报。
-        const id = String(data.id);
-        this.notes.set(id, {
-          id,
-          title: String(data.title),
-          triggers: rawTriggers.map(String),
-          contrasts: (Array.isArray(data.contrasts) ? data.contrasts : []).map(String),
-          // 词一律小写：词条 key 是小写的（app.ts 里 text.trim().toLowerCase()），
-          // 笔记里手写成 Dopamine Detox 也该能对上
-          words: rawWords.map((w: unknown) => String(w).trim().toLowerCase()).filter(Boolean),
-          // 一律 'info'。**故意不读 frontmatter 里的 severity**：
-          // 那是写笔记的人对读者的断言，而每个人的短板不一样。
-          // 服务这一层会按使用者自己的记录把它换成 confirmed / watch（profile.ts 的 severityOf）。
-          severity: 'info',
-          markdown: content.trim(),
-          file,
-        });
-        // 记账必须在 notes.set 之后：中间那几行（String(data.title)、triggers.map、
-        // content.trim()）任何一个抛错都会被下面的 per-file catch 吞掉并 continue，
-        // 记在前面的话这个 id 就会留在 seenFiles 里、却从没进过 notes——两篇同 id 的
-        // 坏笔记就足以让下面的 notes.get(id)! 拿到 undefined，TypeError 冲出 load()：
-        // 启动时服务起不来，chokidar 那条路上则是直接弄死正在跑的 dev server。
-        seenFiles.set(id, [...(seenFiles.get(id) ?? []), file]);
+        files = readdirSync(root.dir).filter((f) => f.endsWith('.md'));
       } catch (e) {
-        this.warn(`[notes] 解析失败: ${file}（${(e as Error)?.message ?? e}）`);
+        if (root.source === 'shipped') {
+          console.warn(`[notes] 读不到随附笔记目录 ${root.dir}（${(e as Error).message}），本次跳过重扫，保持上一次加载的结果`);
+          return;
+        }
+        continue;
+      }
+
+      for (const file of files) {
+        try {
+          const { data, content } = matter(readFileSync(join(root.dir, file), 'utf8'));
+          // triggers 和 words 都可以缺省（缺省即空数组），但**至少要有一个非空**，
+          // 否则这篇笔记永远匹配不上任何词条——文件躺在 notes/ 里却从不出现，最难查的那种。
+          const rawTriggers = Array.isArray(data.triggers) ? data.triggers : [];
+          const rawWords = Array.isArray(data.words) ? data.words : [];
+          if (!data.id || !data.title) {
+            warnings.push(`[notes] 跳过（frontmatter 缺 id 或 title）: ${file}`);
+            continue;
+          }
+          if (rawTriggers.length === 0 && rawWords.length === 0) {
+            warnings.push(`[notes] ${file}：triggers 和 words 都是空的，这篇笔记永远匹配不上任何词条。讲音的写 triggers，讲词的写 words。`);
+          }
+          const id = String(data.id);
+          next.set(id, {
+            id,
+            title: String(data.title),
+            triggers: rawTriggers.map(String),
+            contrasts: (Array.isArray(data.contrasts) ? data.contrasts : []).map(String),
+            // 词一律小写：词条 key 是小写的（app.ts 里 text.trim().toLowerCase()），
+            // 笔记里手写成 Dopamine Detox 也该能对上
+            words: rawWords.map((w: unknown) => String(w).trim().toLowerCase()).filter(Boolean),
+            // 一律 'info'。**故意不读 frontmatter 里的 severity**：
+            // 那是写笔记的人对读者的断言，而每个人的短板不一样。
+            // 服务这一层会按使用者自己的记录把它换成 confirmed / watch（profile.ts 的 severityOf）。
+            severity: 'info',
+            markdown: content.trim(),
+            file,
+            source: root.source,
+          });
+          seen.set(id, [...(seen.get(id) ?? []), { file, source: root.source }]);
+        } catch (e) {
+          warnings.push(`[notes] 解析失败: ${file}（${(e as Error)?.message ?? e}）`);
+        }
       }
     }
-    for (const [id, files] of seenFiles) {
-      if (files.length < 2) continue;
-      const winner = this.notes.get(id)!.file;
-      const ignored = files.filter((f) => f !== winner);
+
+    this.notes = next;
+    // 先清空再由 this.warn 逐条补回来：这样每条告警既进 warnings 数组、也真的
+    // console.warn 出去。扫描时只收集不打印，是为了等整轮扫完再决定赢家。
+    this.warnings = [];
+    for (const warning of warnings) this.warn(warning);
+    for (const [id, entries] of seen) {
+      if (entries.length < 2) continue;
+      const winner = this.notes.get(id)!;
+      const ignored = entries.filter((e) => !(e.file === winner.file && e.source === winner.source));
       this.warn(
-        `[notes] id 冲突：id "${id}" 被 ${files.length} 篇笔记声明——当前生效的是 "${winner}"，` +
-        `${ignored.map((f) => `"${f}"`).join('、')} 会被完全忽略（谁生效取决于文件系统的目录读取顺序，不保证稳定）。给多余的那几篇换个唯一 id`,
+        `[notes] id 冲突：id "${id}" 被 ${entries.length} 篇笔记声明——当前生效的是 "${winner.file}"（${winner.source} 根），` +
+        `${ignored.map((e) => `${e.source} 根的 "${e.file}"`).join('、')} 会被完全忽略` +
+        `（优先级 shipped < legacy < local，高优先级胜出）。给多余的那几篇换个唯一 id`,
       );
     }
     for (const warning of [...validateTriggers(this.all()), ...validateShape(this.all())]) {
@@ -378,7 +389,7 @@ export class NoteStore {
    */
   watch(onReload?: () => void): void {
     if (this.watcher) return;
-    this.watcher = chokidar.watch(this.dir, { ignoreInitial: true }).on('all', () => {
+    this.watcher = chokidar.watch(this.dirs, { ignoreInitial: true }).on('all', () => {
       this.load();
       // 回调抛出去就是未捕获异常——chokidar 的事件处理器里崩掉会把整个服务带走。
       // 同步档案失败不该有这个后果。

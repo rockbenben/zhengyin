@@ -5,7 +5,7 @@ import { splitSections, guidanceSections } from './guidance.js';
 import type { Note } from '../notes.js';
 
 function note(markdown: string): Note {
-  return { id: 'x', title: 'x', triggers: [], words: [], contrasts: [], severity: 'confirmed', markdown, file: 'x.md' };
+  return { id: 'x', title: 'x', triggers: [], words: [], contrasts: [], severity: 'confirmed', markdown, file: 'x.md', source: 'shipped' };
 }
 
 describe('splitSections', () => {

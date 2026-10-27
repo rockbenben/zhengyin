@@ -54,7 +54,12 @@ if (missingHow.length > 0) {
   console.warn(`[articulation] 这些音素还没写"怎么发"，发错时界面给不出指导：${missingHow.join(' ')}`);
 }
 
-const noteStore = new NoteStore(runtime.shippedNotes);
+mkdirSync(runtime.localNotes, { recursive: true });
+const noteStore = new NoteStore([
+  { dir: runtime.shippedNotes, source: 'shipped' },
+  ...(runtime.legacyNotes ? [{ dir: runtime.legacyNotes, source: 'legacy' as const }] : []),
+  { dir: runtime.localNotes, source: 'local' },
+]);
 noteStore.load();
 
 // 领域仪式：每打开一个用户的库都要跑一遍（启动、切换都算）。

@@ -190,7 +190,7 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
     const hit = notesCovering(s, notes.all());
     if (hit.length === 0) missing.push(s);
     const noteCell = hit.length > 0
-      ? hit.map((n) => `[${n.title}](notes/${n.file})`).join('、')
+      ? hit.map((n) => `[${n.title}](${localUrl()}/notes/${n.id})`).join('、')
       : '**还没有**';
     lines.push(`| ${s.count} | ${describe(s)} | ${s.words.join('、')} | ${noteCell} |`);
   }
@@ -240,7 +240,7 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
       const rate = Math.round((w.clean / w.attempts) * 100);
       lines.push(`- **${w.text}** —— 练了 ${w.attempts} 次，全对 ${w.clean} 次（${rate}%）`
         + (hit.length > 0
-          ? `。已有讲解：${hit.map((n) => `[${n.title}](notes/${n.file})`).join('、')}`
+          ? `。已有讲解：${hit.map((n) => `[${n.title}](${localUrl()}/notes/${n.id})`).join('、')}`
           : '。**还没有讲这个词的笔记**'));
     }
   }

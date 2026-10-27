@@ -28,7 +28,7 @@ describe('NoteStore', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       writeFileSync(join(dir, 'bad.md'), ['---', 'id: bad', 'title: 空笔记', '---', '正文', ''].join(NL), 'utf8');
-      const store = new NoteStore(dir);
+      const store = new NoteStore([{ dir, source: 'shipped' }]);
       store.load();
       expect(store.warnings.some((w) => w.includes('bad.md') && w.includes('都是空的'))).toBe(true);
 
@@ -46,7 +46,7 @@ describe('NoteStore', () => {
 
   it('loads note with frontmatter', () => {
     writeFileSync(join(dir, 'a.md'), NOTE, 'utf8');
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
     const n = store.get('test-note')!;
     expect(n.title).toBe('测试笔记');
@@ -62,14 +62,14 @@ describe('NoteStore', () => {
 
   it('skips file without valid frontmatter', () => {
     writeFileSync(join(dir, 'bad.md'), '# 没有 frontmatter\n', 'utf8');
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
     expect(store.all()).toHaveLength(0);
   });
 
   it('defaults severity to info when invalid', () => {
     writeFileSync(join(dir, 'b.md'), NOTE.replace('confirmed', 'bogus'), 'utf8');
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
     expect(store.get('test-note')!.severity).toBe('info');
   });
@@ -77,7 +77,7 @@ describe('NoteStore', () => {
   it('load() keeps a note whose trigger fails validation (warns, does not skip)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeFileSync(join(dir, 'c.md'), NOTE.replace('triggers: [phoneme:l, clear-l]', 'triggers: [phoneme:zzz]'), 'utf8');
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
     expect(store.get('test-note')).toBeDefined();
     expect(store.all()).toHaveLength(1);
@@ -87,7 +87,7 @@ describe('NoteStore', () => {
 
   it('watch() only attaches one chokidar watcher across repeated calls', () => {
     const watchSpy = vi.spyOn(chokidar, 'watch').mockReturnValue({ on: () => ({}) } as unknown as ReturnType<typeof chokidar.watch>);
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.watch();
     store.watch();
     store.watch();
@@ -124,7 +124,7 @@ severity: info
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const store = new NoteStore(dir);
+      const store = new NoteStore([{ dir, source: 'shipped' }]);
       store.load();
 
       expect(store.all().map((n) => n.id).sort()).toEqual(['dup', 'uniq']);
@@ -166,7 +166,7 @@ ${marker}
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const store = new NoteStore(dir);
+      const store = new NoteStore([{ dir, source: 'shipped' }]);
       store.load();
       const survivor = store.get('dup')!;
 
@@ -197,7 +197,7 @@ describe('validateTriggers', () => {
   function note(overrides: Partial<Note>): Note {
     return {
       id: 'n', title: 't', triggers: [], contrasts: [], words: [], severity: 'confirmed',
-      markdown: '', file: 'n.md', ...overrides,
+      markdown: '', file: 'n.md', source: 'shipped', ...overrides,
     };
   }
 
@@ -290,7 +290,7 @@ severity: info
 ---
 正文
 `, 'utf8');
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
 
     const cap = captureHandler();
@@ -317,7 +317,7 @@ severity: info
     // chokidar 的事件处理器里抛出去就是未捕获异常，整个进程会挂。
     // 同步发音档案失败绝不该有这个后果。
     const dir = mkdtempSync(join(tmpdir(), 'watch-'));
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
 
     const cap = captureHandler();
@@ -328,7 +328,7 @@ severity: info
 
   it('不传回调也能用（watch 的原有调用方式不受影响）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'watch-'));
-    const store = new NoteStore(dir);
+    const store = new NoteStore([{ dir, source: 'shipped' }]);
     store.load();
     const cap = captureHandler();
     store.watch();
@@ -345,7 +345,7 @@ severity: info
 describe('validateTriggers 也看 contrasts', () => {
   const note = (contrasts: string[]) => ({
     id: 'x', title: 'x', triggers: ['phoneme:θ'], contrasts,
-    words: [], severity: 'info' as const, markdown: '', file: 'x.md',
+    words: [], severity: 'info' as const, markdown: '', file: 'x.md', source: 'shipped' as const,
   });
 
   it('真音素不报警', () => {
@@ -380,7 +380,7 @@ describe('位置标签的白名单和告警文案不能失步', () => {
   function note(overrides: Partial<Note>): Note {
     return {
       id: 'n', title: 't', triggers: [], contrasts: [], words: [], severity: 'info',
-      markdown: '', file: 'n.md', ...overrides,
+      markdown: '', file: 'n.md', source: 'shipped', ...overrides,
     };
   }
 
@@ -406,12 +406,67 @@ describe('位置标签的白名单和告警文案不能失步', () => {
    * 形近字符（ASCII `g` 对 IPA `ɡ`）在这个仓库真坏过两次，两次都是这么坏的。
    */
   it('仓库里现有的笔记，trigger 全都合法', () => {
-    const store = new NoteStore(join(import.meta.dirname, '..', '..', 'notes'));
+    const store = new NoteStore([{ dir: join(import.meta.dirname, '..', '..', 'notes'), source: 'shipped' }]);
     // 构造函数不读盘，得显式 load()。少这一句 all() 就是空数组，
     // validateTriggers([]) 恒等于 []，这条用例永远绿——shape 那条踩过这个坑。
     store.load();
     expect(store.all().length, '一篇笔记都没读到，这条用例是空过的').toBeGreaterThanOrEqual(5);
     const w = validateTriggers(store.all());
     expect(w, `这些笔记的 trigger 有问题：${w.join(' / ')}`).toEqual([]);
+  });
+});
+
+describe('多根：优先级固定，不靠目录读取顺序', () => {
+  const note = (title: string) => `---
+id: same
+title: ${title}
+triggers: [phoneme:l]
+---
+
+${title}
+`;
+
+  it('同 id 时 local 盖过 legacy，legacy 盖过 shipped', () => {
+    const shippedDir = mkdtempSync(join(tmpdir(), 'n-shipped-'));
+    const legacyDir = mkdtempSync(join(tmpdir(), 'n-legacy-'));
+    const localDir = mkdtempSync(join(tmpdir(), 'n-local-'));
+    writeFileSync(join(shippedDir, 'same.md'), note('shipped'), 'utf8');
+    writeFileSync(join(legacyDir, 'same.md'), note('legacy'), 'utf8');
+    writeFileSync(join(localDir, 'same.md'), note('local'), 'utf8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const s = new NoteStore([
+        { dir: shippedDir, source: 'shipped' },
+        { dir: legacyDir, source: 'legacy' },
+        { dir: localDir, source: 'local' },
+      ]);
+      s.load();
+      expect(s.get('same')?.title).toBe('local');
+      expect(s.get('same')?.source).toBe('local');
+      expect(s.warnings.join('\n')).toMatch(/local/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('不存在的 legacy 根跳过；dirs 按优先级暴露三根', () => {
+    const shippedDir = mkdtempSync(join(tmpdir(), 'n-shipped-'));
+    const localDir = mkdtempSync(join(tmpdir(), 'n-local-'));
+    writeFileSync(join(shippedDir, 'a.md'), `---
+id: a
+title: A
+triggers: [phoneme:l]
+---
+
+a
+`, 'utf8');
+    const s = new NoteStore([
+      { dir: shippedDir, source: 'shipped' },
+      { dir: join(shippedDir, 'missing'), source: 'legacy' },
+      { dir: localDir, source: 'local' },
+    ]);
+    s.load();
+    expect(s.get('a')?.source).toBe('shipped');
+    expect(s.dirs).toEqual([shippedDir, join(shippedDir, 'missing'), localDir]);
   });
 });
