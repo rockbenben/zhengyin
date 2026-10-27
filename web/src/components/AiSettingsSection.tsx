@@ -22,7 +22,7 @@ const PROTOCOL_LABELS: Record<AiProtocol, string> = {
   gemini: 'Gemini',
 };
 
-/** 超过这个数就先折叠——28 家平铺出来比选不出来更难受 */
+/** 超过这个数就先折叠——目录里几十家平铺出来比选不出来更难受（家数跟着目录变，不写死） */
 const CHIP_LIMIT = 8;
 
 const hostOf = (url: string): string => {
