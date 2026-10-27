@@ -12,7 +12,7 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 
 ## 常见误区
 
-- **加塞元音**：在 /k/ 和 /l/ 之间不自觉加了个 /ə/，把 click 念成"克-里-克"（kə-lick）——最常见
+- **加塞元音**：在 /k/ 和 /l/ 之间不自觉加了个 /ə/，把 click 念成「克-里-克」（kə-lick）——最常见
 - **唇形错误**：嘴唇不自觉撅圆，听起来像 crick 或 cwick
 - **舌位不到位**：舌尖没真正碰到上齿龈，l 音含糊
 
@@ -32,16 +32,16 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 **手指搭在下巴上。** 元音会让下巴往下掉一下，辅音不会。
 
 - click /klɪk/ 全程下巴**只掉一次**——就是中间那个 /ɪ/。
-- 如果掉了**两次**，第一次那下就是你塞进去的 /ə/，念成了"克-里-克"。
+- 如果掉了**两次**，第一次那下就是你塞进去的 /ə/，念成了「克-里-克」。
 
 第二个检查，对着镜子：发 /k/ 的时候**先看舌尖**。舌尖这时就该已经贴上上齿龈了。
 如果它还平躺在口腔底部、等 /k/ 放完才开始往上走，那一路上就会漏出 /ə/。
 
-第三个，数拍子：click 拍一下手，"克里克"要拍两下。念完自己拍一遍就知道是几拍。
+第三个，数拍子：click 拍一下手，「克里克」要拍两下。念完自己拍一遍就知道是几拍。
 
 ## 对比训练
 
-**先在中文里感受"一拍还是两拍"。** 中文没有辅音连缀（每个辅音后面必跟元音），
+**先在中文里感受「一拍还是两拍」。** 中文没有辅音连缀（每个辅音后面必跟元音），
 所以这里没有现成的 minimal pair 可用——中文能提供的是**音节数**这个抓手：
 
 | 一拍 | 两拍 |
@@ -51,7 +51,7 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 
 /kl/ 要的是**左边那一拍**，但里面塞着两个辅音。
 
-**英文 minimal pairs —— 验"l 到底有没有发出来"：**
+**英文 minimal pairs —— 验「l 到底有没有发出来」：**
 
 | 有 /l/ | 没有 /l/ |
 |---|---|
@@ -60,7 +60,7 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 | place /pleɪs/ | pace /peɪs/ |
 | flight /flaɪt/ | fight /faɪt/ |
 
-**验"有没有塞元音"的那一对最好用，因为右边那个词的 /ə/ 是真的：**
+**验「有没有塞元音」的那一对最好用，因为右边那个词的 /ə/ 是真的：**
 
 | 没有元音 | 真有一个 /ə/ |
 |---|---|
@@ -72,14 +72,14 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 
 1. **只练尾部**：暂时忘掉 /k/，大声读 **lick** /lɪk/，感受舌尖抵住上齿龈然后迅速弹开。
 2. **加入气流**：喉咙不发声，只用嘴发出短促的 /k/ 气流音，紧接着立刻接上练好的 lick。想象成 **k-lick**，中间不许有停顿。
-3. **带入短语**：读 "click the" 时，/k/ 发完、舌头刚从齿龈弹下，就要立刻准备咬舌尖发 the 的 /ð/。动作要非常紧凑。
-4. **回到整句**："click the mouse"。
+3. **带入短语**：读「click the」时，/k/ 发完、舌头刚从齿龈弹下，就要立刻准备咬舌尖发 the 的 /ð/。动作要非常紧凑。
+4. **回到整句**：「click the mouse」。
 
 对着镜子慢速练，盯住两件事：嘴唇有没有变圆、舌尖是不是真真切切顶到了门牙后方。
 
 ## 同类扩展
 
-同一套方法适用于所有 /Cl/、/Cr/ 类连缀，都是"前一个辅音还没结束，舌尖已经就位"：
+同一套方法适用于所有 /Cl/、/Cr/ 类连缀，都是「前一个辅音还没结束，舌尖已经就位」：
 
 - /kl/：class, clean, clock, close
 - /pl/：play, please, plan
@@ -87,4 +87,4 @@ triggers: [cluster-onset:kl, cluster-onset:pl, cluster-onset:bl, cluster-onset:f
 - /fl/：fly, floor, flat
 - /ɡl/：glass, glad, global
 
-自检：如果你能把 clean 和 "克林" 区分开，就过关了。
+自检：如果你能把 clean 和「克林」区分开，就过关了。
