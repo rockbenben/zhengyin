@@ -1,7 +1,33 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { STOP_HINT } from '../lib/brand';
+import { fireEvent, render, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import { Card } from 'antd';
+
+/**
+ * 渲染这一页要用的桩。
+ *
+ * 子组件一律换成一张同名卡：这一组要守的是**这一页的结构**（一次露几组、几张卡），
+ * 而子组件自己的行为各有各的测试。换成同名卡之后，卡片清单就等于这一页真正的分组。
+ */
+vi.mock('../api', () => ({
+  isOffline: () => false,
+  api: {
+    getMwKey: () => Promise.resolve({ configured: true, masked: '••••847f' }),
+    runtime: () => Promise.resolve({ desktop: true, version: '1.0.0', appRoot: '/x', userNotes: '/y' }),
+    setMwKey: () => Promise.resolve({ configured: true, masked: '••••847f' }),
+    clearMwKey: () => Promise.resolve({ configured: false, masked: null }),
+  },
+}));
+vi.mock('../components/CaptureSetting', () => ({ default: () => <Card title="录音采集" /> }));
+vi.mock('../components/ModelSetting', () => ({ default: () => <Card title="备用评测模型" /> }));
+vi.mock('../components/InkSetting', () => ({ default: () => <Card title="主题" /> }));
+vi.mock('../components/BackupSetting', () => ({ default: () => <Card title="搬家" /> }));
+vi.mock('../components/AiSettingsSection', () => ({ default: () => <Card title="选一个 AI 服务" /> }));
+
+const { default: SettingsPage } = await import('./SettingsPage');
 
 /**
  * 设置页引用别处的原话时，那句原话必须真的还在。
@@ -127,4 +153,101 @@ it('桌面模式不说黑窗口，也不引浏览器那句停止提示', () => {
   expect(block).not.toContain('黑窗口');
   expect(block).not.toContain('STOP_HINT');
   expect(block).toMatch(/关.*窗口|退出/);
+});
+
+/**
+ * 菜单栏撤了以后，原来挂在上面的动作改在设置页的「桌面版」一段里。
+ *
+ * 所以**指着那条菜单的文案必须跟着改掉**——留着「菜单「文件 → 打开数据文件夹」」
+ * 这种话，读者会去找一条已经不存在的菜单，而那一段恰好是告诉他数据在哪的话。
+ */
+it('不再指着那条撤掉的菜单栏', () => {
+  const page = readFileSync(join(root, 'web', 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
+  const start = page.indexOf('const DESKTOP_HELP');
+  const end = page.indexOf('// END DESKTOP_HELP');
+  expect(start).toBeGreaterThan(-1);
+  const block = page.slice(start, end);
+  expect(block, '桌面文案还在指那条菜单').not.toContain('菜单');
+  expect(page, '设置页没挂上「桌面版」那一段').toContain('<DesktopPanel />');
+});
+
+it('README 也不再让人去找那条菜单', () => {
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  expect(readme, 'README 还在指那条菜单').not.toContain('文件 → 打开数据文件夹');
+});
+
+/**
+ * 设置页**不是一页摊开**。
+ *
+ * 原来这一页是八张等权的卡竖着排，实测 3317px（2.7 屏）、56 个可聚焦控件、
+ * 零分组——「设置界面过于复杂」说的就是这件事：不是哪张卡复杂，是八件事同时摊开，
+ * 而且每一件看起来一样重，找不到自己那一件在哪。
+ *
+ * 现在按「你为什么来设置」分五组，一次只露一组。
+ */
+describe('设置页一次只露一组', () => {
+  const cardTitles = (c: HTMLElement) =>
+    [...c.querySelectorAll('.ant-card-head-title')].map((e) => e.textContent?.trim() ?? '');
+
+  async function draw() {
+    const r = render(<MemoryRouter><SettingsPage /></MemoryRouter>);
+    await waitFor(() => expect(r.container.querySelector('.ant-segmented')).toBeTruthy());
+    return r.container;
+  }
+
+  it('有分组切换，而且整页最多三张卡', async () => {
+    const c = await draw();
+    expect(c.querySelectorAll('.ant-card').length, '一页还是摊开了好几组').toBeLessThanOrEqual(3);
+  });
+
+  it('五组都摆出来了，点哪组看哪组', async () => {
+    const c = await draw();
+    const items = [...c.querySelectorAll('.ant-segmented-item')];
+    expect(items.length, '分组不是五组').toBe(5);
+    const seen = new Set<string>();
+    for (const item of items) {
+      const input = item.querySelector('input');
+      expect(input, '分组这一项不是 radio（键盘走不了）').toBeTruthy();
+      fireEvent.click(input!);
+      await waitFor(() => expect(c.querySelectorAll('.ant-card').length).toBeGreaterThan(0));
+      seen.add(cardTitles(c).join('|'));
+    }
+    expect(seen.size, '五组里有两组内容一样（或者没切过去）').toBe(5);
+  });
+
+  it('每一组都说得清自己管什么', async () => {
+    const c = await draw();
+    const items = [...c.querySelectorAll('.ant-segmented-item')];
+    for (const item of items) {
+      fireEvent.click(item.querySelector('input')!);
+      await waitFor(() => expect(c.querySelectorAll('.ant-card').length).toBeGreaterThan(0));
+      // 组名下面那一句说明（次级字色那一行）
+      const hint = [...c.querySelectorAll('.ant-typography-secondary')]
+        .map((e) => e.textContent?.trim() ?? '')
+        .filter((t) => t.length > 8 && !t.includes('key 只存在'));
+      expect(hint.length, '这一组没有说明——只剩组名，读者不知道里面管什么').toBeGreaterThan(0);
+    }
+  });
+});
+
+/**
+ * 「桌面版」那一段的位置。
+ *
+ * 它顶的是原来那条菜单栏，而菜单里「更换数据文件夹…」藏在**文件**子菜单的第三项——
+ * 那种位置的特点是「其实有，但没人找得到」。菜单撤了以后，这一段如果还排在整页最底下
+ * （词典/AI/录音/模型/纸墨/搬家之后），就等于把同一个毛病搬了个地方：
+ * 刚问「数据文件夹目录怎么设置」的人，翻到最底下才找得到。
+ *
+ * 所以它必须紧跟在「怎么退出 / 数据在哪」那张卡后面——那是**整个应用里唯一**
+ * 讲「数据在哪、怎么换」的卡，两个挨在一起才对得上。
+ */
+it('「桌面版」紧跟在「怎么退出 / 数据在哪」后面，不排在整页最底下', () => {
+  const page = readFileSync(join(root, 'web', 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
+  const panel = page.indexOf('<DesktopPanel />');
+  const help = page.indexOf('怎么退出 / 数据在哪');
+  const key = page.indexOf('<span>Merriam-Webster 词典 API key</span>');
+  expect(panel, '设置页没挂「桌面版」那一段').toBeGreaterThan(-1);
+  expect(help, '找不到「怎么退出 / 数据在哪」那张卡').toBeGreaterThan(-1);
+  expect(panel, '「桌面版」没跟在那张卡后面').toBeGreaterThan(help);
+  expect(panel, '「桌面版」被排到词典卡后面了，也就是整页最底下').toBeLessThan(key);
 });

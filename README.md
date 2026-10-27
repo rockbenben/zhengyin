@@ -45,7 +45,7 @@
 
 ## 两分钟跑起来
 
-> **桌面版（Windows x64）** 不需要 Node/uv：从 [Releases](https://github.com/rockbenben/zhengyin/releases) 下载 `zhengyin-<版本>-win-setup.exe`（安装版，可自动更新）或 `-win.zip`（免安装，手动更新），双击即用。第一次打开会问：用旧的正音文件夹、导入备份、或全新开始；数据在 `%APPDATA%\zhengyin\app`（选了旧文件夹则在原处），菜单「文件 → 打开数据文件夹」。未签名，SmartScreen 点「更多信息 → 仍要运行」。关窗口就是退出；首次逐音素评测仍会下约 1.2GB 模型，界面里能看到日志。下面的步骤是**浏览器模式**（需要 Node），两种模式共用同一份数据格式。
+> **桌面版（Windows x64）** 不需要 Node/uv：从 [Releases](https://github.com/rockbenben/zhengyin/releases) 下载 `zhengyin-<版本>-win-setup.exe`（安装版，可自动更新）或 `-win.zip`（免安装，手动更新），双击即用。第一次打开会问：用旧的正音文件夹、导入备份、或全新开始；数据在 `%APPDATA%\zhengyin\app`（选了旧文件夹则在原处），设置页里的「桌面版 → 打开数据文件夹」能直接看到。未签名，SmartScreen 点「更多信息 → 仍要运行」。关窗口就是退出；首次逐音素评测仍会下约 1.2GB 模型，界面里能看到日志。下面的步骤是**浏览器模式**（需要 Node），两种模式共用同一份数据格式。
 
 > **只需要 Node 24.15 或更新**（[nodejs.org](https://nodejs.org) 下 LTS，一路下一步）。版本太老或者没装，启动窗口会用中文说清该干什么，不会甩你一屏英文报错。不用注册，不用填 key。
 
@@ -175,7 +175,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh  # Linux / macOS
 
 **放一个桌面图标**（Windows）：右键 `启动.cmd` →「显示更多选项」→「发送到」→「桌面快捷方式」，「停止」同理。应用的**设置**页也写着这两件事。
 
-> **Linux 上要多一步**：三个平台里只有它没有可靠的「双击跑脚本」约定，多数桌面环境默认用编辑器打开 `.sh`。右键找「以程序运行」/「Run as a Program」，或者终端里 `./启动.sh`。想要真的能点的图标，`启动.sh` 开头的注释里写了怎么做一个 `.desktop` 项。
+> **Linux 上要多一步**：三个平台里只有它没有可靠的「双击跑脚本」约定，多数桌面环境默认用编辑器打开 `.sh`。右键找「以程序运行」，或者终端里 `./启动.sh`。想要真的能点的图标，`启动.sh` 开头的注释里写了怎么做一个 `.desktop` 项。
 
 ---
 

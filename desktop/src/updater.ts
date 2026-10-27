@@ -84,6 +84,9 @@ export function createUpdater(autoUpdater: AutoUpdaterLike, hooks: UpdaterHooks)
     ready = typeof v === 'string' ? v : null;
     hooks.log(`更新已下载：${ready ?? '版本未知'}`);
     set('ready');
+    // 叫醒用户：装不装由他定，但得知道有这么个更新在等着。
+    // 通知不是模态的——对话框会把人正在进行的录音打断。
+    hooks.balloon(ready ? `新版本 ${ready} 已经下好了` : '新版本已经下好了', '点这条通知就能装上；也可以到设置页的「桌面版」里重启安装。');
   });
   autoUpdater.on('error', (e) => {
     const msg = (e as Error | undefined)?.message ?? String(e);

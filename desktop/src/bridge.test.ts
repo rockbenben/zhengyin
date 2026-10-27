@@ -1,0 +1,70 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { CHANNEL, USER_ACTIONS, UPDATER_ACTIONS, DEV_ACTIONS } from './bridge.js';
+
+/**
+ * 桌面外壳 ↔ 网页那根线的守卫。
+ *
+ * **为什么需要它**：频道名在这个仓库里有三份——正本在 `bridge.ts`，preload 抄一份
+ * （沙箱里的 require 取不到旁边的文件，抄不了正本只能抄），网页再抄一份
+ * （`web/src/lib/desktop.ts`，那边也有它自己的一份理由）。抄错的后果不是报错，
+ * 而是**按钮点了没反应**——那种坏法最难查，所以在这里钉住。
+ *
+ * 同理，主进程给每个频道都装了 handler，装的和清单对不上也是同样的坏法。
+ */
+const here = import.meta.dirname;
+const preloadSrc = readFileSync(join(here, 'preload.cts'), 'utf8');
+const mainSrc = readFileSync(join(here, 'main.ts'), 'utf8');
+
+describe('preload 抄的那份频道名，得跟正本一字不差', () => {
+  for (const [name, value] of Object.entries(CHANNEL)) {
+    it(`${name} → ${value}`, () => {
+      expect(preloadSrc).toContain(`'${value}'`);
+    });
+  }
+});
+
+describe('频道名自己不能撞', () => {
+  it('两两不同', () => {
+    const values = Object.values(CHANNEL);
+    expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe('主进程给每一个频道都装了 handler', () => {
+  const handled = (): string[] =>
+    [...mainSrc.matchAll(/ipcMain\.handle\(CHANNEL\.(\w+)/g)].map((m) => m[1]);
+
+  it('清单里的频道一个不缺', () => {
+    const missing = Object.keys(CHANNEL).filter((k) => !handled().includes(k));
+    expect(missing, '这些频道没有 handler：网页点了会没反应').toEqual([]);
+  });
+
+  it('main 里没有清单之外的频道——多出来的那条网页根本调不到', () => {
+    const extra = handled().filter((k) => !(k in CHANNEL));
+    expect(extra).toEqual([]);
+  });
+});
+
+describe('动作清单', () => {
+  it('原来菜单栏上的动作一个都没少', () => {
+    expect([...USER_ACTIONS].sort()).toEqual([
+      'about',
+      'changeDataFolder',
+      'openDataFolder',
+      'quit',
+      'reload',
+    ]);
+  });
+
+  it('更新那几项只在 NSIS 安装版有，开发工具只在开发模式有', () => {
+    expect([...UPDATER_ACTIONS].sort()).toEqual(['checkUpdate', 'restartToUpdate', 'setAutoCheck']);
+    expect([...DEV_ACTIONS]).toEqual(['devTools']);
+  });
+
+  it('三份清单两两不重叠', () => {
+    const all = [...USER_ACTIONS, ...UPDATER_ACTIONS, ...DEV_ACTIONS];
+    expect(new Set(all).size).toBe(all.length);
+  });
+});

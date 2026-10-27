@@ -4,7 +4,11 @@ import type { InkContext } from '../layout';
 import { DEFAULT_HUE, PRESETS, inkFor, type PaperPref } from '../lib/ink';
 
 /**
- * 纸与墨：挑用哪套纸（浅色/深色/跟随系统），和第二版油墨的颜色。
+ * 主题：挑用哪套纸（浅色/深色/跟随系统），和第二版油墨的颜色。
+ *
+ * **卡名是「主题」，不是「纸与墨」。** 纸与墨是卡**里面**那套印刷隐喻的说法
+ * （下面两个小节还叫「纸」「墨屉」），而设置页里这一项要回答的是
+ * 「这个应用长什么样」——找主题的人，看不出「纸与墨」就是它。
  *
  * **纸这一档是补的。** 原来主题只跟随系统、没有开关，而这张卡的预览摆着
  * 「浅色纸/深色纸」两块样张，看着就像能挑——使用者当场问
@@ -33,7 +37,7 @@ export default function InkSetting() {
   const { hue, setHue, dark, paper, setPaper } = useOutletContext<InkContext>();
 
   return (
-    <Card title="纸与墨" size="small">
+    <Card title="主题" size="small">
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
           这套界面按双色套印排：<strong>黑版</strong>印标准音，<strong>第二版</strong>印你发的音。

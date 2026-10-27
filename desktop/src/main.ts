@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, session, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -11,7 +11,7 @@ import { decidePermission } from './permissions.js';
 import { LogSink } from './logs.js';
 import { pickFreePort } from './ports.js';
 import { startServer, waitUntilHealthy, describeLaunchFailure, type ChildHandle } from './serverChild.js';
-import { buildMenuTemplate } from './menu.js';
+import { CHANNEL, type DesktopState } from './bridge.js';
 import {
   createUpdater, loadAutoCheck, saveAutoCheck, shouldEnableUpdater, updateChannelFromPackage,
   type AutoUpdaterLike, type Updater,
@@ -36,6 +36,14 @@ let settings: DesktopSettings | null = null;
 let dataRoot = USER_DATA;
 let port = 0;
 let quitting = false;
+/**
+ * 正音自己的版本号。
+ *
+ * **不用 `app.getVersion()`**：开发模式下 Electron 读不到应用自己的 package.json，
+ * 那个调用给的是 **Electron 的版本**（45.0.0）——界面上写「正音 45.0.0」是句假话。
+ * `desktop/package.json` 里那份才是正音的版本，打包时 electron-builder 也用它。
+ */
+let appVersion = '';
 
 function pkg(): { version: string; zhengyinChannel?: string } {
   return JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version: string; zhengyinChannel?: string };
@@ -61,7 +69,15 @@ function createWindow(healthy: boolean): void {
     height: 800,
     icon: ICON,
     show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+    // preload 是网页跟主进程之间唯一的通道：菜单栏撤了以后，原来挂在菜单上的
+    // 动作（打开数据文件夹、检查更新……）由网页自己摆，点下来走的就是这里。
+    // 它必须是 .cjs —— 沙箱渲染进程不加载 ESM preload（见 preload.cts 的说明）。
+    webPreferences: {
+      preload: join(here, 'preload.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+    },
   });
   win.once('ready-to-show', () => win?.show());
 
@@ -92,30 +108,44 @@ function installPermissions(): void {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => decidePermission(permission));
 }
 
-function buildMenu(): void {
-  const readyVersion = updater?.versionReady() ?? null;
-  Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate({
-    openDataFolder: () => { void shell.openPath(dataRoot); },
-    changeDataFolder: () => { void changeDataFolder(); },
-    reload: () => win?.reload(),
-    quit: () => app.quit(),
-    about: () => {
-      void dialog.showMessageBox({
-        type: 'info',
-        title: `关于${PRODUCT_NAME}`,
-        message: `${PRODUCT_NAME} ${app.getVersion()}`,
-        detail: '美式发音逐音素评测与笔记。数据全部在这台机器上。',
-      });
-    },
-    updater: updater ? {
-      check: () => updater?.checkManual(),
-      restart: () => updater?.restartToInstall(),
-      autoCheck: loadAutoCheck(PREFS_FILE),
-      toggleAutoCheck: (v) => updater?.setAutoCheck(v),
-      readyVersion,
-    } : null,
-    devTools: app.isPackaged ? null : () => win?.webContents.openDevTools(),
-  })));
+function showAbout(): void {
+  void dialog.showMessageBox({
+    type: 'info',
+    title: `关于${PRODUCT_NAME}`,
+    message: `${PRODUCT_NAME} ${appVersion}`,
+    detail: '美式发音逐音素评测与笔记。数据全部在这台机器上。',
+  });
+}
+
+/**
+ * 菜单栏撤了以后，原来挂在菜单上的动作改由网页调用。
+ *
+ * 网页那边拿到的是 preload 递过来的 `window.zhengyinDesktop`，一个方法对应这里
+ * 一个 handler。**动作清单的正本是 bridge.ts**，这里只管实现。
+ *
+ * handler 一律不回值：这些动作的结果要么是界面自己变了（重新加载、退出），
+ * 要么是弹了个对话框（换数据文件夹、关于），网页那边不需要等一个结果。
+ */
+function registerIpc(): void {
+  const state = (): DesktopState => ({
+    version: appVersion,
+    // 有没有更新器取决于打包形态（只有 Windows 的 NSIS 安装版有），网页不自己判断
+    updater: updater !== null,
+    devTools: !app.isPackaged,
+    autoCheck: loadAutoCheck(PREFS_FILE),
+    updateReady: updater?.versionReady() ?? null,
+  });
+
+  ipcMain.handle(CHANNEL.state, () => state());
+  ipcMain.handle(CHANNEL.openDataFolder, () => { void shell.openPath(dataRoot); });
+  ipcMain.handle(CHANNEL.changeDataFolder, () => { void changeDataFolder(); });
+  ipcMain.handle(CHANNEL.reload, () => { win?.reload(); });
+  ipcMain.handle(CHANNEL.quit, () => { app.quit(); });
+  ipcMain.handle(CHANNEL.about, () => { showAbout(); });
+  ipcMain.handle(CHANNEL.checkUpdate, () => { updater?.checkManual(); });
+  ipcMain.handle(CHANNEL.setAutoCheck, (_e, v: unknown) => { updater?.setAutoCheck(v === true); });
+  ipcMain.handle(CHANNEL.restartToUpdate, () => { updater?.restartToInstall(); });
+  ipcMain.handle(CHANNEL.devTools, () => { win?.webContents.openDevTools(); });
 }
 
 async function changeDataFolder(): Promise<void> {
@@ -145,6 +175,14 @@ async function changeDataFolder(): Promise<void> {
 async function bootstrap(): Promise<void> {
   settings = readDesktopSettings(SETTINGS_FILE);
   let backupFile: string | null = null;
+
+  // 没有菜单栏。Electron 默认那条「文件 / 帮助」在 Windows 上是窗口的一部分，
+  // 设成 null 就整条撤掉；窗口的标题栏（最小化/最大化/关闭）不受影响。
+  // 原来挂在上面的动作改成由网页自己摆，通道是 preload（见 bridge.ts）。
+  Menu.setApplicationMenu(null);
+
+  // 界面上要写的版本号。正音自己那份，不是 Electron 的。
+  appVersion = pkg().version;
 
   if (!settings) {
     const choice = await askFirstRun(dialog as unknown as FirstRunDialog);
@@ -187,6 +225,39 @@ async function bootstrap(): Promise<void> {
 
     const healthy = await waitUntilHealthy(port);
     installPermissions();
+
+    // 更新器要在开窗**之前**起来：网页一打开就会问「有没有更新器」，
+    // 那时候这个答案得是对的（晚一步的话，头一次问会得到「没有」，
+    // 那一档按钮就永远不出现了）。
+    const channel = updateChannelFromPackage(pkg());
+    if (shouldEnableUpdater({ isPackaged: app.isPackaged, platform: process.platform, channel })) {
+      const { autoUpdater } = electronUpdater;
+      updater = createUpdater(autoUpdater as unknown as AutoUpdaterLike, {
+        log: (m) => log.write(`[updater] ${m}\n`),
+        // 更新下好了 → 弹一条系统通知，点它就装。
+        //
+        // **不用对话框**：对话框是模态的，会把人正在进行的录音打断。
+        // 通知不挡界面，而「重启以完成更新」这个按钮本身在应用里
+        // （设置页的「桌面版」那一段），通知只是把它叫醒。
+        balloon: (title, content) => {
+          if (!Notification.isSupported()) return;
+          const n = new Notification({ title, body: content });
+          n.on('click', () => { updater?.restartToInstall(); });
+          n.show();
+        },
+        showError: (m) => { void dialog.showMessageBox({ type: 'error', title: `${PRODUCT_NAME}更新`, message: m }); },
+        setTimer: (cb, ms) => setTimeout(cb, ms),
+        readAutoCheck: () => loadAutoCheck(PREFS_FILE),
+        writeAutoCheck: (v) => saveAutoCheck(PREFS_FILE, v),
+        // 以前这里是重建菜单（菜单上那个「自动检查更新」勾要跟着变）。
+        // 现在没有菜单可重建了：网页自己来问状态（CHANNEL.state），
+        // 所以这里不用做任何事。
+        onChange: () => {},
+      });
+      updater.scheduleAuto();
+    }
+
+    registerIpc();
     createWindow(healthy);
 
     if (backupFile) {
@@ -214,22 +285,6 @@ async function bootstrap(): Promise<void> {
         }
       }
     }
-
-    const channel = updateChannelFromPackage(pkg());
-    if (shouldEnableUpdater({ isPackaged: app.isPackaged, platform: process.platform, channel })) {
-      const { autoUpdater } = electronUpdater;
-      updater = createUpdater(autoUpdater as unknown as AutoUpdaterLike, {
-        log: (m) => log.write(`[updater] ${m}\n`),
-        balloon: (title, content) => { void dialog.showMessageBox({ type: 'info', title, message: content }); },
-        showError: (m) => { void dialog.showMessageBox({ type: 'error', title: `${PRODUCT_NAME}更新`, message: m }); },
-        setTimer: (cb, ms) => setTimeout(cb, ms),
-        readAutoCheck: () => loadAutoCheck(PREFS_FILE),
-        writeAutoCheck: (v) => saveAutoCheck(PREFS_FILE, v),
-        onChange: () => buildMenu(),
-      });
-      updater.scheduleAuto();
-    }
-    buildMenu();
   } catch (e) {
     void dialog.showMessageBox({
       type: 'error',
