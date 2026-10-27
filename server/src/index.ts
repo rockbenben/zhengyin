@@ -22,6 +22,7 @@ import { reanalyzeEntries } from './reanalyze.js';
 import { reconcileAttempts } from './reconcile.js';
 import { acquireDataLock, DataLockBusyError } from './lock.js';
 import { missingFromTable, missingHowTo } from './analysis/articulation.js';
+import { CSP } from './csp.js';
 
 // 两个根：只读资源（模板、前端产物、随附笔记）与可写数据（data/、.env、本机笔记）。
 // 浏览器模式下两者都是仓库根，行为与以前一致；桌面版分别指向 resources 与 userData。
@@ -216,6 +217,7 @@ if (existsSync(webDist)) {
   const shell = (c: Context) =>
     c.html(readFileSync(join(webDist, 'index.html'), 'utf8'), 200, {
       'Cache-Control': 'no-store, must-revalidate',
+      'Content-Security-Policy': CSP,
     });
 
   // `/` 必须抢在 serveStatic 前面：静态中间件会把目录请求直接映射到 index.html 并原样
