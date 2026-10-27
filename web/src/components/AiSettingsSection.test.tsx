@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AiSettingsSection from './AiSettingsSection';
 import { api } from '../api';
+import { clearAiDraft } from '../lib/aiDraft';
 import type { AiSettings, AiStatusInfo } from '../types';
 
 const settingsOf = (over: Partial<AiSettings> = {}): AiSettings => ({
@@ -25,7 +26,12 @@ const maskedDeepSeek = {
   model: 'deepseek-flash',
 };
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // 草稿是模块级的（要跨卸载保留），所以每条用例都得从头开始——
+  // 不清的话，上一条留下的草稿会漏进这一条，测的就不是这条用例了。
+  clearAiDraft();
+});
 
 describe('AI 设置：接口模式', () => {
   it('默认是接口模式；点服务商填地址与模型', async () => {
@@ -197,5 +203,49 @@ describe('AI 设置：命令行模式', () => {
     render(<AiSettingsSection />);
 
     expect(await screen.findByText(/用最轻的配置跑一句/)).toBeTruthy();
+  });
+});
+
+/**
+ * 切组不丢没保存的输入。
+ *
+ * 设置页按五组切换，「AI 讲解」那一张卡切走再切回来会**重新挂载**——
+ * 而草稿本来只活在组件的 useState 里，于是刚输入的密钥、刚勾的同意跟着卸载一起消失，
+ * 用户得从头再打一遍（密钥那么长）。
+ */
+describe('切组不丢草稿', () => {
+  const withDeepSeek = () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      endpointId: 'deepseek',
+      endpoints: { deepseek: maskedDeepSeek },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf({
+      configured: true, provider: 'openai·deepseek-flash',
+    }));
+  };
+
+  it('重新挂载之后，刚输入的密钥和刚勾的同意还在', async () => {
+    withDeepSeek();
+    const first = render(<AiSettingsSection />);
+    fireEvent.change(await screen.findByLabelText('密钥'), { target: { value: 'sk-new-value' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    first.unmount();
+
+    render(<AiSettingsSection />);
+    expect((await screen.findByLabelText('密钥') as HTMLInputElement).value).toBe('sk-new-value');
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('保存过之后草稿作废——重新进来是服务端那份，不是旧草稿', async () => {
+    withDeepSeek();
+    const save = vi.spyOn(api, 'saveAiSettings').mockImplementation(async (s) => s);
+    const first = render(<AiSettingsSection />);
+    fireEvent.change(await screen.findByLabelText('密钥'), { target: { value: 'sk-new-value' } });
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    first.unmount();
+
+    render(<AiSettingsSection />);
+    expect((await screen.findByLabelText('密钥') as HTMLInputElement).value).toBe(maskedDeepSeek.key);
   });
 });

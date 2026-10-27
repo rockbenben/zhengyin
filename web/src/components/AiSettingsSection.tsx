@@ -7,6 +7,7 @@ import type {
   AiCliKind, AiEndpointRecord, AiMode, AiProtocol, AiSettings, AiStatusInfo, AiTestResult,
 } from '../types';
 import { AI_PRESETS, modelSuggestionsFor, visibleAiPresets, type AiPreset } from '../lib/aiPresets';
+import { clearAiDraft, getAiDraft, setAiDraft } from '../lib/aiDraft';
 
 const CLI_LABELS: Record<AiCliKind, string> = {
   claude: 'Claude Code',
@@ -65,7 +66,8 @@ export default function AiSettingsSection() {
   useEffect(() => {
     Promise.all([api.aiSettings(), api.aiStatus()])
       .then(([s, st]) => {
-        setSettings(s);
+        // 有草稿就用草稿——那是用户自己刚改的、还没保存的那一份。
+        setSettings(getAiDraft() ?? s);
         setStatus(st);
         originalHosts.current = Object.fromEntries(
           Object.entries(s.endpoints).map(([k, v]) => [k, hostOf(v.baseUrl)]),
@@ -79,20 +81,34 @@ export default function AiSettingsSection() {
   }
   if (!settings || !status) return <Card><Spin /></Card>;
 
+  /**
+   * 改设置 = 改草稿。
+   *
+   * 草稿写在模块级（见 `lib/aiDraft.ts`），所以切组再切回来，用户的输入还在。
+   * 用它统一收口，是为了让「改了东西」只有这一条路——漏一条就等于那份改动会丢。
+   */
+  const edit = (fn: (s: AiSettings) => AiSettings): void => {
+    setSettings((s) => {
+      if (!s) return s;
+      const next = fn(s);
+      setAiDraft(next);
+      return next;
+    });
+  };
+
   const setMode = (mode: AiMode) => {
-    setSettings((s) => (s ? { ...s, mode } : s));
+    edit((s) => ({ ...s, mode }));
     setErr(null);
     setTestResult(null);
   };
 
   const patchCli = (patch: Partial<AiSettings['cli']>) => {
-    setSettings((s) => (s ? { ...s, cli: { ...s.cli, ...patch } } : s));
+    edit((s) => ({ ...s, cli: { ...s.cli, ...patch } }));
     setErr(null);
   };
 
   const patchActive = (patch: Partial<AiEndpointRecord>) => {
-    setSettings((s) => {
-      if (!s) return s;
+    edit((s) => {
       const cur = s.endpoints[s.endpointId];
       if (!cur) return s;
       return { ...s, endpoints: { ...s.endpoints, [s.endpointId]: { ...cur, ...patch } } };
@@ -102,8 +118,7 @@ export default function AiSettingsSection() {
 
   /** 切过去时保留各家自己的地址/模型/密钥；第一次点某家才按预置填一份。 */
   const selectProvider = (p: AiPreset) => {
-    setSettings((s) => {
-      if (!s) return s;
+    edit((s) => {
       if (s.endpoints[p.providerKey]) return { ...s, endpointId: p.providerKey };
       return {
         ...s,
@@ -119,8 +134,7 @@ export default function AiSettingsSection() {
   };
 
   const selectCustom = () => {
-    setSettings((s) => {
-      if (!s) return s;
+    edit((s) => {
       if (s.endpoints.custom) return { ...s, endpointId: 'custom' };
       return {
         ...s,
@@ -136,6 +150,8 @@ export default function AiSettingsSection() {
     if (!settings) throw new Error('还没加载完');
     const next = await api.saveAiSettings(settings);
     setSettings(next);
+    // 保存过了，草稿就作废——服务端那份才是真的。
+    clearAiDraft();
     originalHosts.current = Object.fromEntries(
       Object.entries(next.endpoints).map(([k, v]) => [k, hostOf(v.baseUrl)]),
     );
@@ -409,7 +425,7 @@ export default function AiSettingsSection() {
 
         <Checkbox
           checked={settings.consent}
-          onChange={(e) => setSettings((s) => (s ? { ...s, consent: e.target.checked } : s))}
+          onChange={(e) => edit((s) => ({ ...s, consent: e.target.checked }))}
         >
           我同意把发音档案、相关笔记和这次的错误发给我选的 AI 服务
         </Checkbox>
