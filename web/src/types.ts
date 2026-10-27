@@ -457,3 +457,36 @@ export interface ChatReply {
   provider: string;
   at?: string;
 }
+
+// ── AI 整理代理 ──
+export type AgentState = 'idle' | 'running' | 'done' | 'error' | 'cancelled' | 'undone';
+export type AgentTask = 'organize' | 'profile' | 'custom';
+
+export interface AgentDiff {
+  added: string[];
+  modified: string[];
+  removed: string[];
+}
+
+export interface AgentOutOfScope {
+  path: string;
+  kind: 'added' | 'modified' | 'removed';
+}
+
+/** GET /api/ai/agent/status（以及 undo 的返回） */
+export interface AgentStatusInfo {
+  state: AgentState;
+  logs: string[];
+  startedAt: number | null;
+  finishedAt: number | null;
+  changed: AgentDiff | null;
+  outOfScope: AgentOutOfScope[];
+  noteWarnings: string[];
+  autoOk: boolean | null;
+  runId: string | null;
+  error: string | null;
+  cancelling: boolean;
+}
+
+/** POST /api/ai/agent/run：run 是异步的，runId 可能还没生成，界面随后轮询 status */
+export interface AgentStartResult { runId: string | null }

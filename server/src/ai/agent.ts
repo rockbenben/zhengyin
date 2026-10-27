@@ -73,9 +73,17 @@ export interface AgentRunArgs {
   onLog: (line: string) => void;
   onChild: (pid: number | undefined) => void;
 }
-export interface AgentRunResult { code: number | null; output: string; displayName?: string }
+export type AgentRunResult = { code: number | null; output: string; displayName?: string };
 export type AgentRunFn = (args: AgentRunArgs) => Promise<AgentRunResult>;
 export interface AgentRunnerOptions { runAgent?: AgentRunFn }
+
+/** app.ts 只依赖这四个动作；测试注入的假实现不用碰进程和文件。 */
+export interface AgentController {
+  run(task: AgentTask, note?: string): Promise<void>;
+  status(): AgentStatus;
+  cancel(): void;
+  undo(): void;
+}
 
 const posix = (p: string): string => p.split(sep).join('/');
 const relTo = (root: string, p: string): string => posix(relative(root, p));
@@ -263,7 +271,7 @@ const TASK_TEXT: Record<Exclude<AgentTask, 'custom'>, string> = {
  * 快照只覆盖**允许写的东西**（本机笔记 + 当前用户档案）。data/ 下其余文件在运行结束后
  * 会做一次差异检查，动了就列进 outOfScope——那些不撤销，只提醒人自己看。
  */
-export class AgentRunner {
+export class AgentRunner implements AgentController {
   private state: AgentStatus = {
     state: 'idle',
     logs: [],
@@ -446,6 +454,10 @@ export class AgentRunner {
     if (!this.lastRunDir || !this.lastSnapshot) throw new Error('这一次还没有可撤销的整理。');
     const snap = this.lastSnapshot;
     const profilePath = resolve(this.deps.appRoot, snap.profileRel);
+    // 撤销之后，上一次运行留下的笔记告警已经随着文件一起回滚了；
+    // 只保留撤销本身可能报出来的新问题。
+    this.state.noteWarnings = [];
+    this.state.error = null;
 
     restoreSnapshot(this.lastRunDir, {
       appRoot: this.deps.appRoot,

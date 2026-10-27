@@ -37,6 +37,7 @@ import { aiStatus, readCoach, runAiText } from './ai/run.js';
 import { buildChatContext, buildWordContext } from './ai/context.js';
 import { commandExists } from './ai/cli.js';
 import { appendChat, clearChat, readChat } from './ai/chat.js';
+import type { AgentController, AgentTask } from './ai/agent.js';
 
 export type AiRun = (
   messages: AiMessage[],
@@ -93,6 +94,8 @@ export interface AppDeps {
   shippedNotes: string;
   /** 测试注入：不给就按 dataDir 里的设置走真实接口/命令行 */
   aiRun?: AiRun;
+  /** 文件整理代理。index.ts 构造真的，测试注入假的 */
+  agent: AgentController;
   /** 多用户。实现是 users.ts 的 UserManager，index.ts 接线；测试里给 stub */
   users: {
     current: () => string;
@@ -421,6 +424,54 @@ export function createApp(deps: AppDeps) {
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 500);
+    }
+  });
+
+  // ── AI 整理：只有命令行代理能读写文件 ──
+  app.post('/api/ai/agent/run', async (c) => {
+    try {
+      requireConsent();
+      if (aiSettings().mode !== 'cli') {
+        return c.json({ error: '整理需要命令行代理：接口模式只能讲解，不能读写文件。' }, 409);
+      }
+      const body = await c.req.json().catch(() => null) as { task?: string; note?: string } | null;
+      const task = body?.task;
+      if (task !== 'organize' && task !== 'profile' && task !== 'custom') {
+        return c.json({ error: 'task 只能是 organize / profile / custom' }, 400);
+      }
+      const note = (body?.note ?? '').trim();
+      if (task === 'custom' && !note) {
+        return c.json({ error: '自定义整理要写清让 AI 做什么。' }, 400);
+      }
+      if (deps.agent.status().state === 'running') {
+        return c.json({ error: '上一次整理还在跑，等它结束（或先取消）再开始。' }, 409);
+      }
+
+      void deps.agent.run(task as AgentTask, note || undefined).catch(() => {});
+      // run 在第一个 await 之前就把快照和 runId 备好了；拿不到也不挡，
+      // 界面随后会轮询 status。
+      return c.json({ runId: deps.agent.status().runId }, 202);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, aiErrorStatus(e));
+    }
+  });
+
+  app.get('/api/ai/agent/status', (c) => c.json(deps.agent.status()));
+
+  app.post('/api/ai/agent/cancel', (c) => {
+    if (deps.agent.status().state !== 'running') {
+      return c.json({ error: '现在没有在跑的整理。' }, 409);
+    }
+    deps.agent.cancel();
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/ai/agent/undo', (c) => {
+    try {
+      deps.agent.undo();
+      return c.json(deps.agent.status());
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
     }
   });
 

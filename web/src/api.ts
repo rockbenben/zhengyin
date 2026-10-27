@@ -230,4 +230,14 @@ export const api = {
     body: JSON.stringify(word ? { message, word } : { message }),
   })),
   clearAiChat: () => jx<{ ok: boolean }>(fetch('/api/ai/chat', { method: 'DELETE' })),
+
+  // 整理代理。run 只接受 organize/profile/custom；custom 要带说明。
+  aiAgentRun: (task: T.AgentTask, note?: string) => jx<T.AgentStartResult>(fetch('/api/ai/agent/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(note ? { task, note } : { task }),
+  })),
+  aiAgentStatus: () => j<T.AgentStatusInfo>(fetch('/api/ai/agent/status')),
+  aiAgentCancel: () => jx<{ ok: boolean }>(fetch('/api/ai/agent/cancel', { method: 'POST' })),
+  aiAgentUndo: () => jx<T.AgentStatusInfo>(fetch('/api/ai/agent/undo', { method: 'POST' })),
 };

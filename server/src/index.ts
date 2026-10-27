@@ -23,6 +23,7 @@ import { reconcileAttempts } from './reconcile.js';
 import { acquireDataLock, DataLockBusyError } from './lock.js';
 import { missingFromTable, missingHowTo } from './analysis/articulation.js';
 import { CSP } from './csp.js';
+import { AgentRunner } from './ai/agent.js';
 
 // 两个根：只读资源（模板、前端产物、随附笔记）与可写数据（data/、.env、本机笔记）。
 // 浏览器模式下两者都是仓库根，行为与以前一致；桌面版分别指向 resources 与 userData。
@@ -124,6 +125,20 @@ const um = new UserManager({
 });
 console.log(`[users] 当前用户：${um.current().name}`);
 
+// 代理一次只能跑一个；它读的档案和库跟着当前用户走，所以用 getter 而不是快照。
+const agent = new AgentRunner({
+  appRoot: runtime.appRoot,
+  dataDir: runtime.dataDir,
+  localNotes: runtime.localNotes,
+  shippedNotes: runtime.shippedNotes,
+  workflowsDir: runtime.workflowsDir,
+  noteStore,
+  get db() { return um.current().db; },
+  get profileFile() { return um.current().profileFile; },
+  userName: () => um.current().name,
+  now: () => new Date().toISOString(),
+});
+
 const envText = readEnvFile(runtime.envFile);
 const modelSource = readEnvValue(envText, 'MODEL_SOURCE');
 const hfEndpoint = readEnvValue(envText, 'HF_ENDPOINT');
@@ -187,6 +202,7 @@ const app = createApp({
   appRoot: runtime.appRoot,
   workflowsDir: runtime.workflowsDir,
   shippedNotes: runtime.shippedNotes,
+  agent,
   audioDir: join(dataDir, 'audio'),
   // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的
   // envFile 再兜一次，避免"明明配了却说没配"。

@@ -10,6 +10,7 @@ import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
 import AssistantPage from './pages/AssistantPage';
+import OrganizePage from './pages/OrganizePage';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/organize" element={<OrganizePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

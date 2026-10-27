@@ -11,6 +11,15 @@ import { analyzeText } from './service.js';
 import { ReviewStore } from './review.js';
 import { CONFIDENT } from './analysis/espeak.js';
 import { invalidUserName } from './users.js';
+import type { AgentStatus } from './ai/agent.js';
+
+export function idleAgentStatus(): AgentStatus {
+  return {
+    state: 'idle', logs: [], startedAt: null, finishedAt: null,
+    changed: null, outOfScope: [], noteWarnings: [], autoOk: null,
+    runId: null, error: null, cancelling: false,
+  };
+}
 
 export function testDeps(): AppDeps {
   const notesDir = mkdtempSync(join(tmpdir(), 'notes-'));
@@ -93,6 +102,12 @@ severity: confirmed
       list: () => ['默认'],
       switchTo: vi.fn().mockReturnValue('ok' as const),
       create: vi.fn().mockReturnValue('ok' as const),
+    },
+    agent: {
+      run: vi.fn(async () => {}),
+      status: () => idleAgentStatus(),
+      cancel: vi.fn(),
+      undo: vi.fn(),
     },
   };
 }
@@ -954,6 +969,114 @@ describe('AI api', () => {
       const del = await app.request('/api/ai/chat', { method: 'DELETE' });
       expect(del.status).toBe(200);
       expect((await (await app.request('/api/ai/chat')).json()).messages).toEqual([]);
+    });
+  });
+
+  describe('整理代理', () => {
+    const cliBody = {
+      ...aiSettingsBody,
+      mode: 'cli',
+      cli: { kind: 'claude', path: '', customArgs: '' },
+    };
+
+    function fakeAgent(initial: Partial<AgentStatus> = {}) {
+      let st: AgentStatus = { ...idleAgentStatus(), ...initial };
+      const controller = {
+        run: vi.fn(async () => {
+          st = { ...st, state: 'running', startedAt: 1, runId: 'run-1' };
+        }),
+        status: vi.fn(() => ({
+          ...st,
+          logs: [...st.logs],
+          changed: st.changed ? { ...st.changed } : null,
+          outOfScope: [...st.outOfScope],
+          noteWarnings: [...st.noteWarnings],
+        })),
+        cancel: vi.fn(() => { st = { ...st, state: 'cancelled' }; }),
+        undo: vi.fn(() => { st = { ...st, state: 'undone' }; }),
+      };
+      return { controller, set: (p: Partial<AgentStatus>) => { st = { ...st, ...p }; } };
+    }
+
+    it('接口模式拒绝整理，不启动代理', async () => {
+      const deps = testDeps();
+      const app = createApp(deps);
+      await putSettings(app, aiSettingsBody);
+      const r = await postJson(app, '/api/ai/agent/run', { task: 'organize' });
+      expect(r.status).toBe(409);
+      expect((await r.json()).error).toContain('命令行代理');
+      expect(deps.agent.run).not.toHaveBeenCalled();
+    });
+
+    it('没同意也不开始', async () => {
+      const deps = testDeps();
+      const app = createApp(deps);
+      await putSettings(app, { ...cliBody, consent: false });
+      expect((await postJson(app, '/api/ai/agent/run', { task: 'organize' })).status).toBe(409);
+      expect(deps.agent.run).not.toHaveBeenCalled();
+    });
+
+    it('命令行模式返回 202 并转发自定义说明', async () => {
+      const deps = testDeps();
+      const fake = fakeAgent();
+      deps.agent = fake.controller;
+      const app = createApp(deps);
+      await putSettings(app, cliBody);
+
+      const r = await postJson(app, '/api/ai/agent/run', { task: 'custom', note: '把 l/n 补一篇' });
+      expect(r.status).toBe(202);
+      expect(await r.json()).toEqual({ runId: 'run-1' });
+      expect(fake.controller.run).toHaveBeenCalledWith('custom', '把 l/n 补一篇');
+    });
+
+    it('任务非法、自定义为空、正在跑都拒绝', async () => {
+      const deps = testDeps();
+      const fake = fakeAgent();
+      deps.agent = fake.controller;
+      const app = createApp(deps);
+      await putSettings(app, cliBody);
+
+      expect((await postJson(app, '/api/ai/agent/run', { task: 'nope' })).status).toBe(400);
+      expect((await postJson(app, '/api/ai/agent/run', { task: 'custom', note: '  ' })).status).toBe(400);
+
+      fake.set({ state: 'running' });
+      expect((await postJson(app, '/api/ai/agent/run', { task: 'organize' })).status).toBe(409);
+      expect(fake.controller.run).not.toHaveBeenCalled();
+    });
+
+    it('status / cancel / undo 都转发给 runner', async () => {
+      const deps = testDeps();
+      const fake = fakeAgent();
+      deps.agent = fake.controller;
+      const app = createApp(deps);
+
+      fake.set({ state: 'running', logs: ['正在启动'] });
+      const status = await (await app.request('/api/ai/agent/status')).json();
+      expect(status.state).toBe('running');
+      expect(status.logs).toContain('正在启动');
+
+      expect((await postJson(app, '/api/ai/agent/cancel', {})).status).toBe(200);
+      expect(fake.controller.cancel).toHaveBeenCalledOnce();
+
+      fake.set({ state: 'done', changed: { added: ['data/notes/x.md'], modified: [], removed: [] } });
+      const undo = await postJson(app, '/api/ai/agent/undo', {});
+      expect(undo.status).toBe(200);
+      expect(fake.controller.undo).toHaveBeenCalledOnce();
+      expect((await undo.json()).state).toBe('undone');
+    });
+
+    it('没有在跑时取消 → 409；撤销失败 → 400', async () => {
+      const deps = testDeps();
+      const fake = fakeAgent();
+      deps.agent = fake.controller;
+      const app = createApp(deps);
+
+      expect((await postJson(app, '/api/ai/agent/cancel', {})).status).toBe(409);
+
+      fake.controller.undo = vi.fn(() => { throw new Error('没有可撤销的整理'); });
+      const u = await postJson(app, '/api/ai/agent/undo', {});
+      expect(u.status).toBe(400);
+      expect((await u.json()).error).toContain('没有可撤销');
     });
   });
 });
