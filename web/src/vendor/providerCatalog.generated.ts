@@ -1,0 +1,811 @@
+// ⚠ 自动生成，请勿手改 —— 手改会在下次同步时被整份覆盖。
+// 更新模型清单 / 端点 / 链接：跑 provider 目录同步脚本重新生成本文件。
+//
+// 这里只有【厂商事实】：模型 id、区域端点、文档与控制台链接、逐 SKU 思考能力，
+// 以及思考参数该往请求体里合并什么（thinkingWire / thinkingWireIf）。
+// 档位表（thinkingLevels / effortLevels）是【给消费方收窄下拉】用的：只列该型号
+// 真有的档，存的值要钳到表里再显示（见各仓自己的 thinking helper）—— 别摆一个
+// 厂商不收的档，那一档线上会被钳到别处，界面与实际跑的档就不是一档了。
+// 形态按各 provider 的 protocol 给：claude / gemini 是【原生协议】的形状，走
+// OpenAI 兼容层时不适用。怎么发（流式/超时/重试/max_tokens）仍是各 app 自己的事。
+// 不含机器翻译类 provider。
+//
+// 例外一行：gemini-openai 不在 registry 里 —— 它是 Google 官方的 OpenAI 兼容面
+// （/v1beta/openai/chat/completions），由同步脚本从原生 gemini 行合成，给只讲
+// Chat Completions 的消费方用。见同步脚本里那条的注释。
+
+export interface CatalogEndpoint {
+  /** 区域/产品线标签，如 "Mainland (CN)" / "International" */
+  label: string;
+  /** 完整请求地址 */
+  url: string;
+  /** 去掉动作路径后的 base，如 https://api.deepseek.com */
+  baseUrl: string;
+  /**
+   * 该端点【自己】的文档。只出现在「一个端点就是一个独立产品」的场合
+   * （Custom 底下的 LM Studio / Ollama / LiteLLM…）—— provider 级的 docs 对
+   * 它们没有意义，而这恰恰是最需要先读上游文档的一条路。同一服务的地域/计费
+   * 变体共用 provider 级 docs，不带这个字段。
+   */
+  docs?: string;
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  /** 该 SKU 支持思考模式 */
+  thinking?: boolean;
+  /** 该 SKU 接受的思考档位，由低到高。声明它 = 厂商没有关闭开关，最低档就是"最关" */
+  thinkingLevels?: readonly string[];
+  /**
+   * 该 SKU 收哪些 effort（不含 none —— 那是关闭值，由 thinkingWire 的 off 槽表达）。
+   * 与 thinkingLevels 分开：一个是"关不掉"，一个是"关得掉但档位受限"
+   * （OpenRouter 的 deepseek-v4.1-flash / hy3 / nemotron-3-super / kimi-k3，
+   * 官方 supported_efforts 里有的没有 medium）。
+   * 声明了就只列它真有的档位 —— 用户不会拨到一个官方没有的档。
+   * 缺省 = 该 SKU 收全部档位。
+   */
+  effortLevels?: readonly string[];
+  /**
+   * 各档位该往请求体里合并的字段。缺省 = 这个 SKU 不发任何思考参数
+   * （已知不思考，或该 provider 没有已知的线格式 —— 两种都不该乱发）。
+   * 缺 off 键 = 关闭态也不发（厂商没有关闭值时由最低档承担，见 thinkingLevels）。
+   *
+   * ⚠ 形态是按该 provider 的 protocol 字段给的。claude / gemini 这里给的是【原生
+   * 协议】的形状（/v1/messages、:streamGenerateContent）—— 你要是改走 OpenAI
+   * 兼容层，这份不适用。
+   */
+  thinkingWire?: {
+    off?: Record<string, unknown>;
+    low?: Record<string, unknown>;
+    medium?: Record<string, unknown>;
+    high?: Record<string, unknown>;
+  };
+}
+
+export interface CatalogProvider {
+  key: string;
+  label: string;
+  category: "llm" | "aggregator";
+  /** 决定走哪个 adapter */
+  protocol: string;
+  docs?: string;
+  apiKeyUrl?: string;
+  defaultModel?: string;
+  /** false = 这家没有关闭值，关闭态只能发最低档（仍在推理、仍在计费） */
+  canDisableThinking: boolean;
+  /**
+   * true = 该 provider 当前【浏览器直连是坏的】（CORS 缺头 / 预检 404 / 按 origin
+   * 拦截），必须经代理或中转。是实测得出的当前事实，不是永恒属性 —— 上游修好后
+   * 会在下次同步里变回 false，所以别把它硬编码进业务分支，跟着这个字段走。
+   */
+  directBlocked: boolean;
+  /**
+   * true = 在各 app 的默认 provider 选择器里【隐藏】，用户要打开一个默认关的高级
+   * 开关才放出来（被标的都是订阅套餐端点：官方文档写明，在非 AI 编程工具 /
+   * 允许范围之外使用套餐端点可能被判定滥用，
+   * 导致订阅停用或账号 / API Key 封禁）。
+   *
+   * ⚠ 这【只】是默认 UI 过滤，不是禁用：行为层必须照常工作 —— 已经选了它的老
+   * 设置、导入的设置文件、显式指定都要能解析能用。开关只是把选项放出来。
+   */
+  hidden?: boolean;
+  /**
+   * true = 这家的【地址才是凭据】，apiKey 可选甚至根本不存在（自建网关、局域网
+   * 里的本地推理服务）。界面不该拿「没填 key」拦住开跑 —— 那会让本地模型完全用
+   * 不了，而用户只能随便编一个字符串糊弄过去。
+   */
+  keyOptional?: boolean;
+  /**
+   * 用户手填的、不在 models 清单里的 SKU 该发的思考参数（能力未知，按本 provider
+   * 的通用形态走）。清单内的 SKU 用它自己的 thinkingWire —— 有的 provider 逐 SKU
+   * 形态不同（moonshot 的 kimi-k3 收顶层 reasoning_effort，K2.x 收 thinking:{type}），
+   * 拿 provider 级形态套上去会 4xx。
+   */
+  thinkingWire?: CatalogModel["thinkingWire"];
+  /**
+   * 未列出 SKU 的【条件】形态：取【第一条】pattern 匹配上的 wire，都不匹配才用
+   * 上面的 thinkingWire。只有【思考协议按名字分代、且无法从 models 清单判定】的
+   * provider 才需要它（Claude 即此类：官方 4.7 及以后【拒收】budget_tokens，
+   * 属于哪一代取决于模型名），手填的
+   * SKU 不在任何清单里，只能按名字判。
+   *
+   * ⚠ 是【有序数组】，规则会互相包含：官方标 Always on 的那几支同属新世代，正则
+   * 是新世代那条的子集，形态却差在关闭档（它们连 thinking:{type:"disabled"} 都回
+   * 400，所以那条规则的 wire 干脆没有 off 键）。窄的排在前面，务必取首个匹配，
+   * 别遍历合并。
+   *
+   * ⚠ 取首个匹配 ⇒ 【没有向宽规则继承这回事】。少一个档位 = 那一档什么都不发，
+   * 不是「用宽规则那一档」。所以各规则的非-off 档位集合恒等（生成时断言），只有
+   * off 允许缺席（缺 off = 这一支关不掉）。加新规则时别只写差异的那半。
+   *
+   * 这套规则各 app 各写一份必然漂，所以由目录统一下发；删掉窄规则里的任何档位，
+   * 都可能让手填的 SKU 拿到被拒的参数形态。
+   */
+  thinkingWireIf?: readonly { pattern: string; wire: CatalogModel["thinkingWire"] }[];
+  /** [0] 为默认端点 */
+  endpoints: readonly CatalogEndpoint[];
+  models: readonly CatalogModel[];
+}
+
+export const PROVIDER_CATALOG: readonly CatalogProvider[] = [
+  {
+    key: "deepseek",
+    label: "DeepSeek",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://api-docs.deepseek.com/",
+    apiKeyUrl: "https://platform.deepseek.com/api_keys",
+    defaultModel: "deepseek-flash",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.deepseek.com/chat/completions", baseUrl: "https://api.deepseek.com" },
+    ],
+    models: [
+      { id: "deepseek-flash", name: "DeepSeek Flash", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}} },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"high"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "openai",
+    label: "OpenAI",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://developers.openai.com/api/docs/guides/text",
+    apiKeyUrl: "https://platform.openai.com/api-keys",
+    defaultModel: "gpt-6-luna",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.openai.com/v1/chat/completions", baseUrl: "https://api.openai.com/v1" },
+    ],
+    models: [
+      { id: "gpt-6-astra", name: "GPT-6 Astra", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-6-luna", name: "GPT-6 Luna", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "claude",
+    label: "Claude",
+    category: "llm",
+    protocol: "anthropic",
+    docs: "https://platform.claude.com/docs/en/intro",
+    apiKeyUrl: "https://platform.claude.com/settings/keys",
+    defaultModel: "claude-sonnet-5-5",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"low":{"thinking":{"type":"enabled","budget_tokens":4096}},"medium":{"thinking":{"type":"enabled","budget_tokens":10000}},"high":{"thinking":{"type":"enabled","budget_tokens":12000}}},
+    thinkingWireIf: [{"pattern":"claude-(fable-5|mythos|opus-5-5)","wire":{"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}}},{"pattern":"claude-sonnet-5-5","wire":{"off":{"thinking":{"type":"between_tools"}},"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}}},{"pattern":"claude-(opus-5|opus-4-[78]|sonnet-5|fable-5|mythos|haiku-5)","wire":{"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}}}],
+    endpoints: [
+      { label: "Anthropic", url: "https://api.anthropic.com/v1/messages", baseUrl: "https://api.anthropic.com/v1" },
+    ],
+    models: [
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5", thinking: true, thinkingWire: {"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}} },
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", thinking: true, thinkingWire: {"off":{"thinking":{"type":"between_tools"}},"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}} },
+      { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}} },
+      { id: "claude-fable-5-1", name: "Claude Fable 5.1", thinking: true, thinkingWire: {"low":{"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}},"medium":{"thinking":{"type":"adaptive"},"output_config":{"effort":"medium"}},"high":{"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}} },
+    ],
+  },
+  {
+    key: "gemini",
+    label: "Gemini",
+    category: "llm",
+    protocol: "gemini",
+    docs: "https://ai.google.dev/api/generate-content",
+    apiKeyUrl: "https://aistudio.google.com/app/api-keys",
+    defaultModel: "gemini-3.8-flash",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"low":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"medium":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"medium"}}},"high":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"}}}},
+    endpoints: [
+      { label: "Google AI", url: "https://generativelanguage.googleapis.com/v1beta/models", baseUrl: "https://generativelanguage.googleapis.com" },
+    ],
+    models: [
+      { id: "gemini-4-argon", name: "Gemini 4 Argon", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"low":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"medium":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"medium"}}},"high":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"}}}} },
+      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"low":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"medium":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"medium"}}},"high":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"}}}} },
+      { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", thinking: true, thinkingLevels: ["minimal","low","medium","high"], thinkingWire: {"off":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"minimal"}}},"low":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}},"medium":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"medium"}}},"high":{"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"}}}} },
+    ],
+  },
+  {
+    key: "gemini-openai",
+    label: "Google AI Studio",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://ai.google.dev/gemini-api/docs/openai",
+    apiKeyUrl: "https://aistudio.google.com/app/api-keys",
+    defaultModel: "gemini-3.8-flash",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "OpenAI compatibility", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
+    ],
+    models: [
+      { id: "gemini-4-argon", name: "Gemini 4 Argon", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "qwen",
+    label: "Qwen",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://help.aliyun.com/model-studio/qwen-api-via-openai-chat-completions",
+    apiKeyUrl: "https://bailian.console.aliyun.com/?tab=model#/api-key",
+    defaultModel: "qwen3.8-flash",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"enable_thinking":false},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"xhigh"}},
+    endpoints: [
+      { label: "Mainland (CN)", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+      { label: "International", url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
+      { label: "US", url: "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions", baseUrl: "https://dashscope-us.aliyuncs.com/compatible-mode/v1" },
+      { label: "Hong Kong", url: "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", baseUrl: "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1" },
+    ],
+    models: [
+      { id: "qwen3.8-max", name: "Qwen3.8 Max", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"xhigh"}} },
+      { id: "qwen3.8-flash", name: "Qwen3.8 Flash", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"xhigh"}} },
+    ],
+  },
+  {
+    key: "moonshot",
+    label: "Kimi (Moonshot)",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://platform.kimi.com/docs/models",
+    apiKeyUrl: "https://platform.kimi.com/console/api-keys",
+    defaultModel: "kimi-k2.6",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}},
+    thinkingWireIf: [{"pattern":"kimi-k3","wire":{"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}}}],
+    endpoints: [
+      { label: "Mainland (CN)", url: "https://api.moonshot.cn/v1/chat/completions", baseUrl: "https://api.moonshot.cn/v1" },
+      { label: "International", url: "https://api.moonshot.ai/v1/chat/completions", baseUrl: "https://api.moonshot.ai/v1" },
+    ],
+    models: [
+      { id: "kimi-k3", name: "Kimi K3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}} },
+      { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
+      { id: "kimi-k2.6", name: "Kimi K2.6", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+    ],
+  },
+  {
+    key: "doubao",
+    label: "Doubao (Volcengine)",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.volcengine.com/docs/ark/model-list",
+    apiKeyUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    defaultModel: "doubao-seed-2-1-turbo-260628",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+    ],
+    models: [
+      { id: "doubao-seed-evolving", name: "Doubao Seed Evolving", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "doubao-seed-2-1-pro-260915", name: "Doubao Seed 2.1 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "doubao-seed-2-1-lite-260915", name: "Doubao Seed 2.1 Lite", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "doubao-seed-2-1-turbo-260628", name: "Doubao Seed 2.1 Turbo", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "mimo",
+    label: "Xiaomi MiMo",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://mimo.mi.com/docs/api/chat/openai-api",
+    apiKeyUrl: "https://platform.xiaomimimo.com/console/api-keys",
+    defaultModel: "mimo-v2.6-flash",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}},
+    endpoints: [
+      { label: "Pay-as-you-go", url: "https://api.xiaomimimo.com/v1/chat/completions", baseUrl: "https://api.xiaomimimo.com/v1" },
+      { label: "Token Plan (CN)", url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1" },
+      { label: "Token Plan (Singapore)", url: "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions", baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1" },
+      { label: "Token Plan (Europe)", url: "https://token-plan-ams.xiaomimimo.com/v1/chat/completions", baseUrl: "https://token-plan-ams.xiaomimimo.com/v1" },
+    ],
+    models: [
+      { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+    ],
+  },
+  {
+    key: "zhipu",
+    label: "Zhipu GLM",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.bigmodel.cn/cn/guide/start/model-overview",
+    apiKeyUrl: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+    defaultModel: "glm-5.3",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Mainland (CN)", url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+      { label: "International (Z.ai)", url: "https://api.z.ai/api/paas/v4/chat/completions", baseUrl: "https://api.z.ai/api/paas/v4" },
+    ],
+    models: [
+      { id: "glm-5.3", name: "GLM-5.3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}} },
+      { id: "glm-5.3-flash", name: "GLM-5.3 Flash", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}} },
+      { id: "glm-5.3-flashx", name: "GLM-5.3 FlashX", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"low":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"medium":{"thinking":{"type":"enabled"},"reasoning_effort":"low"},"high":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "minimax",
+    label: "MiniMax",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+    apiKeyUrl: "https://platform.minimax.io/console/access",
+    defaultModel: "MiniMax-M3.1-Flash",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"}},"medium":{"thinking":{"type":"adaptive"}},"high":{"thinking":{"type":"adaptive"}}},
+    endpoints: [
+      { label: "Mainland (CN)", url: "https://api.minimax.cn/v1/chat/completions", baseUrl: "https://api.minimax.cn/v1" },
+      { label: "Mainland (CN, legacy)", url: "https://api.minimaxi.com/v1/chat/completions", baseUrl: "https://api.minimaxi.com/v1" },
+      { label: "International", url: "https://api.minimax.io/v1/chat/completions", baseUrl: "https://api.minimax.io/v1" },
+    ],
+    models: [
+      { id: "MiniMax-M3.1-Flash", name: "MiniMax M3.1 Flash", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"thinking":{"type":"adaptive"},"reasoning_effort":"low"},"low":{"thinking":{"type":"adaptive"},"reasoning_effort":"low"},"medium":{"thinking":{"type":"adaptive"},"reasoning_effort":"medium"},"high":{"thinking":{"type":"adaptive"},"reasoning_effort":"high"}} },
+      { id: "MiniMax-M3", name: "MiniMax M3", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"}},"medium":{"thinking":{"type":"adaptive"}},"high":{"thinking":{"type":"adaptive"}}} },
+    ],
+  },
+  {
+    key: "stepfun",
+    label: "StepFun (阶跃星辰)",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://platform.stepfun.com/docs/zh/guides/models/list",
+    apiKeyUrl: "https://platform.stepfun.com/interface-key",
+    defaultModel: "step-3.5-flash",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.stepfun.com/v1/chat/completions", baseUrl: "https://api.stepfun.com/v1" },
+    ],
+    models: [
+      { id: "step-3.5-flash", name: "Step 3.5 Flash" },
+      { id: "step-3.7-flash", name: "Step 3.7 Flash", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "qianfan",
+    label: "Baidu ERNIE (Qianfan)",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
+    apiKeyUrl: "https://console.bce.baidu.com/iam/#/iam/apikey/list",
+    defaultModel: "ernie-5.1",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}},
+    endpoints: [
+      { label: "Default", url: "https://qianfan.baidubce.com/v2/chat/completions", baseUrl: "https://qianfan.baidubce.com/v2" },
+    ],
+    models: [
+      { id: "ernie-5.1", name: "ERNIE 5.1" },
+    ],
+  },
+  {
+    key: "mistral",
+    label: "Mistral",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.mistral.ai/api",
+    apiKeyUrl: "https://console.mistral.ai/api-keys",
+    defaultModel: "mistral-small-latest",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.mistral.ai/v1/chat/completions", baseUrl: "https://api.mistral.ai/v1" },
+    ],
+    models: [
+      { id: "mistral-medium-3-5", name: "Mistral Medium 3.5", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}} },
+      { id: "mistral-small-latest", name: "Mistral Small 4", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}} },
+      { id: "ministral-14b-2512", name: "Ministral 3 14B" },
+    ],
+  },
+  {
+    key: "grok",
+    label: "xAI (Grok)",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.x.ai/developers/models",
+    apiKeyUrl: "https://console.x.ai/",
+    defaultModel: "grok-4.7",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.x.ai/v1/chat/completions", baseUrl: "https://api.x.ai/v1" },
+    ],
+    models: [
+      { id: "grok-4.7", name: "Grok 4.7", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "cohere",
+    label: "Cohere",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.cohere.com/docs/compatibility-api",
+    apiKeyUrl: "https://dashboard.cohere.com/api-keys",
+    defaultModel: "command-a-plus-05-2026",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.cohere.ai/compatibility/v1/chat/completions", baseUrl: "https://api.cohere.ai/compatibility/v1" },
+    ],
+    models: [
+      { id: "command-a-plus-05-2026", name: "Command A Plus", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}} },
+      { id: "command-a-reasoning-08-2025", name: "Command A Reasoning", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"high"},"medium":{"reasoning_effort":"high"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "yandex",
+    label: "YandexGPT (AI Studio)",
+    category: "llm",
+    protocol: "yandex",
+    docs: "https://aistudio.yandex.ru/en/docs/ai-studio/concepts/api",
+    apiKeyUrl: "https://aistudio.yandex.ru/platform/folders/",
+    defaultModel: "yandexgpt-5.1",
+    canDisableThinking: true,
+    directBlocked: true,
+    endpoints: [
+      { label: "Yandex Cloud", url: "https://llm.api.cloud.yandex.net/v1/chat/completions", baseUrl: "https://llm.api.cloud.yandex.net/v1" },
+    ],
+    models: [
+      { id: "yandexgpt-5.1", name: "YandexGPT Pro 5.1" },
+      { id: "yandexgpt-5-pro", name: "YandexGPT Pro 5" },
+      { id: "aliceai-llm", name: "Alice AI LLM" },
+      { id: "aliceai-llm-flash", name: "Alice AI LLM Flash" },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+      { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B" },
+      { id: "gpt-oss-120b", name: "GPT-OSS 120B" },
+      { id: "gpt-oss-20b", name: "GPT-OSS 20B" },
+    ],
+  },
+  {
+    key: "openrouter",
+    label: "OpenRouter",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://openrouter.ai/docs/use-cases/reasoning-tokens",
+    apiKeyUrl: "https://openrouter.ai/settings/keys",
+    defaultModel: "minimax/minimax-m3.1-flash:free",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}},
+    endpoints: [
+      { label: "Default", url: "https://openrouter.ai/api/v1/chat/completions", baseUrl: "https://openrouter.ai/api/v1" },
+    ],
+    models: [
+      { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "Nemotron 3 Super 120B (free)", thinking: true, effortLevels: ["low","medium"], thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"medium"}}} },
+      { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", thinking: true, effortLevels: ["low","high"], thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"low"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "tencent/hy3", name: "Hy3", thinking: true, effortLevels: ["low","high"], thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"low"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5", thinking: true, thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "google/gemini-3.8-flash", name: "Gemini 3.8 Flash", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "openai/gpt-6-astra", name: "GPT-6 Astra", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "openai/gpt-6-luna", name: "GPT-6 Luna", thinking: true, thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "z-ai/glm-5.3", name: "GLM-5.3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"low"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "x-ai/grok-4.7", name: "Grok 4.7", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "moonshotai/kimi-k2.6", name: "Kimi K2.6", thinking: true, thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "moonshotai/kimi-k3", name: "Kimi K3", thinking: true, effortLevels: ["low","high"], thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"low"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "nvidia/nemotron-3.5-lightning:free", name: "Nemotron 3.5 Lightning (free)" },
+      { id: "minimax/minimax-m3.1-flash:free", name: "MiniMax M3.1 Flash (free)", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning":{"effort":"low"}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+      { id: "minimax/minimax-m3", name: "MiniMax M3", thinking: true, thinkingWire: {"off":{"reasoning":{"enabled":false}},"low":{"reasoning":{"effort":"low"}},"medium":{"reasoning":{"effort":"medium"}},"high":{"reasoning":{"effort":"high"}}} },
+    ],
+  },
+  {
+    key: "opencodeZen",
+    label: "OpenCode Zen",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://opencode.ai/docs/zen/",
+    apiKeyUrl: "https://opencode.ai/auth",
+    defaultModel: "deepseek-v4.1-flash",
+    canDisableThinking: true,
+    directBlocked: true,
+    endpoints: [
+      { label: "Default", url: "https://opencode.ai/zen/v1/chat/completions", baseUrl: "https://opencode.ai/zen/v1" },
+    ],
+    models: [
+      { id: "big-pickle", name: "Big Pickle (free)" },
+      { id: "mimo-v2.6-flash-free", name: "MiMo V2.6 Flash (free)" },
+      { id: "minimax-m3.1-flash-free", name: "MiniMax M3.1 Flash (free)" },
+      { id: "nemotron-3-ultra-free", name: "Nemotron 3 Ultra (free)" },
+      { id: "nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning (free)" },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+      { id: "qwen3.8-flash", name: "Qwen3.8 Flash" },
+      { id: "glm-5.3-flash", name: "GLM 5.3 Flash" },
+      { id: "minimax-m3", name: "MiniMax M3" },
+      { id: "qwen3.6-plus", name: "Qwen3.6 Plus" },
+      { id: "kimi-k2.6", name: "Kimi K2.6" },
+      { id: "glm-5.3", name: "GLM 5.3" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { id: "kimi-k3", name: "Kimi K3" },
+    ],
+  },
+  {
+    key: "opencodeGo",
+    label: "OpenCode Go",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://opencode.ai/docs/go/",
+    apiKeyUrl: "https://opencode.ai/auth",
+    defaultModel: "mimo-v2.6-flash",
+    canDisableThinking: true,
+    directBlocked: true,
+    endpoints: [
+      { label: "Default", url: "https://opencode.ai/zen/go/v1/chat/completions", baseUrl: "https://opencode.ai/zen/go/v1" },
+    ],
+    models: [
+      { id: "muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor" },
+      { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash" },
+      { id: "hy3", name: "Hy3" },
+      { id: "qwen3.8-flash", name: "Qwen3.8 Flash" },
+      { id: "glm-5.3-flash", name: "GLM 5.3 Flash" },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+      { id: "longcat-2.0", name: "LongCat 2.0" },
+      { id: "minimax-m3", name: "MiniMax M3" },
+      { id: "qwen3.7-plus", name: "Qwen3.7 Plus" },
+      { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { id: "glm-5.3", name: "GLM 5.3" },
+      { id: "qwen3.8-max", name: "Qwen3.8 Max" },
+      { id: "kimi-k3", name: "Kimi K3" },
+    ],
+  },
+  {
+    key: "tokenhub",
+    label: "TokenHub (Tencent)",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://cloud.tencent.com/document/product/1823/130079",
+    apiKeyUrl: "https://console.cloud.tencent.com/tokenhub/apikey",
+    defaultModel: "hy3",
+    canDisableThinking: false,
+    directBlocked: true,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}},
+    thinkingWireIf: [{"pattern":"minimax-m3","wire":{"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"}},"medium":{"thinking":{"type":"adaptive"}},"high":{"thinking":{"type":"adaptive"}}}},{"pattern":"glm-5\\.3|kimi-k3","wire":{"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}}}],
+    endpoints: [
+      { label: "Mainland (CN)", url: "https://tokenhub.tencentmaas.com/v1/chat/completions", baseUrl: "https://tokenhub.tencentmaas.com/v1" },
+      { label: "International", url: "https://tokenhub-intl.tencentmaas.com/v1/chat/completions", baseUrl: "https://tokenhub-intl.tencentmaas.com/v1" },
+    ],
+    models: [
+      { id: "hy4-preview", name: "Hunyuan hy4 Preview", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "hy3", name: "Hunyuan hy3", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "glm-5.3", name: "GLM-5.3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}} },
+      { id: "kimi-k3", name: "Kimi K3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}} },
+      { id: "kimi-k2.6", name: "Kimi K2.6", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "minimax-m3", name: "MiniMax M3", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"adaptive"}},"medium":{"thinking":{"type":"adaptive"}},"high":{"thinking":{"type":"adaptive"}}} },
+      { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro" },
+    ],
+  },
+  {
+    key: "groq",
+    label: "Groq",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://console.groq.com/docs/text-chat",
+    apiKeyUrl: "https://console.groq.com/keys",
+    defaultModel: "openai/gpt-oss-20b",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+      { label: "Default", url: "https://api.groq.com/openai/v1/chat/completions", baseUrl: "https://api.groq.com/openai/v1" },
+    ],
+    models: [
+      { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "cerebras",
+    label: "Cerebras",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://inference-docs.cerebras.ai/models/overview",
+    apiKeyUrl: "https://cloud.cerebras.ai/",
+    defaultModel: "gpt-oss-120b",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    thinkingWireIf: [{"pattern":"gpt-oss","wire":{"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}}}],
+    endpoints: [
+      { label: "Default", url: "https://api.cerebras.ai/v1/chat/completions", baseUrl: "https://api.cerebras.ai/v1" },
+    ],
+    models: [
+      { id: "gpt-oss-120b", name: "GPT-OSS 120B", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "qwen-3.8-27b", name: "Qwen 3.8 27B", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "siliconflow",
+    label: "SiliconFlow",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://docs.siliconflow.cn/docs/api/chat-completions-post",
+    apiKeyUrl: "https://cloud.siliconflow.cn/me/account/ak",
+    defaultModel: "deepseek-ai/DeepSeek-V4-Flash",
+    canDisableThinking: true,
+    directBlocked: false,
+    thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}},
+    endpoints: [
+      { label: "Default", url: "https://api.siliconflow.cn/v1/chat/completions", baseUrl: "https://api.siliconflow.cn/v1" },
+    ],
+    models: [
+      { id: "deepseek-ai/DeepSeek-V4-Flash", name: "DeepSeek V4 Flash", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "deepseek-ai/DeepSeek-V4-Pro", name: "DeepSeek V4 Pro", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "zai-org/GLM-5.3", name: "GLM-5.3" },
+      { id: "Qwen/Qwen3.8-27B", name: "Qwen3.8 27B" },
+    ],
+  },
+  {
+    key: "atlascloud",
+    label: "Atlas Cloud",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://www.atlascloud.ai/docs",
+    apiKeyUrl: "https://www.atlascloud.ai/console/api-keys",
+    defaultModel: "deepseek-ai/deepseek-v4.1-flash",
+    canDisableThinking: true,
+    directBlocked: false,
+    endpoints: [
+      { label: "Default", url: "https://api.atlascloud.ai/v1/chat/completions", baseUrl: "https://api.atlascloud.ai/v1" },
+    ],
+    models: [
+      { id: "deepseek-ai/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+      { id: "deepseek-ai/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+      { id: "moonshotai/kimi-k3", name: "Kimi K3" },
+      { id: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5" },
+      { id: "qwen/qwen3.8-max", name: "Qwen3.8 Max" },
+      { id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5" },
+      { id: "openai/gpt-6.1-sol", name: "GPT 6.1 Sol" },
+      { id: "google/gemini-3.8-flash", name: "Gemini 3.8 Flash" },
+    ],
+  },
+  {
+    key: "nvidia",
+    label: "Nvidia NIM",
+    category: "aggregator",
+    protocol: "openai",
+    docs: "https://build.nvidia.com/explore/discover",
+    apiKeyUrl: "https://build.nvidia.com/",
+    defaultModel: "deepseek-ai/deepseek-v4.1-flash",
+    canDisableThinking: true,
+    directBlocked: true,
+    endpoints: [
+      { label: "NVIDIA NIM", url: "https://integrate.api.nvidia.com/v1/chat/completions", baseUrl: "https://integrate.api.nvidia.com/v1" },
+    ],
+    models: [
+      { id: "nvidia/nemotron-3-ultra-550b-a55b", name: "Nemotron 3 Ultra 550B" },
+      { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B" },
+      { id: "google/gemma-4-31b-it", name: "Gemma 4 31B IT" },
+      { id: "nvidia/nemotron-3-super-120b-a12b", name: "Nemotron Super 120B" },
+      { id: "nvidia/nemotron-3.5-lightning-30b-a3b", name: "Nemotron 3.5 Lightning 30B" },
+      { id: "moonshotai/kimi-k2.6", name: "Kimi K2.6" },
+      { id: "z-ai/glm-5.3-flash", name: "GLM-5.3 Flash" },
+      { id: "deepseek-ai/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", thinking: true, thinkingWire: {"low":{"chat_template_kwargs":{"thinking":true}},"medium":{"chat_template_kwargs":{"thinking":true}},"high":{"chat_template_kwargs":{"thinking":true}}} },
+    ],
+  },
+  {
+    key: "azureopenai",
+    label: "Azure OpenAI",
+    category: "aggregator",
+    protocol: "azure-openai",
+    docs: "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
+    defaultModel: "gpt-6.1-sol",
+    canDisableThinking: false,
+    directBlocked: false,
+    thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}},
+    endpoints: [
+    ],
+    models: [
+      { id: "gpt-6-astra", name: "GPT-6 Astra", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", thinking: true, thinkingLevels: ["low","medium","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-6-luna", name: "GPT-6 Luna", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+      { id: "gpt-chat-latest", name: "GPT-chat-latest" },
+      { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", thinking: true, thinkingWire: {"off":{"reasoning_effort":"none"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"medium"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+  {
+    key: "llm",
+    label: "Custom (OpenAI-compatible)",
+    category: "aggregator",
+    protocol: "openai",
+    canDisableThinking: true,
+    directBlocked: false,
+    keyOptional: true,
+    endpoints: [
+      { label: "LM Studio", url: "http://127.0.0.1:1234/v1/chat/completions", baseUrl: "http://127.0.0.1:1234/v1", docs: "https://lmstudio.ai/docs/developer/openai-compat" },
+      { label: "Ollama", url: "http://127.0.0.1:11434/v1/chat/completions", baseUrl: "http://127.0.0.1:11434/v1", docs: "https://docs.ollama.com/api/openai-compatibility" },
+      { label: "llama.cpp", url: "http://127.0.0.1:9931/v1/chat/completions", baseUrl: "http://127.0.0.1:9931/v1", docs: "https://github.com/ggml-org/llama.cpp/tree/master/tools/server" },
+      { label: "koboldcpp", url: "http://127.0.0.1:5001/v1/chat/completions", baseUrl: "http://127.0.0.1:5001/v1", docs: "https://github.com/LostRuins/koboldcpp/wiki" },
+      { label: "LiteLLM", url: "http://127.0.0.1:4000/v1/chat/completions", baseUrl: "http://127.0.0.1:4000/v1", docs: "https://docs.litellm.ai/docs/" },
+      { label: "9Router", url: "http://127.0.0.1:20127/v1/chat/completions", baseUrl: "http://127.0.0.1:20127/v1", docs: "https://github.com/decolua/9router" },
+      { label: "OmniRoute", url: "http://127.0.0.1:20128/v1/chat/completions", baseUrl: "http://127.0.0.1:20128/v1", docs: "https://github.com/diegosouzapw/OmniRoute" },
+      { label: "Together AI", url: "https://api.together.ai/v1/chat/completions", baseUrl: "https://api.together.ai/v1", docs: "https://docs.together.ai/docs/inference/openai-compatibility" },
+      { label: "Fireworks AI", url: "https://api.fireworks.ai/inference/v1/chat/completions", baseUrl: "https://api.fireworks.ai/inference/v1", docs: "https://docs.fireworks.ai/tools-sdks/openai-compatibility" },
+    ],
+    models: [
+    ],
+  },
+  {
+    key: "volcengine",
+    label: "Volcengine Coding Plan",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://docs.volcengine.com/docs/ark/coding-plan-personal-get-started",
+    apiKeyUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    defaultModel: "doubao-seed-evolving",
+    canDisableThinking: true,
+    directBlocked: true,
+    hidden: true,
+    thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}},
+    endpoints: [
+      { label: "Default", url: "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions", baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3" },
+    ],
+    models: [
+      { id: "doubao-seed-evolving", name: "Doubao Seed Evolving", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "doubao-seed-2.1-pro", name: "Doubao Seed 2.1 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "doubao-seed-2.1-lite", name: "Doubao Seed 2.1 Lite", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "doubao-seed-2.0-mini", name: "Doubao Seed 2.0 Mini", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "glm-5.3", name: "GLM-5.3 (glm-latest)" },
+      { id: "glm-5.3-flash", name: "GLM-5.3 Flash" },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", thinking: true, thinkingWire: {"off":{"thinking":{"type":"disabled"}},"low":{"thinking":{"type":"enabled"}},"medium":{"thinking":{"type":"enabled"}},"high":{"thinking":{"type":"enabled"}}} },
+      { id: "kimi-k2.8-preview", name: "Kimi K2.8 Preview" },
+      { id: "kimi-k3", name: "Kimi K3" },
+    ],
+  },
+  {
+    key: "alibaba",
+    label: "Alibaba Bailian Token Plan",
+    category: "llm",
+    protocol: "openai",
+    docs: "https://help.aliyun.com/model-studio/token-plan-personal-overview",
+    apiKeyUrl: "https://bailian.console.aliyun.com/cn-beijing/subscription/token-plan/personal",
+    defaultModel: "qwen3.8-flash",
+    canDisableThinking: false,
+    directBlocked: true,
+    hidden: true,
+    thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}},
+    thinkingWireIf: [{"pattern":"glm-5\\.3","wire":{"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}}}],
+    endpoints: [
+      { label: "Default", url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions", baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1" },
+    ],
+    models: [
+      { id: "qwen3.8-max", name: "Qwen 3.8 Max", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "qwen3.8-flash", name: "Qwen 3.8 Flash", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "deepseek-v4-pro-0813", name: "DeepSeek V4 Pro 0813", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "deepseek-v4-flash-0731", name: "DeepSeek V4 Flash 0731", thinking: true, thinkingWire: {"off":{"enable_thinking":false},"low":{"enable_thinking":true},"medium":{"enable_thinking":true},"high":{"enable_thinking":true}} },
+      { id: "glm-5.3", name: "GLM-5.3", thinking: true, thinkingLevels: ["low","high"], thinkingWire: {"off":{"reasoning_effort":"low"},"low":{"reasoning_effort":"low"},"medium":{"reasoning_effort":"low"},"high":{"reasoning_effort":"high"}} },
+    ],
+  },
+] as const;
+
+export const findProvider = (key: string): CatalogProvider | undefined => PROVIDER_CATALOG.find((p) => p.key === key);
