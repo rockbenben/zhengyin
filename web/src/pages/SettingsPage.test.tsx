@@ -107,3 +107,16 @@ describe('设置页的页头与启停文案', () => {
     }
   });
 });
+
+it('桌面模式不说黑窗口，也不引浏览器那句停止提示', () => {
+  const page = readFileSync(join(root, 'web', 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
+  expect(page).toContain('runtime?.desktop');
+  const start = page.indexOf('const DESKTOP_HELP');
+  expect(start, '桌面文案要收在 DESKTOP_HELP 这一个常量里').toBeGreaterThan(-1);
+  const end = page.indexOf('// END DESKTOP_HELP');
+  expect(end, '桌面文案后面要有 END DESKTOP_HELP 标记，守卫才知道切到哪').toBeGreaterThan(start);
+  const block = page.slice(start + 'const DESKTOP_HELP'.length, end);
+  expect(block).not.toContain('黑窗口');
+  expect(block).not.toContain('STOP_HINT');
+  expect(block).toMatch(/关.*窗口|退出/);
+});

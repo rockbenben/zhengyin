@@ -6,11 +6,26 @@ import Offline from '../components/Offline';
 import PageHead from '../components/PageHead';
 import { LoadFailed } from '../components/PageResult';
 import { STOP_HINT } from '../lib/brand';
-import type { MwKeyState } from '../types';
+import type { MwKeyState, RuntimeInfo } from '../types';
 import ModelSetting from '../components/ModelSetting';
 import CaptureSetting from '../components/CaptureSetting';
 import InkSetting from '../components/InkSetting';
 import BackupSetting from '../components/BackupSetting';
+
+const DESKTOP_HELP = (
+  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+    <Typography.Text className="measure">
+      <strong>关闭</strong>：关掉这个窗口就退出了，后台不会留进程。
+    </Typography.Text>
+    <Typography.Text className="measure">
+      <strong>数据</strong>：菜单「文件 → 打开数据文件夹」能直接看到词条、练习记录、发音档案和本机笔记。
+    </Typography.Text>
+    <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
+      要换一个数据文件夹：菜单「文件 → 更换数据文件夹…」，选完会重启。
+    </Typography.Text>
+  </Space>
+);
+// END DESKTOP_HELP
 
 // 设置页：Merriam-Webster 词典 API key + 评测模型。
 //
@@ -24,10 +39,15 @@ export default function SettingsPage() {
   const [input, setInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
 
   useEffect(() => {
     api.getMwKey().then(setState)
       .catch((e) => setLoadError(isOffline(e) ? 'offline' : 'failed'));
+  }, []);
+
+  useEffect(() => {
+    api.runtime().then(setRuntime).catch(() => setRuntime(null));
   }, []);
 
   async function save(verify: boolean) {
@@ -79,38 +99,37 @@ export default function SettingsPage() {
              "找不到怎么开启、关闭这个服务"是真实会卡住人的一步，而人找的时候
              是在浏览器里、不在终端里——所以这段必须出现在页面上，光写在 README 里等于没写。
 
-             启动器三个平台各有一个可双击的（AGENTS：没有哪一个文件能在三个系统上都双击运行），
-             所以开启这段也必须三个都点名——原来只写 Windows 的桌面图标 + 快捷方式，
-             macOS/Linux 用户看到的是一条自己机器上不存在的操作路径。
-             刻意**没有**做成"在网页上点一下关掉服务"的按钮：那需要先把服务从 0.0.0.0
-             改成只绑本机（否则局域网里谁都能触发关机），而且**关不掉边车**——
-             concurrently 不会因为主服务退出就杀那个 Python 进程，它占着 1.2GB 模型继续挂着。
-             关掉那个黑窗口才是真的全停（连带整棵进程树）。所以这里说的是实话，不是按钮。 */}
-      <Card title="怎么开启 / 怎么关闭" size="small">
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Typography.Text className="measure">
-            <strong>开启</strong>：双击正音文件夹里的启动器（Windows 是{' '}
-            <Typography.Text code>启动.cmd</Typography.Text>，macOS 是{' '}
-            <Typography.Text code>启动.command</Typography.Text>，Linux 是{' '}
-            <Typography.Text code>启动.sh</Typography.Text>）。
-            {'浏览器会自己打开，不用记网址。'}
-          </Typography.Text>
-          <Typography.Text className="measure">
-            <strong>关闭</strong>：把启动时弹出的那个黑窗口<strong>关掉</strong>就全停了。
-            {'窗口找不着了的话，双击正音文件夹里的 停止.cmd（macOS 是 .command，Linux 是 .sh）——'}
-            {'它按端口找进程，不会误杀别的程序。'}
-          </Typography.Text>
-          {/* 这里引的是**另一个界面上的原话**，而那种引用会烂：上一版引的是
-              「TO STOP: just close this window」——那句英文早在启动器改说中文、
-              停止提示挪进服务启动输出时就删掉了，全仓库一个字都不剩，而这一页
-              还在原样引着它。下面 SettingsPage.test.tsx 盯着这条：引的话必须是
-              服务真会打出来的那句。 */}
-          <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
-            {'练发音的时候那个黑窗口一直开着就行。服务起来时会在里面打一行「'}
-            {STOP_HINT}
-            {'」。'}
-          </Typography.Text>
-        </Space>
+             两套文案按运行时分叉：浏览器模式讲三个启动器；桌面版没有黑窗口，
+             讲关窗口即退出和原生菜单里的数据文件夹。
+             仍然不做"网页上点一下关服务"的按钮：服务现在绑 127.0.0.1、自己管边车，
+             关窗口/停止脚本已经能带走整棵进程树，再放一个按钮只会多一条容易误解的路径。 */}
+      <Card title={runtime?.desktop ? '怎么退出 / 数据在哪' : '怎么开启 / 怎么关闭'} size="small">
+        {runtime?.desktop ? DESKTOP_HELP : (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Typography.Text className="measure">
+              <strong>开启</strong>：双击正音文件夹里的启动器（Windows 是{' '}
+              <Typography.Text code>启动.cmd</Typography.Text>，macOS 是{' '}
+              <Typography.Text code>启动.command</Typography.Text>，Linux 是{' '}
+              <Typography.Text code>启动.sh</Typography.Text>）。
+              {'浏览器会自己打开，不用记网址。'}
+            </Typography.Text>
+            <Typography.Text className="measure">
+              <strong>关闭</strong>：把启动时弹出的那个黑窗口<strong>关掉</strong>就全停了。
+              {'窗口找不着了的话，双击正音文件夹里的 停止.cmd（macOS 是 .command，Linux 是 .sh）——'}
+              {'它按端口找进程，不会误杀别的程序。'}
+            </Typography.Text>
+            {/* 这里引的是**另一个界面上的原话**，而那种引用会烂：上一版引的是
+                「TO STOP: just close this window」——那句英文早在启动器改说中文、
+                停止提示挪进服务启动输出时就删掉了，全仓库一个字都不剩，而这一页
+                还在原样引着它。下面 SettingsPage.test.tsx 盯着这条：引的话必须是
+                服务真会打出来的那句。 */}
+            <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
+              {'练发音的时候那个黑窗口一直开着就行。服务起来时会在里面打一行「'}
+              {STOP_HINT}
+              {'」。'}
+            </Typography.Text>
+          </Space>
+        )}
       </Card>
 
       <Card
