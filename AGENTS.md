@@ -105,8 +105,11 @@ true，22.9 会被放行。
 | `data/users/<当前用户>/发音档案.md` | 使用者的口音设定 + 已确认的习惯性短板。**每次纠音前先读，纠音后回来更新**。当前用户是谁看 `data/当前用户.txt`。**这个文件不在版本库里**（`.gitignore`），第一次启动服务时从 `发音档案.template.md` 铺出来——文件不存在就说明这台机器还没跑过服务，如实说明即可。文件末尾有一块 `<!-- AUTO:发音统计 ... -->`，那是工具根据每次评测自动写的（`server/src/profile.ts`），**别手改那一块**，它下次评测就会被覆盖；标记之外的内容工具一个字节都不碰。想知道他最近实际错在哪些音，先看这一块，或者 `curl http://localhost:30031/api/stats` |
 | `notes/<音或词>-<中文描述>.md` | 一个音 / 一类问题一篇。**这是你产出的东西** |
 | `desktop/` | Electron 桌面外壳：窗口、首启向导、随包运行时、打包与更新。`desktop/vendor/` 和 `desktop/release*/` 是构建产物，不进版本库 |
-| `workflows/` | AI 的提示词正本（计划二补内容）；桌面版从只读资源根读它 |
+| `workflows/` | AI 的提示词正本：`coach.md`（讲解、笔记草稿、助教对话共用）和 `agent.md`（整理代理的行为边界）。桌面版从只读资源根读它 |
 | `data/notes/` | 本机笔记，AI 写这里；随附 `notes/` 只读，同名时本机优先 |
+| `data/ai-settings.json` | 整机一份的 AI 设置（接口地址、模型、打码后的密钥、命令行选择）。**不跟当前用户走，也不进备份** |
+| `data/ai-runs/<runId>/snapshot.json` | 每次 AI 整理前的快照；「撤销这次整理」靠它 |
+| `.ai-reference/` | 整理代理每次运行前铺的只读参考副本（随附笔记 + 提示词）。会整体刷新，不进版本库 |
 | `美音要点-中文母语者.md` | **通用先验**：中文母语者统计上容易错在哪。跟 `notes/` 的分工是"跟谁在念无关" vs "这个人的问题"——写笔记时别把先验写成对他的断言 |
 | `server/src/analysis/articulation.ts` | **每个音素客观上怎么发**（舌尖顶哪、气流走哪、唇形），全集覆盖。跟 `notes/` 分工同上。评测报错时即使还没有笔记，界面也答得出"那这个音该怎么发"。加音素时两张表（位置 + 怎么发）都要填，漏了启动会告警、测试会红 |
 | `README.md` | 面向新用户的上手文档 + 笔记索引表 |
@@ -116,8 +119,8 @@ true，22.9 会被放行。
 一眼分清三类：**跟着发布走**的是代码、`notes/`、`desktop/`、`workflows/`、两份 md 文档和启动脚本；
 **本机数据**是整个 `data/`（每个人的 `index.db`、`review-state.json`、`发音档案.md`
 都在 `data/users/<名字>/` 下，`data/notes/` 是本机笔记）和 `.env`；
-**工具状态**是 `.claude/`、`.superpowers/`、`.decisions/`，以及 `desktop/vendor/`、`desktop/release*/`
-这些构建产物。后两类都在 `.gitignore` 里。
+**工具状态**是 `.claude/`、`.superpowers/`、`.decisions/`、`.ai-reference/`，以及
+`desktop/vendor/`、`desktop/release*/` 这些构建产物。后两类都在 `.gitignore` 里。
 
 ## 常用命令
 
@@ -514,6 +517,83 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 **缺 `target` / `atIndex` 的备份直接 400 拒掉，不补默认值。** 两种补法都是
 「看着成功的失败」：`target` 补成整条，讲那个词的笔记全部落空（这个默认值真写过
 一次，96 条录音里 73 条被填错）；`atIndex` 补成 0，结构标签被安到第一个音上。
+
+## AI 接入（可选，界面上叫「AI 讲解」）
+
+**不接 AI 也是完整工具。** 查词、真人音、逐音素评测、复习、音素文档全在本机，
+一个 `/api/ai/*` 都不经过。AI 只负责那件网页做不到的事：讲解、把结论写成笔记、
+以及用命令行代理整理笔记和档案。
+
+### 设置与密钥
+
+- 设置文件是 `data/ai-settings.json`，**整机一份**，不跟当前用户走，也不进 `/api/backup`。
+  换个人用同一台机器，不该让他重填密钥。
+- `GET /api/ai/settings` 只回打码后的密钥（`••••5678`）；提交时原样带回表示「没动它」。
+  地址的主机名变了，服务端会清空旧 key，免得把上一家的密钥发到新地址。
+  key 可以空着——本机端点、Ollama 之类本来就不要。
+- 只接受 `http/https` 地址；协议只有三种：`openai`（含 OpenAI 兼容）、`anthropic`、
+  `gemini`。命令行只有五种：claude / codex / gemini / agy / custom。
+- 设置页的服务商预置来自 `web/src/vendor/providerCatalog.generated.ts`——它由外部目录工具
+  生成，**不手改**；`web/src/lib/aiPresets.ts` 只负责从里面挑出三协议、补显示名和模型候选。
+- `consent` 默认 `false`。**设置、状态不拦**；会发资料或写文件的动作才拦（讲解、
+  测试连接、笔记草稿、助教对话、整理代理）。界面上不能出现「点下去才告诉你没同意」的按钮：
+  未配置 / 未同意时，词条页和助教页给的是去设置的入口。
+
+### 接口 / 命令行只在 `runAiText` 分一次流
+
+- 接口走 `callAi`（`ai/protocols.ts`），三家共用一套错误映射和脱敏；非流式。
+- 命令行走 `resolveCliInvocation` + `runCliAgent`（`ai/cli.ts`），用 `cross-spawn`
+  直接起进程，**不拼 shell 字符串**；取消按进程树杀。
+- 每个 AI 功能（讲解、对话、整理）都调用同一个 `runAiText` / 注入点 `deps.aiRun`，
+  不要在路由里各写一份「接口还是命令行」的判断。
+
+### 上下文复用现有判据，不另造一套
+
+- `ai/context.ts` 的 `buildWordContext` / `buildChatContext` 只做**组装**：
+  档案（含 AUTO 统计块）、词条音标、`latestAttemptFor` 的最近一处错、相关笔记、
+  `howToPronounce` 的发音要点。判据仍然在 `noteLinks.ts`、`matchNotes`、
+  `notesCovering`、`profile.ts`、`articulation.ts` 里——这里不许再写一份。
+- 短语词条逐词录音，`latestAttemptFor(db, entry, target)` 必须按这次实际念的词过滤；
+  不过滤会把另一个词的错摆进讲解。
+- `workflows/coach.md` 是讲解/草稿/对话共用的提示词正本；`workflows/agent.md` 是
+  整理代理的边界。两边都读同一份文件，别往代码里抄第二份规则。
+
+### AI 写笔记
+
+- 只写**本机笔记根**（`data/notes`，`runtime.localNotes`）；随附 `notes/` 和
+  `.ai-reference/` 永远只读。
+- 草稿走 `ai/notes.ts` 的 `parseNoteDraft` → `normalizeDraft`：scope 只认 `phoneme|word`，
+  IPA 会剥掉 `/…/`、`[…]`、`phoneme:` 外壳。**frontmatter 由服务端拼**，不让模型碰 YAML。
+- id 用 `ai-<scope>-<slug|hash>`，撞上已有三根或同名文件就加 `-2`、`-3`；最终必须匹配
+  `^[a-z0-9-]+$`（它同时是文件名）。
+- 写盘前跑 `validateTriggers` + `validateShape`：形近字符（ASCII g ≠ IPA ɡ）、缺
+  「自检法」「对比训练」、正文里的个人实测断言都会被拒，错误原话回给界面。
+- 写完：`noteStore.load()`（重扫三根）→ `reconcileAttempts`（重算归属）→
+  `syncProfile`（更新 AUTO 统计）。后两步失败只告警，不能把「笔记已写成功」报成失败。
+
+### 整理代理（只有命令行模式能开）
+
+- 接口模式只能讲解，**不能读写文件**。`/api/ai/agent/run` 在接口模式直接 409，
+  runner 自己也会在铺快照之前再挡一次。
+- cwd 是 `appRoot`；每次运行前把随附笔记和 `workflows/` 全量刷到 `.ai-reference/`
+  （先删后拷，旧文件不会留下）。
+- 允许写：本机笔记整棵子树 + 当前用户档案的手写两节。其余一律不改。
+- 跑之前 `snapshotAllowed` 存两份东西：允许写的内容（笔记、档案原文）和 `data/` 下
+  除 `audio/`、`models/`、`ai-runs/` 之外的文件 hash。跑完**先做越界检测，再做
+  `reconcile`/`syncProfile`**——顺序反了，我们自己写 DB 和 AUTO 块的动静会被当成代理越界。
+- 越界检测的允许集是「档案这一个文件 + 笔记目录整棵子树」，不是「运行前已存在的笔记」；
+  否则代理新建的笔记会被误报。
+- `undo` 按快照恢复笔记与档案，恢复后同样重扫/重算/同步；**越界改动不撤销**，只在
+  结果区点名。AUTO 标记会单独检查：必须恰好一对、顺序正确。
+- 一次只跑一个，状态在内存里（重启即丢）；日志有上限，防止一个输出狂魔把内存吃满。
+  页面轮询 `GET /api/ai/agent/status`，取消/撤销分别走独立端点。
+
+### 打包
+
+`cross-spawn` 和 `which` 是 **server 的运行时依赖**，不是 devDependency；
+`scripts/server-runtime-deps.mjs` 从 `server/package.json` 算闭包，`check-package`
+会覆盖到它们。`desktop/package.json` 仍然不进 `nodeFloor.test.ts`（Electron 的
+engines 下限比本仓高）。
 
 ## 说的和给的，必须是同一件事
 
