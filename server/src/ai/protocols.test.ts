@@ -1,11 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
-import { callAi, redactUrl, type AiConfig } from './protocols.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { callAi, redactUrl, SUPPORTED_PROTOCOLS, type AiConfig } from './protocols.js';
 
 const msg = [{ role: 'user' as const, content: 'hi' }];
 const cfg = (protocol: AiConfig['protocol'], baseUrl: string): AiConfig =>
   ({ protocol, baseUrl, key: 'sk-1', model: 'm1' });
 
 describe('协议适配', () => {
+  it('服务端只支持这三家，跟 web 侧的预置表一致', () => {
+    expect([...SUPPORTED_PROTOCOLS]).toEqual(['openai', 'anthropic', 'gemini']);
+    const web = readFileSync(
+      join(import.meta.dirname, '..', '..', '..', 'web', 'src', 'lib', 'aiPresets.ts'),
+      'utf8',
+    );
+    expect(web).toContain("export const WEB_AI_PROTOCOLS = ['openai', 'anthropic', 'gemini'] as const;");
+  });
+
   it('openai：POST /chat/completions + Bearer，取 content', async () => {
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({
       choices: [{ message: { content: 'ok' } }],
