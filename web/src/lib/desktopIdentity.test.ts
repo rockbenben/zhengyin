@@ -35,6 +35,14 @@ describe('桌面应用的身份字面量只有一处', () => {
     expect(existsSync(join(root, 'web/public/icon-512.png'))).toBe(true);
   });
 
+  it('主进程的 AUMID 与 builder 的 appId 一致', () => {
+    const product = read('desktop/src/product.ts');
+    expect(product).toContain('com.rockbenben.zhengyin');
+    expect(read('desktop/src/main.ts')).toContain('APP_ID');
+    const cfg = read('desktop/electron-builder.config.mjs');
+    expect(cfg).toContain("appId: 'com.rockbenben.zhengyin'");
+  });
+
   it('产物名全 ASCII 且自带扩展名占位', () => {
     const cfg = read('desktop/electron-builder.config.mjs');
     expect(cfg).toContain('zhengyin-${version}-win.${ext}');
