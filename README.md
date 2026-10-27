@@ -127,7 +127,7 @@
 
 ### 换成真人发音（免费，两三分钟）
 
-设置页填一个 [Merriam-Webster 词典 API key](https://dictionaryapi.com)，单词页就会放真人录音而不是合成音。
+设置页填一个 [Merriam-Webster 词典 API key](https://dictionaryapi.com)，单词页就会放真人录音而不是合成音。**已经注册过？直接去 [My Keys](https://dictionaryapi.com/account/my-keys) 复制，不用重新注册。**
 
 除了好听，它还让评测更准：**参考音和你的录音过的是同一个模型**，模型自己那点偏差两边一起有，减掉就没了。没配 key 也能评测，只是那时只能拿词典音标当标准，而模型转写元音时有固定的偏移，元音的判断会明显软一截（实测元音只对 15/22，辅音 41/42）。
 

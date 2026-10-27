@@ -110,6 +110,10 @@ describe('设置页的页头与启停文案', () => {
   it('AI 设置真的挂在这一页上，不只是建了个组件', () => {
     expect(body).toContain('<AiSettingsSection />');
   });
+
+  it('已经注册过的人有直接拿 key 的地址，不用再走一遍注册流程', () => {
+    expect(body).toContain('https://dictionaryapi.com/account/my-keys');
+  });
 });
 
 it('桌面模式不说黑窗口，也不引浏览器那句停止提示', () => {

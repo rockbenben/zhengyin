@@ -166,7 +166,13 @@ export default function SettingsPage() {
                 申请时<strong>产品选 “Collegiate Dictionary”</strong>——本工具用的是这个，
                 {'选成 Thesaurus 之类的 key 在这里用不了'}
               </li>
-              <li>登录后在 “Your Keys” 页面复制那串 key，粘贴到下面</li>
+              <li>
+                登录后打开{' '}
+                <Typography.Link href="https://dictionaryapi.com/account/my-keys" target="_blank" rel="noreferrer">
+                  My Keys
+                </Typography.Link>
+                {' '}页面复制那串 key，粘贴到下面；已经注册过的人不用重新注册
+              </li>
             </ol>
           </div>
 
