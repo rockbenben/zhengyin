@@ -56,11 +56,16 @@ severity: confirmed
 ---
 词尾两个辅音之间不许有元音。
 `, 'utf8');
-  const noteStore = new NoteStore([{ dir: notesDir, source: 'shipped' }]);
+  const localNotes = mkdtempSync(join(tmpdir(), 'localnotes-'));
+  const noteStore = new NoteStore([
+    { dir: notesDir, source: 'shipped' },
+    { dir: localNotes, source: 'local' },
+  ]);
   noteStore.load();
   return {
     db: openDb(':memory:'),
     noteStore,
+    localNotes,
     audioDir: mkdtempSync(join(tmpdir(), 'audio-')),
     mwKey: 'TESTKEY',
     fetchMw: vi.fn().mockResolvedValue('click-mw.mp3'),
@@ -702,6 +707,45 @@ describe('notes api', () => {
   it('unknown id → 404', async () => {
     const app = createApp(testDeps());
     expect((await app.request('/api/notes/nope')).status).toBe(404);
+  });
+
+  it('POST /api/notes 把草稿写成本机笔记并重新扫描', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    const res = await app.request('/api/notes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: 'l 和 n', scope: 'phoneme', values: ['l', 'n'], contrasts: [],
+        body: '## 自检法\n捏鼻。\n\n## 对比训练\n老 / 脑，再练 light / night。',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const saved = await res.json();
+    expect(saved.id).toMatch(/^ai-phoneme-/);
+    expect(deps.noteStore.get(saved.id)?.source).toBe('local');
+    expect(readFileSync(join(deps.localNotes, saved.file), 'utf8')).toContain('triggers:');
+  });
+
+  it('POST /api/notes 校验不过就不落盘', async () => {
+    const deps = testDeps();
+    const res = await createApp(deps).request('/api/notes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: 'x', scope: 'phoneme', values: ['l'], contrasts: [], body: '只有一句话。',
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/没通过校验/);
+    expect(existsSync(join(deps.localNotes, 'ai-phoneme-x.md'))).toBe(false);
+  });
+
+  it('POST /api/notes 请求体不是 JSON → 400', async () => {
+    const res = await createApp(testDeps()).request('/api/notes', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '不是 JSON',
+    });
+    expect(res.status).toBe(400);
   });
 });
 

@@ -29,6 +29,7 @@ import { maskKey, readEnvFile, readEnvValue, upsertEnvValue, writeEnvFile } from
 import { loadRegistry, modelState, resolveModel } from './models.js';
 import { writeGuard } from './httpGuard.js';
 import { entryHasNote, relevantNotes } from './noteLinks.js';
+import { saveAiNote, type NoteDraft } from './ai/notes.js';
 
 /**
  * 低于这个信噪比，评测结果照给，但**不写进发音档案和复习队列**。
@@ -64,6 +65,8 @@ export interface AppDeps {
   asr: { status: () => AsrStatus; restart: () => Promise<void> };
   /** 发音档案 Markdown 的路径。发音统计会写进它的 AUTO 标记块，手写部分不动 */
   profileFile: string;
+  /** 本机可写笔记目录（data/notes）。AI 写的笔记只落这里；随附笔记只读 */
+  localNotes: string;
   /** 多用户。实现是 users.ts 的 UserManager，index.ts 接线；测试里给 stub */
   users: {
     current: () => string;
@@ -554,6 +557,23 @@ export function createApp(deps: AppDeps) {
     if (!n) return c.json({ error: '笔记不存在' }, 404);
     const examples = store.listEntries(deps.db).filter((e) => entryHasNote(e, n)).map((e) => e.text);
     return c.json({ id: n.id, title: n.title, severity: severityOf(store.noteEvidence(deps.db).get(n.id), n), triggers: n.triggers, markdown: n.markdown, examples });
+  });
+
+  // AI 草稿（用户改过一遍）落盘。frontmatter 由服务端拼，校验不过就不写。
+  app.post('/api/notes', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body) return c.json({ error: '请求体不是 JSON' }, 400);
+    try {
+      return c.json(saveAiNote({
+        db: deps.db,
+        noteStore: deps.noteStore,
+        localNotes: deps.localNotes,
+        profileFile: deps.profileFile,
+        now: deps.now,
+      }, body as NoteDraft));
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
   });
 
   // upcoming 一起给：没有它，前端分不出「队列空」和「队列有、今天没到期」，
