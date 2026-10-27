@@ -1,0 +1,10 @@
+{
+  "node": {
+    "version": "24.22.1",
+    "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5"
+  },
+  "uv": {
+    "version": "0.11.3",
+    "sha256": "ae681c0aaec7cc96af184648cb88d73f8393ed60fa5880abdd6bdb910f9b227c"
+  }
+}
