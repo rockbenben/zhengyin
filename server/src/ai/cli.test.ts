@@ -35,6 +35,14 @@ describe('CLI 参数', () => {
   it('自定义路径优先生效', () => {
     expect(resolveCliInvocation(s('claude', 'C:/my-claude.exe'), 'P', 'text').command).toBe('C:/my-claude.exe');
   });
+
+  it('自定义命令的显示名只取文件名，不把整条路径甩到界面上', () => {
+    expect(resolveCliInvocation(s('custom', 'C:/Tools/node.exe'), 'P', 'text').displayName)
+      .toBe('自定义命令（node.exe）');
+    expect(resolveCliInvocation(s('custom', 'C:\\Tools\\node.exe'), 'P', 'text').displayName)
+      .toBe('自定义命令（node.exe）');
+    expect(resolveCliInvocation(s('custom'), 'P', 'text').displayName).toBe('claude');
+  });
 });
 
 it('commandExists 认 PATH / 绝对路径，不认识假命令', () => {

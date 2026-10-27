@@ -71,9 +71,10 @@ export function resolveCliInvocation(
     };
   }
   if (kind === 'custom') {
+    const file = custom.split(/[\\/]/).pop() || '';
     return {
       command: custom || 'claude',
-      displayName: custom || 'claude',
+      displayName: file ? `自定义命令（${file}）` : 'claude',
       args: parseCustomArgs(customArgs, prompt),
     };
   }
