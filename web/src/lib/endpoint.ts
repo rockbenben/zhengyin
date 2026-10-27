@@ -59,6 +59,8 @@ export function detectEndOfSpeech(
   let done = false;
   /** 10 秒那道闸的**定时器兜底**，见下面 capTimer 那一段 */
   let capTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 5 秒「一直没听到人声」那道闸的定时器兜底 */
+  let noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 
   // 只 resolve 一次，并且**先关音频节点再回调**：回调里通常会 recorder.stop()，
   // 那之后这条流的轨道会被停掉，再去动 AudioContext 容易撞上已失效的节点。
@@ -72,6 +74,7 @@ export function detectEndOfSpeech(
   function cleanup() {
     cancelAnimationFrame(raf);
     if (capTimer !== null) { clearTimeout(capTimer); capTimer = null; }
+    if (noSpeechTimer !== null) { clearTimeout(noSpeechTimer); noSpeechTimer = null; }
     try { src.disconnect(); } catch { /* 已经断开就算了 */ }
     // close() 返回 Promise，失败无所谓——反正这个 ctx 不再用了
     void ctx.close().catch(() => {});
@@ -134,6 +137,22 @@ export function detectEndOfSpeech(
    * 定时器在后台照跑（`setTimeout` 不受可见性影响），所以兜底用定时器。
    */
   capTimer = setTimeout(() => finish('too-long'), MAX_MS);
+
+  /**
+   * 5 秒那道「一直没听到人声」的闸，也来一道**定时器兜底**。
+   *
+   * 跟 10 秒那道闸是同一个毛病：判定跑在 `requestAnimationFrame` 上，窗口在后台时
+   * rAF 几乎不跑 → 那道闸跟着失效。少了它，用户**没说话**却会被 10 秒那道闸
+   * 判成「录太长了」，还会把 10 秒静音送去评测；前台时他收到的却是
+   * 「没听到人声，再试一次」——同一件事两种说法。
+   *
+   * 回调里看 `speechAt`：**已经说过话就别报「没听到人声」**（那种情况该由
+   * 10 秒那道闸收尾）。
+   *
+   * 迟 250ms 是给 rAF 留出处理最后一点音频的余地：宁可多录 0.25 秒，
+   * 也别把用户刚开口的那一下切掉——这一段的原则是**宁可晚停，不可早停**。
+   */
+  noSpeechTimer = setTimeout(() => { if (!speechAt) finish('no-speech'); }, NO_SPEECH_MS + 250);
 
   return { stop: () => { if (!done) { done = true; cleanup(); } } };
 }
