@@ -57,6 +57,8 @@ export function detectEndOfSpeech(
   let quietSince = 0;       // 说过话之后开始安静的时刻；0 = 当前不安静
   let raf = 0;
   let done = false;
+  /** 10 秒那道闸的**定时器兜底**，见下面 capTimer 那一段 */
+  let capTimer: ReturnType<typeof setTimeout> | null = null;
 
   // 只 resolve 一次，并且**先关音频节点再回调**：回调里通常会 recorder.stop()，
   // 那之后这条流的轨道会被停掉，再去动 AudioContext 容易撞上已失效的节点。
@@ -69,6 +71,7 @@ export function detectEndOfSpeech(
 
   function cleanup() {
     cancelAnimationFrame(raf);
+    if (capTimer !== null) { clearTimeout(capTimer); capTimer = null; }
     try { src.disconnect(); } catch { /* 已经断开就算了 */ }
     // close() 返回 Promise，失败无所谓——反正这个 ctx 不再用了
     void ctx.close().catch(() => {});
@@ -118,5 +121,19 @@ export function detectEndOfSpeech(
   };
 
   raf = requestAnimationFrame(tick);
+
+  /**
+   * 10 秒那道闸的**定时器兜底**。
+   *
+   * 为什么必须有：检测跑在 `requestAnimationFrame` 上，而 Chromium 在窗口不可见时
+   * （最小化、被完全遮挡）会把 rAF 降到几乎不跑——于是这道闸跟着失效，
+   * 录音会一直录下去。实测：窗口最小化时录了 59.9 秒都不停，最后服务端按
+   * 30 秒上限拒掉，界面甩一句「音频超过 30s」——**那是在怪用户的录音**，
+   * 而用户其实只念了两秒就切走了。
+   *
+   * 定时器在后台照跑（`setTimeout` 不受可见性影响），所以兜底用定时器。
+   */
+  capTimer = setTimeout(() => finish('too-long'), MAX_MS);
+
   return { stop: () => { if (!done) { done = true; cleanup(); } } };
 }

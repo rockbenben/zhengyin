@@ -68,7 +68,12 @@ export function whyMatched(tags: string[]): string {
   const word = tags.find((t) => t.startsWith('word:'));
   if (word) return '这篇专门讲这个词';
   const parts = tags.map(explainTag);
-  return parts.length > 0 ? `因为这个词里有 ${parts.join('、')}` : '';
+  if (parts.length === 0) return '';
+  // 「有」后面：**接 IPA 要空格**（有 /n/），**接汉字不要**（有词首的 /kl/ 连缀）。
+  // 原来这里是无脑加空格，于是「因为这个词里有 词首的 /kl/ 连缀」中间多一个豁口——
+  // 汉字中间插空格，读者会当成断句。
+  const head = /^[一-鿿「『]/.test(parts[0]) ? parts[0] : ` ${parts[0]}`;
+  return `因为这个词里有${head}${parts.slice(1).map((p) => `、${p}`).join('')}`;
 }
 
 /**

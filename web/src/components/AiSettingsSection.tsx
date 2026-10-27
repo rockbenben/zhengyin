@@ -192,8 +192,8 @@ export default function AiSettingsSection() {
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Paragraph type="secondary" className="measure" style={{ marginBottom: 0 }}>
-          配了之后，词条页能讲解「这个音为什么难」，也能把结论写成笔记。不配照样能用：
-          查词、真人发音、逐音素评测和复习都在本机跑。
+          {'配了之后，词条页能讲解「这个音为什么难」，也能把结论写成笔记。不配照样能用：'}
+          {'查词、真人发音、逐音素评测和复习都在本机跑。'}
         </Typography.Paragraph>
 
         <Typography.Text type={ready ? 'success' : 'secondary'}>

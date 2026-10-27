@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { phonemic, phonetic, SEVERITY_LABEL } from './notation';
+import { phonemic, phonetic, SEVERITY_LABEL, whyMatched } from './notation';
 
 // 这一对记号对应这个工具最核心的区分：/目标/ 是这个词是什么，[你发的] 是你实际发出了什么。
 // 之前两边都用斜线、还写成 `/n aɪ t/`——斜线里加空格本身不是合法记法，
@@ -27,6 +27,30 @@ describe('IPA 记法', () => {
     expect(phonemic([])).toBe('//');
     expect(phonetic([])).toBe('[]');
     expect(phonemic('')).toBe('//');
+  });
+});
+
+/**
+ * 「因为这个词里有…」这句话里**不该多一个空格**。
+ *
+ * 汉字中间插空格，读者会当成断句——「因为这个词里有 词首的 /kl/ 连缀」读起来
+ * 像两句话。接 IPA 时那个空格是对的（**有 /n/**），接汉字时不对。
+ *
+ * 这条是界面上的实测出来的：词条页上那句「因为这个词里有 词首的 /kl/ 连缀」，
+ * 中间的豁口就是这么来的。
+ */
+describe('匹配理由那句话的空格', () => {
+  it('接 IPA 留空格，接汉字不留', () => {
+    expect(whyMatched(['phoneme:n'])).toBe('因为这个词里有 /n/');
+    expect(whyMatched(['cluster-onset:kl'])).toBe('因为这个词里有词首的 /kl/ 连缀');
+  });
+
+  it('不管哪种标签，汉字中间都不许出现空格', () => {
+    const cases = [['phoneme:n'], ['phoneme:n', 'phoneme:l'], ['cluster-onset:kl'], ['cluster-coda:ks'],
+      ['word:click'], ['clear-l'], ['dark-l'], ['flap-t'], ['final-voiced']];
+    for (const c of cases) {
+      expect(whyMatched(c), JSON.stringify(c)).not.toMatch(/[一-鿿] [一-鿿]/);
+    }
   });
 });
 

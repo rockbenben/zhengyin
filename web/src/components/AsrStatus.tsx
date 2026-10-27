@@ -99,7 +99,7 @@ export default function AsrStatus({ pollMs = DEFAULT_POLL_MS }: { pollMs?: numbe
     return (
       <Notice tone="quiet" label="逐音素评测没开" title="识别服务没有由主服务托管">
         开发模式下由 <Typography.Text code>npm run asr</Typography.Text> 单独启动；
-        也可以在下面点重启。
+        {'也可以在下面点重启。'}
         {log}
         {restart}
       </Notice>

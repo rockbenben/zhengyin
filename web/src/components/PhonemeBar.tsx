@@ -92,6 +92,15 @@ export default function PhonemeBar({ word, hitTags, onTagClick }: Props) {
   // 退化成"一整节、零个格子"——下面的 cell() 因此一次都不会被调用。
   const groups = syllables.length > 0 ? syllables : [arpabet.map((_, i) => i)];
 
+  /**
+   * 蓝框 = 命中笔记的音。**这一页原来没说过蓝框是什么意思**——一排格子里三个是蓝的，
+   * 而屏幕上没有任何一处解释它，于是那是一种没有出处的颜色（音素表那页倒是有图例，
+   * 但说的是「加粗蓝线」，跟这里的蓝框不是同一个说法）。
+   *
+   * 只在真有蓝框时才说：没有蓝框还留着这句，就成了一句解释不存在的东西的话。
+   */
+  const anyHit = groups.some((g) => g.some((i) => (phoneTags[i] ?? []).some((t) => hitTags.has(t))));
+
   const cell = (i: number) => {
           const ipa = phoneIpa[i];
           const causing = phoneTags[i].filter((t) => hitTags.has(t));
@@ -149,7 +158,8 @@ export default function PhonemeBar({ word, hitTags, onTagClick }: Props) {
 
       {open === null ? (
         <span className="slug" style={{ display: 'block', marginTop: 9 }}>
-          点音标看这个音怎么发
+          {'点音标看这个音怎么发'}
+          {anyHit && '　蓝框 · 有讲解的音'}
         </span>
       ) : (
         <div

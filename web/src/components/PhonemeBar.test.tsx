@@ -35,9 +35,9 @@ function dopamine(over: Partial<WordAnalysis> = {}): WordAnalysis {
   };
 }
 
-async function draw(word: WordAnalysis) {
+async function draw(word: WordAnalysis, hitTags: Set<string> = new Set()) {
   const { container } = render(
-    <MemoryRouter><PhonemeBar word={word} hitTags={new Set()} onTagClick={() => {}} /></MemoryRouter>,
+    <MemoryRouter><PhonemeBar word={word} hitTags={hitTags} onTagClick={() => {}} /></MemoryRouter>,
   );
   await waitFor(() => expect(container.textContent).toContain('点音标'));
   return container;
@@ -78,6 +78,31 @@ describe('点开一个音素', () => {
     });
     expect(link.getAttribute('href'), '拼出了 undefined —— openIpa 没取到').toBe('/phoneme/d');
     expect(c.textContent).not.toContain('undefined');
+  });
+});
+
+describe('蓝框要说得清它是什么', () => {
+  // 蓝框 = 命中笔记的音。**屏幕上原来没有任何一处解释它**，
+  // 于是一排格子里三个是蓝的、而蓝的意思只有代码知道。
+  const click = (over: Partial<WordAnalysis> = {}): WordAnalysis => ({
+    word: 'click', found: true,
+    arpabet: ['K', 'L', 'IH1', 'K'],
+    ipa: 'klɪk', tags: [],
+    phoneIpa: ['k', 'l', 'ɪ', 'k'],
+    phoneTags: [['cluster-onset:kl'], ['cluster-onset:kl'], ['phoneme:ɪ'], []],
+    syllables: [[0, 1, 2, 3]],
+    syllableStress: [1],
+    ...over,
+  });
+
+  it('有蓝框时，页面上要说出蓝框是什么意思', async () => {
+    const c = await draw(click(), new Set(['cluster-onset:kl', 'phoneme:ɪ']));
+    expect(c.textContent, '蓝框没有解释').toMatch(/蓝框.*有讲解/);
+  });
+
+  it('没有蓝框时，别留那句解释——不然是在解释不存在的东西', async () => {
+    const c = await draw(click(), new Set());
+    expect(c.textContent).not.toContain('蓝框');
   });
 });
 

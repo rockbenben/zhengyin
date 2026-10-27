@@ -76,8 +76,8 @@ export default function NoteEditor({ draft, open, onClose, onSaved }: {
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Paragraph type="secondary" className="measure" style={{ marginBottom: 0 }}>
-          笔记对这台机器的所有使用者可见：只写知识（怎么发、怎么自检、怎么对比练），
-          不要写「你有这个毛病」。服务端会检查「自检法」「对比训练」两节。
+          {'笔记对这台机器的所有使用者可见：只写知识（怎么发、怎么自检、怎么对比练），'}
+          {'不要写「你有这个毛病」。服务端会检查「自检法」「对比训练」两节。'}
         </Typography.Paragraph>
 
         <div>

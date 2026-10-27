@@ -153,3 +153,36 @@ describe('detectEndOfSpeech', () => {
     expect(closed).toBe(1);
   });
 });
+
+/**
+ * 窗口在后台时，10 秒那道闸也得响。
+ *
+ * 检测跑在 `requestAnimationFrame` 上，而 Chromium 在窗口不可见时（最小化、
+ * 被完全遮挡）会把 rAF 降到几乎不跑——于是那道闸跟着失效，录音一直录下去。
+ * 实测：窗口最小化时录了 59.9 秒都不停，服务端最后按 30 秒上限拒掉，
+ * 界面甩一句「音频超过 30s」——**那是在怪用户的录音**，而用户其实只念了两秒就切走了。
+ *
+ * 所以那道闸另有一道**定时器**兜底（定时器在后台照跑）。
+ * 这里让 rAF **一帧都不跑**，只推进定时器——就是「窗口在后台」的样子。
+ */
+describe('窗口在后台（rAF 一帧都不跑）时', () => {
+  // **只假定时器**：requestAnimationFrame 保留上面那个桩（否则它也被接管，
+  // rAF 那条路就会跑起来，先报 'no-speech'，量出来的就不是兜底那道闸了）。
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('10 秒那道闸照样停', () => {
+    const onDone = vi.fn();
+    detectEndOfSpeech(fakeStream, onDone);
+    vi.advanceTimersByTime(10_001);
+    expect(onDone).toHaveBeenCalledWith('too-long');
+  });
+
+  it('停了之后定时器也撤了——不留一个十秒后自己醒的回调', () => {
+    const onDone = vi.fn();
+    const ep = detectEndOfSpeech(fakeStream, onDone);
+    ep.stop();
+    vi.advanceTimersByTime(20_000);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+});
