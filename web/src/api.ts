@@ -192,4 +192,14 @@ export const api = {
   createUser: (name: string) => jx<T.UserInfo>(fetch('/api/users', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
   })),
+
+  // AI。设置里的 key 在响应里是打码的；保存时原样带回表示「没动它」。
+  // 测试连接走 jx：服务端把失败原因写在 error 里（密钥被拒、地址路径不对、命令行没找到），
+  // 而那句话正是用户下一步要照做的。
+  aiSettings: () => j<T.AiSettings>(fetch('/api/ai/settings')),
+  saveAiSettings: (s: T.AiSettings) => jx<T.AiSettings>(fetch('/api/ai/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s),
+  })),
+  aiStatus: () => j<T.AiStatusInfo>(fetch('/api/ai/status')),
+  aiTest: () => jx<T.AiTestResult>(fetch('/api/ai/test', { method: 'POST' })),
 };

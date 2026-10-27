@@ -377,3 +377,44 @@ export interface PhonemeDetail {
 
 /** GET/POST /api/user、POST /api/users 的响应：整机唯一的「当前用户」+ 全部用户名单 */
 export interface UserInfo { current: string; users: string[] }
+
+// ── AI ──
+// 与服务端 server/src/ai/settings.ts、app.ts 的返回形状对齐。
+// key 在响应里永远是打码后的（••••1234），提交时原样带回表示「没动它」。
+export type AiMode = 'api' | 'cli';
+export type AiProtocol = 'openai' | 'anthropic' | 'gemini';
+export type AiCliKind = 'claude' | 'codex' | 'gemini' | 'agy' | 'custom';
+
+export interface AiEndpointRecord {
+  protocol: AiProtocol;
+  baseUrl: string;
+  key: string;
+  model: string;
+}
+
+export interface AiSettings {
+  schemaVersion: 1;
+  consent: boolean;
+  mode: AiMode;
+  endpointId: string;
+  endpoints: Record<string, AiEndpointRecord>;
+  cli: { kind: AiCliKind; path: string; customArgs: string };
+}
+
+/** GET /api/ai/status */
+export interface AiStatusInfo {
+  configured: boolean;
+  mode: AiMode;
+  consent: boolean;
+  provider: string | null;
+  reason: string | null;
+}
+
+/** POST /api/ai/test */
+export interface AiTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  sample?: string;
+  provider?: string;
+  error?: string;
+}

@@ -106,6 +106,10 @@ describe('设置页的页头与启停文案', () => {
       expect(body, `启停文案漏了 ${f}`).toContain(f);
     }
   });
+
+  it('AI 设置真的挂在这一页上，不只是建了个组件', () => {
+    expect(body).toContain('<AiSettingsSection />');
+  });
 });
 
 it('桌面模式不说黑窗口，也不引浏览器那句停止提示', () => {

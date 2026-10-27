@@ -11,6 +11,7 @@ import ModelSetting from '../components/ModelSetting';
 import CaptureSetting from '../components/CaptureSetting';
 import InkSetting from '../components/InkSetting';
 import BackupSetting from '../components/BackupSetting';
+import AiSettingsSection from '../components/AiSettingsSection';
 
 const DESKTOP_HELP = (
   <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -221,6 +222,11 @@ export default function SettingsPage() {
           </Typography.Text>
         </Space>
       </Card>
+
+      {/* AI 是单独一组：它决定的是「讲解谁来写」，跟上面的词典/评测不是一回事。
+          不配也不影响查词、发音和评测——这段承诺写在这张卡自己的开头。 */}
+      <span className="slug">AI 讲解</span>
+      <AiSettingsSection />
 
       <CaptureSetting />
 
