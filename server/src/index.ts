@@ -183,6 +183,10 @@ const app = createApp({
   },
   noteStore,
   localNotes: runtime.localNotes,
+  dataDir: runtime.dataDir,
+  appRoot: runtime.appRoot,
+  workflowsDir: runtime.workflowsDir,
+  shippedNotes: runtime.shippedNotes,
   audioDir: join(dataDir, 'audio'),
   // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的
   // envFile 再兜一次，避免"明明配了却说没配"。

@@ -66,6 +66,10 @@ severity: confirmed
     db: openDb(':memory:'),
     noteStore,
     localNotes,
+    dataDir: mkdtempSync(join(tmpdir(), 'data-')),
+    appRoot: process.cwd(),
+    workflowsDir: join(process.cwd(), 'workflows'),
+    shippedNotes: join(process.cwd(), 'notes'),
     audioDir: mkdtempSync(join(tmpdir(), 'audio-')),
     mwKey: 'TESTKEY',
     fetchMw: vi.fn().mockResolvedValue('click-mw.mp3'),
@@ -755,6 +759,123 @@ function postAsr(app: ReturnType<typeof createApp>, body: unknown) {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+describe('AI api', () => {
+  const aiSettingsBody = {
+    consent: true,
+    mode: 'api',
+    endpointId: 'x',
+    endpoints: { x: { protocol: 'openai', baseUrl: 'https://a.test/v1', key: 'sk-12345678', model: 'm' } },
+    cli: { kind: 'claude', path: '', customArgs: '' },
+  };
+  const putSettings = (app: ReturnType<typeof createApp>, body: unknown) =>
+    app.request('/api/ai/settings', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+  const postJson = (app: ReturnType<typeof createApp>, path: string, body: unknown) =>
+    app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+  it('GET/PUT /api/ai/settings 打码保存；consent 默认为 false', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    expect((await (await app.request('/api/ai/settings')).json()).consent).toBe(false);
+
+    const saved = await putSettings(app, aiSettingsBody);
+    expect(saved.status).toBe(200);
+    const body = await saved.json();
+    expect(body.consent).toBe(true);
+    expect(body.endpoints.x.key).toBe('••••5678');
+    expect((await (await app.request('/api/ai/settings')).json()).endpoints.x.key).toBe('••••5678');
+  });
+
+  it('打码密钥原样提交时不清空真密钥', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    await putSettings(app, aiSettingsBody);
+    const masked = await (await app.request('/api/ai/settings')).json();
+    await putSettings(app, { ...masked, endpoints: { x: { ...masked.endpoints.x, model: 'm2' } } });
+
+    const stored = JSON.parse(readFileSync(join(deps.dataDir, 'ai-settings.json'), 'utf8'));
+    expect(stored.endpoints.x.key).toBe('sk-12345678');
+    expect(stored.endpoints.x.model).toBe('m2');
+  });
+
+  it('未 consent 时讲解/测试返回 409；设置和状态不挡', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    const r = await postJson(app, '/api/ai/explain', { word: 'click' });
+    expect(r.status).toBe(409);
+    expect((await postJson(app, '/api/ai/test', {})).status).toBe(409);
+    expect((await app.request('/api/ai/status')).status).toBe(200);
+    expect((await app.request('/api/ai/settings')).status).toBe(200);
+  });
+
+  it('consent 后讲解走注入的 aiRun，带档案与发音要点，返回 markdown 与来源', async () => {
+    const deps = testDeps();
+    const aiRun = vi.fn(async (
+      _messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+      _opts?: { timeoutMs?: number },
+    ) => ({ text: '## 讲解\n把舌尖顶上去。', provider: '接口·test' }));
+    deps.aiRun = aiRun;
+    const app = createApp(deps);
+    await addEntry(app, 'click');
+    await putSettings(app, { ...aiSettingsBody, endpoints: { x: { ...aiSettingsBody.endpoints.x, key: '' } } });
+
+    const res = await postJson(app, '/api/ai/explain', { word: 'click' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.markdown).toContain('讲解');
+    expect(Array.isArray(body.sources)).toBe(true);
+    expect(body.provider).toBe('接口·test');
+
+    expect(aiRun).toHaveBeenCalledOnce();
+    const messages = aiRun.mock.calls[0][0];
+    expect(messages[0].content).toContain('发音教练');
+    expect(messages[1].content).toContain('/ˈklɪk/');
+  });
+
+  it('讲解不存在的词 → 404，不浪费一次 AI 调用', async () => {
+    const deps = testDeps();
+    const aiRun = vi.fn(async () => ({ text: 'x', provider: 'p' }));
+    deps.aiRun = aiRun;
+    const app = createApp(deps);
+    await putSettings(app, aiSettingsBody);
+    expect((await postJson(app, '/api/ai/explain', { word: 'notaword' })).status).toBe(404);
+    expect(aiRun).not.toHaveBeenCalled();
+  });
+
+  it('笔记草稿返回结构化 JSON；模型乱答时 502', async () => {
+    const deps = testDeps();
+    let answer = JSON.stringify({
+      title: 'l 和 n', scope: 'phoneme', values: ['l', 'n'], contrasts: [], body: '## 自检法\n捏鼻。\n\n## 对比训练\n老 / 脑。',
+    });
+    deps.aiRun = vi.fn(async () => ({ text: answer, provider: '接口·test' }));
+    const app = createApp(deps);
+    await addEntry(app, 'click');
+    await putSettings(app, aiSettingsBody);
+
+    const ok = await postJson(app, '/api/ai/note-draft', { word: 'click' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ title: 'l 和 n', scope: 'phoneme', values: ['l', 'n'] });
+
+    answer = '我写好了。';
+    const bad = await postJson(app, '/api/ai/note-draft', { word: 'click' });
+    expect(bad.status).toBe(502);
+    expect((await bad.json()).error).toContain('JSON');
+  });
+
+  it('测试连接返回耗时与提供方', async () => {
+    const deps = testDeps();
+    deps.aiRun = vi.fn(async () => ({ text: 'OK', provider: '接口·测试' }));
+    const app = createApp(deps);
+    await putSettings(app, aiSettingsBody);
+    const d = await (await postJson(app, '/api/ai/test', {})).json();
+    expect(d).toMatchObject({ ok: true, sample: 'OK', provider: '接口·测试' });
+    expect(typeof d.latencyMs).toBe('number');
+  });
+});
 
 describe('asr api', () => {
   it('single-word mishear (equal word counts) diffs the pair and hits l-vs-n note', async () => {

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { unlinkSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
@@ -29,7 +30,21 @@ import { maskKey, readEnvFile, readEnvValue, upsertEnvValue, writeEnvFile } from
 import { loadRegistry, modelState, resolveModel } from './models.js';
 import { writeGuard } from './httpGuard.js';
 import { entryHasNote, relevantNotes } from './noteLinks.js';
-import { saveAiNote, type NoteDraft } from './ai/notes.js';
+import { saveAiNote, parseNoteDraft, type NoteDraft } from './ai/notes.js';
+import { maskAiSettings, mergeAiSettings, readAiSettings, writeAiSettings } from './ai/settings.js';
+import { AiError, type AiMessage } from './ai/protocols.js';
+import { aiStatus, readCoach, runAiText } from './ai/run.js';
+import { buildWordContext } from './ai/context.js';
+import { commandExists } from './ai/cli.js';
+
+export type AiRun = (
+  messages: AiMessage[],
+  opts?: { timeoutMs?: number },
+) => Promise<{ text: string; provider: string }>;
+
+/** AiError 的 status 是数字（协议层不依赖 Hono）；到这里才落成 Hono 认的状态码。 */
+const aiErrorStatus = (e: unknown): ContentfulStatusCode =>
+  e instanceof AiError ? (e.status as ContentfulStatusCode) : 502;
 
 /**
  * 低于这个信噪比，评测结果照给，但**不写进发音档案和复习队列**。
@@ -67,6 +82,16 @@ export interface AppDeps {
   profileFile: string;
   /** 本机可写笔记目录（data/notes）。AI 写的笔记只落这里；随附笔记只读 */
   localNotes: string;
+  /** 本机设置与 AI 配置的目录 */
+  dataDir: string;
+  /** 可写数据根。AI 整理代理在这里工作 */
+  appRoot: string;
+  /** 提示词正本目录（workflows/） */
+  workflowsDir: string;
+  /** 随附笔记目录（只读）。整理代理的参考副本从这里来 */
+  shippedNotes: string;
+  /** 测试注入：不给就按 dataDir 里的设置走真实接口/命令行 */
+  aiRun?: AiRun;
   /** 多用户。实现是 users.ts 的 UserManager，index.ts 接线；测试里给 stub */
   users: {
     current: () => string;
@@ -251,6 +276,108 @@ export function createApp(deps: AppDeps) {
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
 
   app.get('/api/runtime', (c) => c.json(deps.runtime));
+
+  // ── AI ─────────────────────────────────────────────────
+  // 设置是**整机**的（api-settings.json 在 dataDir 下），不跟当前用户走：
+  // 换个人用同一台机器，不该让他重新填一遍密钥。
+  const aiSettings = () => readAiSettings(deps.dataDir);
+  const run: AiRun = deps.aiRun ?? ((messages, opts) => runAiText(aiSettings(), messages, opts));
+  const requireConsent = () => {
+    if (!aiSettings().consent) {
+      throw new AiError(409, '先在设置里确认：使用 AI 会把发音档案、相关笔记和这次的错误发给你选的服务。');
+    }
+  };
+  const running = new Set<string>();
+  const tryLock = (name: string): (() => void) | null => {
+    if (running.has(name)) return null;
+    running.add(name);
+    return () => { running.delete(name); };
+  };
+
+  app.get('/api/ai/settings', (c) => c.json(maskAiSettings(aiSettings())));
+
+  app.put('/api/ai/settings', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: '请求体不是 JSON 对象' }, 400);
+    }
+    try {
+      const next = mergeAiSettings(body, aiSettings());
+      writeAiSettings(deps.dataDir, next);
+      return c.json(maskAiSettings(next));
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  app.get('/api/ai/status', (c) => c.json(aiStatus(aiSettings(), commandExists)));
+
+  app.post('/api/ai/test', async (c) => {
+    try {
+      requireConsent();
+      const t0 = Date.now();
+      const r = await run([{ role: 'user', content: '只回复 OK 两个字母。' }], { timeoutMs: 60_000 });
+      return c.json({ ok: true, latencyMs: Date.now() - t0, sample: r.text.slice(0, 80), provider: r.provider });
+    } catch (e) {
+      return c.json({ ok: false, error: (e as Error).message }, aiErrorStatus(e));
+    }
+  });
+
+  app.post('/api/ai/explain', async (c) => {
+    const release = tryLock('explain');
+    if (!release) return c.json({ error: '上一次讲解还在跑，等它结束再试' }, 409);
+    try {
+      requireConsent();
+      const body = await c.req.json().catch(() => null) as { word?: string; target?: string } | null;
+      const word = (body?.word ?? '').trim().toLowerCase();
+      if (!word) return c.json({ error: '缺 word' }, 400);
+      if (!store.getEntry(deps.db, word)) return c.json({ error: `词库里没有「${word}」` }, 404);
+
+      const ctx = buildWordContext(deps, word, body?.target);
+      const coach = readCoach(deps.workflowsDir);
+      const r = await run([
+        { role: 'system', content: coach },
+        {
+          role: 'user',
+          content: `${ctx.text}\n\n请按上面的规则讲解「${word}」，不要重复用户的统计，直接给结论、身体动作、自检和对比。`,
+        },
+      ]);
+      return c.json({ markdown: r.text, sources: ctx.sources, provider: r.provider });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, aiErrorStatus(e));
+    } finally {
+      release();
+    }
+  });
+
+  app.post('/api/ai/note-draft', async (c) => {
+    const release = tryLock('note-draft');
+    if (!release) return c.json({ error: '上一次生成草稿还在跑，等它结束再试' }, 409);
+    try {
+      requireConsent();
+      const body = await c.req.json().catch(() => null) as { word?: string; target?: string } | null;
+      const word = (body?.word ?? '').trim().toLowerCase();
+      if (!word) return c.json({ error: '缺 word' }, 400);
+      if (!store.getEntry(deps.db, word)) return c.json({ error: `词库里没有「${word}」` }, 404);
+
+      const ctx = buildWordContext(deps, word, body?.target);
+      const coach = readCoach(deps.workflowsDir);
+      const r = await run([
+        { role: 'system', content: coach },
+        {
+          role: 'user',
+          content: `${ctx.text}\n\n请为「${word}」写一篇笔记草稿。只输出 JSON：`
+            + '{"title":"…","scope":"phoneme"|"word","values":["…"],"contrasts":["…"],"body":"markdown"}。'
+            + 'body 必须包含「## 自检法」和「## 对比训练」两节；不要写个人断言，不要写 severity。',
+        },
+      ]);
+      return c.json({ ...parseNoteDraft(r.text), provider: r.provider, sources: ctx.sources });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, aiErrorStatus(e));
+    } finally {
+      release();
+    }
+  });
 
   // ── 多用户 ──────────────────────────────────────────────
   // 谁在用由服务端定（整机一个「当前用户」），网页和 AI 端读到的永远一致。
