@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import dayjs from 'dayjs';
+import { writeFileAtomic } from './atomic.js';
 
 /**
  * 复习间隔（天）。
@@ -195,14 +196,7 @@ function backupCorrupt(file: string, required: boolean): void {
 // 写入走 tmp + rename：rename 是原子的，中途断电/Ctrl+C 只会留下一个 .tmp，最终文件要么
 // 是旧的完整内容、要么是新的完整内容，不会出现被截断的半个 JSON。
 function atomicWrite(file: string, data: unknown): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-    renameSync(tmp, file);
-  } catch (e) {
-    try { if (existsSync(tmp)) rmSync(tmp, { force: true }); } catch { /* 清理失败不掩盖原始错误 */ }
-    throw e;
-  }
+  writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 export class ReviewStore {

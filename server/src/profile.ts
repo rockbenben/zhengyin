@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { phonemeStats, overallStats, stuckWords, PHONEME_STATS_LIMIT, type PhonemeStat } from './db.js';
 import type { NoteStore, Severity } from './notes.js';
 import { localUrl } from './port.js';
+import { writeFileAtomic } from './atomic.js';
 
 // 把评测流水汇总回 发音档案.md。
 //
@@ -300,12 +301,5 @@ export function syncProfile(file: string, db: Database.Database, notes: NoteStor
   }
   if (next === original) return;
 
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, next, 'utf8');
-    renameSync(tmp, file);
-  } catch (e) {
-    try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* 清不掉就算了，别掩盖真正的错误 */ }
-    throw e;
-  }
+  writeFileAtomic(file, next);
 }

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { writeFileAtomic } from './atomic.js';
 
 // .env 的最小读写。只认 `KEY=value` 这一种最朴素的形式——这个文件目前只放一个
 // MW_API_KEY，不值得为它引入一个 dotenv 写入库（dotenv 自己也只负责读、不负责写）。
@@ -49,14 +50,7 @@ export function readEnvFile(file: string): string {
 // 跟 review-state.json 一样走 tmp + rename：.env 里可能还有用户自己加的其它变量，
 // 中途断电留下半个文件会把它们一起弄坏。
 export function writeEnvFile(file: string, text: string): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
-    renameSync(tmp, file);
-  } catch (e) {
-    try { if (existsSync(tmp)) rmSync(tmp, { force: true }); } catch { /* 清理失败不掩盖原始错误 */ }
-    throw e;
-  }
+  writeFileAtomic(file, text.endsWith('\n') ? text : `${text}\n`);
 }
 
 /** 只露出末 4 位，用于在界面上确认"配的是哪一个"而不回显完整密钥 */
