@@ -12,6 +12,25 @@ export type Severity = 'confirmed' | 'watch' | 'info';
 export type AudioSource = 'mw' | 'tts';
 export type Grade = 'remembered' | 'forgot';
 
+/** GET /api/runtime：桌面标志、版本与数据位置 */
+export interface RuntimeInfo {
+  desktop: boolean;
+  version: string;
+  appRoot: string;
+  userNotes: string;
+}
+
+/** GET /api/asr/status：边车状态与最近日志 */
+export type AsrState = 'off' | 'no-uv' | 'starting' | 'ready' | 'error';
+export interface AsrStatusInfo {
+  state: AsrState;
+  port: number | null;
+  uvFound: boolean;
+  startedAt: number | null;
+  error: string | null;
+  log: string[];
+}
+
 // server/src/db.ts WordAnalysis —— **全部必填**，那边有一段讲为什么不再有可选字段
 export interface WordAnalysis {
   word: string;

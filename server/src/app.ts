@@ -69,6 +69,8 @@ export interface AppDeps {
     switchTo: (name: string) => 'ok' | 'not-found' | 'invalid';
     create: (name: string) => 'ok' | 'exists' | 'invalid';
   };
+  /** 给界面的运行时信息：桌面标志、版本、数据位置 */
+  runtime: { desktop: boolean; version: string; appRoot: string; userNotes: string };
 }
 
 // 共享谓词：判断某词条是否命中某笔记（笔记 triggers 与词条各词 tags 的并集有交集）。
@@ -282,6 +284,8 @@ export function createApp(deps: AppDeps) {
   const app = new Hono();
 
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
+
+  app.get('/api/runtime', (c) => c.json(deps.runtime));
 
   // ── 多用户 ──────────────────────────────────────────────
   // 谁在用由服务端定（整机一个「当前用户」），网页和 AI 端读到的永远一致。

@@ -18,6 +18,8 @@ vi.mock('../api', () => ({
       } as unknown as EntryDetail);
     },
     pronounceHealth: () => Promise.resolve({ ok: true, uv: true }),
+    asrStatus: () => Promise.resolve({ state: 'ready' as const, port: 30032, uvFound: true, startedAt: 1, error: null, log: [] }),
+    asrRestart: () => Promise.resolve({ state: 'ready' as const, port: 30032, uvFound: true, startedAt: 1, error: null, log: [] }),
     getMwKey: () => Promise.resolve({ configured: true, masked: null }),
     confusions: () => Promise.resolve({ contrasts: [] }),
     articulation: () => Promise.resolve({ places: [], manners: {}, phones: [] }),

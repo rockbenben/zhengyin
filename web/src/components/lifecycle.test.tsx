@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { STATS_CHANGED } from '../lib/events';
+import type { AsrStatusInfo } from '../types';
 
 /**
  * 资源生命周期。这是这个前端**唯一还没有网**的高风险区，而且是类型检查天生兜不住的一类：
@@ -28,7 +29,7 @@ let played: string[] = [];         // 真的开始播了的 src
 let playedEls: HTMLMediaElement[] = [];   // 对应的元素本身——要靠它手动触发 onended
 let speechCancels = 0;
 let seq = 0;
-let healthCalls = 0;
+let asrCalls = 0;
 let gumCalls = 0;
 
 /**
@@ -36,6 +37,9 @@ let gumCalls = 0;
  * vi.hoisted 是必须的——vi.mock 会被提到文件顶部，普通的 let 在工厂求值时还在 TDZ 里。
  */
 const healthStub = vi.hoisted(() => ({ impl: () => Promise.resolve({ ok: false, uv: true }) }));
+const asrStub = vi.hoisted(() => ({
+  impl: (): Promise<AsrStatusInfo> => Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] }),
+}));
 
 // getUserMedia 的桩：验"连点两下"要能把它挂住，制造 await 期间那个窗口。
 const gumStub = vi.hoisted(() => ({ impl: (() => Promise.reject(new Error('未设置'))) as () => Promise<MediaStream> }));
@@ -81,6 +85,8 @@ vi.mock('../lib/wav', () => ({
 vi.mock('../api', () => ({
   api: {
     pronounceHealth: () => healthStub.impl(),   // 默认 ok:false，关掉自动评测那条支路
+    asrStatus: () => { asrCalls += 1; return asrStub.impl(); },
+    asrRestart: () => { asrCalls += 1; return asrStub.impl(); },
     getMwKey: () => Promise.resolve({ configured: true, masked: '••••1234' }),
     confusions: () => Promise.resolve({ contrasts: [] }),
     articulation: () => Promise.resolve({ places: [], manners: {}, phones: [] }),
@@ -99,9 +105,10 @@ const { default: AudioPlayer } = await import('./AudioPlayer');
 
 beforeEach(() => {
   tracksStopped = 0; audioCtxClosed = 0; created = []; revoked = []; played = []; playedEls = [];
-  speechCancels = 0; seq = 0; healthCalls = 0; gumCalls = 0;
+  speechCancels = 0; seq = 0; asrCalls = 0; gumCalls = 0;
   gumStub.impl = () => Promise.resolve(fakeStream());
   healthStub.impl = () => Promise.resolve({ ok: false, uv: true });
+  asrStub.impl = () => Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
   pronounceStub.impl = () => Promise.reject(new Error('本测试不评测'));
   clipStub.hold = false; clipStub.release = null;
 
@@ -421,45 +428,34 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
  */
 describe('边车没就绪时要接着问，页面自己会好', () => {
   it('先没就绪、后就绪 → 提示自己从「正在启动」变成不再出现，不用刷新', async () => {
-    let ok = false;
-    healthStub.impl = () => Promise.resolve({ ok, uv: true });
+    let ready = false;
+    asrStub.impl = () => Promise.resolve(ready
+      ? { state: 'ready' as const, port: 30032, uvFound: true, startedAt: 1, error: null, log: [] }
+      : { state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
 
-    render(<AsrStatus />);
+    render(<AsrStatus pollMs={20} />);
+    await waitFor(() => expect(document.body.textContent).toContain('正在启动'));
 
-    // 第一次问：没就绪 → 说"正在启动"，而不是"没启动"（后者跟事实相反）
-    await waitFor(() => expect(document.body.textContent).toContain('正在加载模型'));
-    expect(document.body.textContent).not.toContain('音素识别服务没起来');
-
-    // 边车就绪
-    ok = true;
-    // 轮询间隔是 2s，给足时间让下一次问落地
+    ready = true;
     await waitFor(
-      () => expect(document.body.textContent).not.toContain('正在加载模型'),
+      () => expect(document.body.textContent).not.toContain('正在启动'),
       { timeout: 8000 },
     );
-    expect(document.body.textContent).not.toContain('音素识别服务没起来');
-  }, 15000);
-
-  it('熬过 give-up 要说「黑窗口」，不许说「终端窗口」——走到这档的人多半是双击启动的', async () => {
-    healthStub.impl = () => Promise.resolve({ ok: false, uv: true });
-    // 90 秒不该真等 90 秒：pollMs/giveUpMs 是测试缝
-    render(<AsrStatus pollMs={20} giveUpMs={40} />);
-    await waitFor(() => expect(document.body.textContent).toContain('等了一分半还没连上'));
-    const t = document.body.textContent ?? '';
-    expect(t, '没给可照做的下一步').toMatch(/黑窗口/);
-    expect(t, '把人打发去翻终端了（uv 分支早钉过同样的理由）').not.toMatch(/终端/);
   }, 15000);
 
   it('卸载后不许再问 —— 否则换了页面它还在轮询，还会对已卸载的组件 setState', async () => {
-    healthStub.impl = () => { healthCalls += 1; return Promise.resolve({ ok: false, uv: true }); };
+    asrStub.impl = () => {
+      asrCalls += 1;
+      return Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
+    };
 
-    const { unmount } = render(<AsrStatus />);
-    await waitFor(() => expect(healthCalls).toBeGreaterThan(0));
+    const { unmount } = render(<AsrStatus pollMs={20} />);
+    await waitFor(() => expect(asrCalls).toBeGreaterThan(0));
     await act(async () => { unmount(); });
 
-    const after = healthCalls;
-    await new Promise((r) => setTimeout(r, 2600));   // 跨过一个 2s 的轮询间隔
-    expect(healthCalls).toBe(after);
+    const after = asrCalls;
+    await new Promise((r) => setTimeout(r, 120));
+    expect(asrCalls).toBe(after);
   }, 15000);
 });
 
@@ -561,36 +557,31 @@ describe('AudioPlayer 与全局的 speechSynthesis', () => {
  *
  * 这三条守的是：说得早、说得准、没证据不说。
  */
-describe('这台机器没装 uv 时', () => {
-  async function withHealth(h: { ok: boolean; uv?: boolean }) {
-    healthStub.impl = () => Promise.resolve(h as { ok: boolean; uv: boolean });
-    render(<AsrStatus />);
-    await waitFor(() => expect(document.body.textContent).toMatch(/uv|加载模型/));
+describe('这台机器没有可用的 uv 时', () => {
+  async function withAsr() {
+    asrStub.impl = () => {
+      asrCalls += 1;
+      return Promise.resolve({ state: 'no-uv' as const, port: null, uvFound: false, startedAt: null, error: null, log: [] });
+    };
+    render(<AsrStatus pollMs={20} />);
+    await waitFor(() => expect(document.body.textContent).toMatch(/uv/));
     return document.body.textContent ?? '';
   }
 
   it('立刻说没装，而不是让人等模型加载', async () => {
-    const t = await withHealth({ ok: false, uv: false });
+    const t = await withAsr();
     expect(t).toMatch(/uv/);
-    expect(t, '还在说"正在加载模型"').not.toMatch(/稍等十几秒/);
+    expect(t, '还在说"正在准备"').not.toMatch(/正在准备/);
   });
 
   it('在浏览器里就给出装法，不打发人去翻终端', async () => {
-    const t = await withHealth({ ok: false, uv: false });
+    const t = await withAsr();
     expect(t, '没给可照做的装法').toMatch(/pip install uv|winget|brew/);
     expect(t, '又把人打发去看终端了').not.toMatch(/终端窗口/);
   });
 
   it('并且说清楚在那之前哪些还能用——别让人以为整个工具废了', async () => {
-    const t = await withHealth({ ok: false, uv: false });
+    const t = await withAsr();
     expect(t).toMatch(/照常|仍然|还能/);
-  });
-
-  it('服务端没给 uv 这个字段 → 不许下"你没装"的结论，退回原来的等待', async () => {
-    // 说"你没装 uv"是一句关于他机器的断言。字段缺失（旧服务、响应被截断）时没有证据，
-    // 没证据就不许说。
-    const t = await withHealth({ ok: false });
-    expect(t).toMatch(/加载模型/);
-    expect(t, '凭空断言了没装 uv').not.toMatch(/pip install uv/);
   });
 });

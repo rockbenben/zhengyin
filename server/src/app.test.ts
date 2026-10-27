@@ -77,6 +77,7 @@ severity: confirmed
       status: () => ({ state: 'ready' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] }),
       restart: vi.fn().mockResolvedValue(undefined),
     },
+    runtime: { desktop: false, version: '', appRoot: '/repo', userNotes: '/repo/data/notes' },
     profileFile: join(mkdtempSync(join(tmpdir(), 'profile-')), '发音档案.md'),
     users: {
       current: () => '默认',
@@ -1973,6 +1974,13 @@ severity: confirmed
     const res = await createApp(deps).request('/api/asr/restart', { method: 'POST' });
     expect(res.status).toBe(200);
     expect(deps.asr.restart).toHaveBeenCalledOnce();
+  });
+
+  it('GET /api/runtime 给桌面标志与两个路径', async () => {
+    const res = await createApp(testDeps()).request('/api/runtime');
+    expect(await res.json()).toEqual({
+      desktop: false, version: '', appRoot: '/repo', userNotes: '/repo/data/notes',
+    });
   });
 });
 

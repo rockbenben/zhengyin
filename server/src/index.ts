@@ -174,6 +174,12 @@ const app = createApp({
     switchTo: (name: string) => um.switchTo(name),
     create: (name: string) => um.create(name),
   },
+  runtime: {
+    desktop: runtime.desktop,
+    version: runtime.version,
+    appRoot: runtime.appRoot,
+    userNotes: runtime.localNotes,
+  },
   noteStore,
   audioDir: join(dataDir, 'audio'),
   // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的

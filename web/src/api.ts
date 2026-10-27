@@ -56,6 +56,9 @@ async function jx<R>(res: Promise<Response>): Promise<R> {
 
 export const api = {
   health: () => j<{ ok: boolean; mwConfigured: boolean }>(fetch('/api/health')),
+  runtime: () => j<T.RuntimeInfo>(fetch('/api/runtime')),
+  asrStatus: () => j<T.AsrStatusInfo>(fetch('/api/asr/status')),
+  asrRestart: () => j<T.AsrStatusInfo>(fetch('/api/asr/restart', { method: 'POST' })),
 
   addEntry: (text: string) => jx<T.EntryDetail>(fetch('/api/entries', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
