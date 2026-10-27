@@ -15,8 +15,13 @@ export const DEFAULT_PORT = 30031;
  * 改过端口的人照着做，两条都是错的。前端另有一处是对的（用 location.port 取当前端口），
  * 也就是**同一句话有两个实现、其中一个错**——这个仓库最典型的一种坏法。
  */
-export function serverPort(): number {
-  return Number(process.env.PORT) || DEFAULT_PORT;
+export function serverPort(env: NodeJS.ProcessEnv = process.env): number {
+  return Number(env.PORT) || DEFAULT_PORT;
+}
+
+/** 服务绑哪个地址。默认只绑本机：AI 密钥与能写文件的代理都挂在这个服务上 */
+export function serverHost(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HOST?.trim() || '127.0.0.1';
 }
 
 /** 本机访问这个应用的地址。发音档案、报错提示里要写网址时都用它 */

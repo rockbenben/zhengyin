@@ -49,7 +49,10 @@ export interface AppDeps {
   modelsDir: string;
   /** .env 的路径。设置页保存 MW_API_KEY / VOSK_MODEL 时写这里，重启后仍然生效 */
   envFile: string;
-  /** 仓库根，用来定位 scripts/vosk-models.json */
+  /**
+   * 只读资源根：用来定位 scripts/vosk-models.json、发音档案模板等随应用发布的文件。
+   * 桌面版这里是 resources，不是用户数据目录。
+   */
   root: string;
   verifyMw: typeof verifyMwKey;
   /** 本地音素识别边车客户端（asr-service），连不上时返回 reachable:false */

@@ -156,6 +156,11 @@ export interface UserManagerOptions {
   root: string;
   dataDir: string;
   /**
+   * 新用户档案模板。桌面版从只读资源根取；默认仍是 root 下那份。
+   * 旧版遗留文件（根目录的 review-state.json / 发音档案.md）跟着 root 走。
+   */
+  templateFile?: string;
+  /**
    * 每打开一个用户的库就跑一次（启动、每次切换）。index.ts 把领域仪式挂这里：
    * reanalyze / reconcile / 孤儿复习卡清理 / 档案统计同步。
    * UserManager 只管文件与句柄的生命周期，不认识 noteStore——边界在这。
@@ -220,7 +225,7 @@ export class UserManager {
     const dir = join(usersDirOf(this.opts.dataDir), name);
     mkdirSync(dir, { recursive: true });
     const profile = join(dir, "发音档案.md");
-    const template = join(this.opts.root, "发音档案.template.md");
+    const template = this.opts.templateFile ?? join(this.opts.root, "发音档案.template.md");
     if (!existsSync(profile) && existsSync(template)) copyFileSync(template, profile);
   }
 

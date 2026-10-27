@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import dayjs from 'dayjs';
 import 'dotenv/config';
-import { serverPort } from './port.js';
+import { resolveRuntime } from './runtime.js';
 import { createApp } from './app.js';
 import { getEntry, pruneOrphanAttempts } from './db.js';
 import { NoteStore } from './notes.js';
@@ -20,9 +20,10 @@ import { reanalyzeEntries } from './reanalyze.js';
 import { reconcileAttempts } from './reconcile.js';
 import { missingFromTable, missingHowTo } from './analysis/articulation.js';
 
-// 兼容从仓库根（npm start / npm run dev）或从 server/ 内部启动两种情况
-const root = existsSync(join(process.cwd(), 'notes')) ? process.cwd() : join(process.cwd(), '..');
-const dataDir = join(root, 'data');
+// 两个根：只读资源（模板、前端产物、随附笔记）与可写数据（data/、.env、本机笔记）。
+// 浏览器模式下两者都是仓库根，行为与以前一致；桌面版分别指向 resources 与 userData。
+const runtime = resolveRuntime();
+const { appRoot, dataDir } = runtime;
 mkdirSync(join(dataDir, 'audio'), { recursive: true });
 
 // 发音部位表漏了音素的话，界面上那个音的部位尺会静静地不画——不报错、不崩，只是空着。
@@ -36,7 +37,7 @@ if (missingHow.length > 0) {
   console.warn(`[articulation] 这些音素还没写"怎么发"，发错时界面给不出指导：${missingHow.join(' ')}`);
 }
 
-const noteStore = new NoteStore(join(root, 'notes'));
+const noteStore = new NoteStore(runtime.shippedNotes);
 noteStore.load();
 
 // 领域仪式：每打开一个用户的库都要跑一遍（启动、切换都算）。
@@ -93,7 +94,12 @@ function openRituals(s: UserSession): void {
 
 // 铺文件（新用户的档案缺了从模板铺）、决定当前是谁、打开对应的 db/review 句柄，
 // 都在这个构造函数里做完；上面的 openRituals 就是它每次「打开一个用户」都会回调的那一下。
-const um = new UserManager({ root, dataDir, onOpen: openRituals });
+const um = new UserManager({
+  root: runtime.appRoot,
+  dataDir,
+  templateFile: join(runtime.shippedRoot, '发音档案.template.md'),
+  onOpen: openRituals,
+});
 console.log(`[users] 当前用户：${um.current().name}`);
 
 /**
@@ -128,16 +134,16 @@ const app = createApp({
   },
   noteStore,
   audioDir: join(dataDir, 'audio'),
-  // dotenv 按 cwd 找 .env，而本进程可能从仓库根也可能从 server/ 启动；
-  // 这里以解析出来的 root 为准再兜一次，避免"明明配了却说没配"。
-  mwKey: process.env.MW_API_KEY || readEnvValue(readEnvFile(join(root, '.env')), 'MW_API_KEY') || undefined,
+  // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的
+  // envFile 再兜一次，避免"明明配了却说没配"。
+  mwKey: process.env.MW_API_KEY || readEnvValue(readEnvFile(runtime.envFile), 'MW_API_KEY') || undefined,
   fetchMw: fetchMwAudio,
   synthTts: synthesizeTts,
   now: () => new Date().toISOString(),
   today: () => dayjs().format('YYYY-MM-DD'),
   modelsDir: join(dataDir, 'models'),
-  envFile: join(root, '.env'),
-  root,
+  envFile: runtime.envFile,
+  root: runtime.shippedRoot,
   verifyMw: verifyMwKey,
   recognizePhonemes,
   checkPhonemeAsr,
@@ -153,7 +159,7 @@ const app = createApp({
 // /api/* 的路由已经在 createApp() 里注册在前面，命中的请求在到达这里之前就已经
 // 结束（不会 next() 下来）；只有真正未知的路径才会落到下面这段。未知的 /api/* 显式
 // 返回 JSON 404，避免被 SPA fallback 误吞成 index.html。
-const webDist = join(root, 'web', 'dist');
+const webDist = runtime.webDist;
 if (existsSync(webDist)) {
   // SPA 外壳绝不能被缓存。它里面写死了带哈希的资源文件名；浏览器一旦缓存了旧的一份，
   // 重新构建之后拿到的仍是旧 HTML → 指向旧资源 → 新页面永远看不到（新增的「设置」入口
@@ -189,7 +195,7 @@ if (existsSync(webDist)) {
  * 端口被占最常见的占用者是上次没关掉的同一个应用，那时正确的反应不是换端口，
  * 是告诉你"已经在跑了"。
  */
-const port = serverPort();
+const port = runtime.port;
 const url = `http://localhost:${port}`;
 
 /** 占着这个端口的是不是本应用自己 */
