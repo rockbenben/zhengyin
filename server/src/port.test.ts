@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { serverPort, localUrl, DEFAULT_PORT } from './port.js';
+import { serverPort, serverHost, localUrl, DEFAULT_PORT } from './port.js';
 
 /**
  * 端口是 `.env` 里可以改的（PORT=30041），可它曾经**写死在给用户看的文字里**：
@@ -76,5 +76,13 @@ describe('端口不许在别处写死', () => {
   it('web 源码里只有 brand.ts 能出现它', () => {
     const dir = join(import.meta.dirname, '..', '..', 'web', 'src');
     expect(offenders(dir, /\.tsx?$/, 'brand.ts'), '这些文件把端口写死了').toEqual([]);
+  });
+});
+
+describe('服务绑哪个地址', () => {
+  it('默认只绑本机，HOST 可显式放开', () => {
+    expect(serverHost({} as NodeJS.ProcessEnv)).toBe('127.0.0.1');
+    expect(serverHost({ HOST: '0.0.0.0' } as NodeJS.ProcessEnv)).toBe('0.0.0.0');
+    expect(serverHost({ HOST: '   ' } as NodeJS.ProcessEnv)).toBe('127.0.0.1');
   });
 });

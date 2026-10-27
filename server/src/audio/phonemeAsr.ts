@@ -11,7 +11,12 @@ import { spawnSync } from 'node:child_process';
 // 没做成环境变量：uvicorn 的 --port 优先于环境变量，做出来的开关不会生效，
 // 而一个不生效的开关比没有开关更糟。这是内部端口，真撞上的概率也低——
 // 撞了的话界面上"服务没启动"那条提示会出来，照它说的看终端日志就能定位。
-const ENDPOINT = 'http://127.0.0.1:30032';
+const DEFAULT_ASR_PORT = 30032;
+
+/** 边车地址。端口由服务端在启动时决定，桌面版不再写死 30032 */
+export function asrEndpoint(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
 
 export interface PhonemeAsrResult {
   reachable: boolean;
@@ -36,11 +41,12 @@ export async function recognizePhonemes(
   audio: Uint8Array,
   fetchFn: typeof fetch = fetch,
   timeoutMs = 60_000,
+  port = DEFAULT_ASR_PORT,
 ): Promise<PhonemeAsrResult> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetchFn(`${ENDPOINT}/recognize`, {
+    const res = await fetchFn(`${asrEndpoint(port)}/recognize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
       // Uint8Array 直接当 body：Node 的 fetch 收 BodyInit，不用先转 Buffer/Blob
@@ -103,11 +109,11 @@ export function hasUv(): boolean {
   return spawnSync('uv --version', { stdio: 'ignore', shell: true }).status === 0;
 }
 
-export async function checkPhonemeAsr(fetchFn: typeof fetch = fetch, timeoutMs = 2_000): Promise<boolean> {
+export async function checkPhonemeAsr(fetchFn: typeof fetch = fetch, timeoutMs = 2_000, port = DEFAULT_ASR_PORT): Promise<boolean> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetchFn(`${ENDPOINT}/health`, { signal: ctl.signal });
+    const res = await fetchFn(`${asrEndpoint(port)}/health`, { signal: ctl.signal });
     if (!res.ok) return false;
     const body = await res.json() as { ok?: unknown };
     return body.ok === true;

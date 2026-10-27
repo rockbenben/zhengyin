@@ -233,7 +233,7 @@ async function alreadyOurs(): Promise<boolean> {
 // serve() 是**异步** listen，EADDRINUSE 以 'error' 事件到达、不会同步抛出——
 // 包 try/catch 抓不到它，进程会以未捕获异常收场（这段会话里就这么崩过一次）。
 // 必须挂在返回的 server 上。
-const server = serve({ fetch: app.fetch, port }, () => {
+const server = serve({ fetch: app.fetch, port, hostname: runtime.host }, () => {
   console.log(`正音 ${url}`);
   // ── 「怎么停」必须在这儿说，不能交给启动脚本 ──
   //

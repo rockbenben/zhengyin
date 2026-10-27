@@ -35,5 +35,7 @@ export const REPO_URL = 'https://github.com/rockbenben/zhengyin';
  * 默认值 30031 的由来见 server/src/index.ts 顶上那段。
  */
 export function localAppUrl(): string {
-  return `http://localhost:${typeof location !== 'undefined' && location.port ? location.port : '30031'}`;
+  const host = typeof location !== 'undefined' && location.hostname ? location.hostname : 'localhost';
+  const port = typeof location !== 'undefined' && location.port ? location.port : '30031';
+  return `http://${host}:${port}`;
 }

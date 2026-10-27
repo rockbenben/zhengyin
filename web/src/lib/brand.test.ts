@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { APP_NAME, APP_TAGLINE, REPO_URL } from './brand';
+import { APP_NAME, APP_TAGLINE, REPO_URL, localAppUrl } from './brand';
 
 /**
  * 名字只能有一个。
@@ -100,5 +100,22 @@ describe('源码链接指向的就是这个仓库', () => {
     const layout = read('web/src/layout.tsx');
     expect(layout, '版口里没有用 REPO_URL').toContain('REPO_URL');
     expect(layout, '没有 GitHub 图标').toContain('GithubOutlined');
+  });
+});
+
+describe('本机访问地址', () => {
+  it('没有 location 时退回 localhost:30031', () => {
+    expect(localAppUrl()).toBe('http://localhost:30031');
+  });
+
+  it('有 location.hostname 时跟它走，不写死 localhost', () => {
+    const prev = (globalThis as { location?: unknown }).location;
+    (globalThis as { location?: unknown }).location = { hostname: '127.0.0.1', port: '30100' };
+    try {
+      expect(localAppUrl()).toBe('http://127.0.0.1:30100');
+    } finally {
+      if (prev === undefined) delete (globalThis as { location?: unknown }).location;
+      else (globalThis as { location?: unknown }).location = prev;
+    }
   });
 });
