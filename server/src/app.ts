@@ -27,6 +27,7 @@ import { GRADES, CardNotFoundError, type ReviewStore, type Grade } from './revie
 import { invalidUserName } from './users.js';
 import { maskKey, readEnvFile, readEnvValue, upsertEnvValue, writeEnvFile } from './envfile.js';
 import { loadRegistry, modelState, resolveModel } from './models.js';
+import { writeGuard } from './httpGuard.js';
 
 /**
  * 低于这个信噪比，评测结果照给，但**不写进发音档案和复习队列**。
@@ -282,6 +283,7 @@ async function referenceBaseline(
 
 export function createApp(deps: AppDeps) {
   const app = new Hono();
+  app.use('*', writeGuard());
 
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
 
