@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { UpdateState } from './bridge.js';
 
 export type UpdateChannel = 'nsis' | 'zip';
 
@@ -56,7 +57,7 @@ export interface UpdaterHooks {
   onChange(): void;
 }
 
-export type UpdaterState = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+export type UpdaterState = UpdateState;
 
 export interface Updater {
   state(): UpdaterState;
@@ -130,7 +131,12 @@ export function createUpdater(autoUpdater: AutoUpdaterLike, hooks: UpdaterHooks)
     },
     scheduleAuto,
     restartToInstall() {
-      if (state === 'ready') autoUpdater.quitAndInstall();
+      // 判据是「有没有下好的版本」，**不是状态机现在停在哪一格**。
+      //
+      // 状态会漂：更新下好之后用户再点一次「检查更新」，状态就被推离 'ready'
+      // （检查失败 → 'error'，没有新版本 → 'idle'），而下好的版本一直都在。
+      // 用状态判就会出现「按钮还摆着，点了没反应，更新再也装不上」。
+      if (ready !== null) autoUpdater.quitAndInstall();
     },
   };
 }

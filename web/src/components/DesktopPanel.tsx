@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Space, Typography, message } from 'antd';
-import { desktopBridge, type DesktopState } from '../lib/desktop';
+import { desktopBridge, type DesktopState, type UpdateState } from '../lib/desktop';
 
 /**
  * 设置页里的「桌面版」一段。
@@ -15,9 +15,17 @@ import { desktopBridge, type DesktopState } from '../lib/desktop';
 export default function DesktopPanel() {
   const bridge = desktopBridge();
   const [state, setState] = useState<DesktopState | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
+  const prevUpdateState = useRef<UpdateState | null>(null);
 
   const refresh = useCallback(() => {
-    bridge?.state().then(setState).catch(() => setState(null));
+    bridge?.state()
+      .then((s) => { setState(s); setStateError(null); })
+      .catch((e: unknown) => {
+        // 读不到状态**不是**「没有更新器」：那会把整块更新区和开发者工具按钮
+        // 悄悄收走，用户分不清「这台机器没有更新」和「桥坏了」。说出来。
+        setStateError(e instanceof Error ? e.message : '读不到桌面外壳的状态');
+      });
   }, [bridge]);
 
   useEffect(() => {
@@ -28,6 +36,19 @@ export default function DesktopPanel() {
     const t = setInterval(refresh, 3000);
     return () => clearInterval(t);
   }, [bridge, refresh]);
+
+  /**
+   * 「已经是最新了」只在**刚查完**的那一刻说一次。
+   *
+   * 之前点完「检查更新」界面上一动不动：没有新版时更新器只是回到 idle，
+   * 那个状态没人读，于是用户分不清"没反应"和"没有新版"。
+   */
+  useEffect(() => {
+    const now = state?.updateState ?? null;
+    const prev = prevUpdateState.current;
+    prevUpdateState.current = now;
+    if (prev === 'checking' && now === 'idle') message.info('已经是最新版本了');
+  }, [state]);
 
   const run = async (fn: () => Promise<void>): Promise<void> => {
     try {
@@ -43,6 +64,10 @@ export default function DesktopPanel() {
   return (
     <Card title="桌面版" size="small">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        {stateError && (
+          <Alert type="warning" showIcon message="读不到桌面外壳的状态" description={stateError} />
+        )}
+
         {/* 这段只说「这些动作原来在菜单栏上，现在在这儿」。
             **不重复上面那张卡的话**（「能直接看到词条、练习记录…」那句）——
             两张卡紧挨着，同一句话连着说两遍，读着像出了两次错。 */}
@@ -61,7 +86,12 @@ export default function DesktopPanel() {
           <Space direction="vertical" size="small" style={{ width: '100%' }}>
             <span className="slug">更新</span>
             <Space wrap align="center">
-              <Button onClick={() => void run(() => bridge.checkUpdate())}>检查更新</Button>
+              <Button
+                loading={state.updateState === 'checking'}
+                onClick={() => void run(() => bridge.checkUpdate())}
+              >
+                检查更新
+              </Button>
               <Checkbox
                 checked={state.autoCheck}
                 onChange={(e) => void run(() => bridge.setAutoCheck(e.target.checked))}
@@ -69,6 +99,11 @@ export default function DesktopPanel() {
                 自动检查更新
               </Checkbox>
             </Space>
+            {state.updateState === 'downloading' && (
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                正在下载新版本……
+              </Typography.Text>
+            )}
             {state.updateReady && (
               <Alert
                 type="success"

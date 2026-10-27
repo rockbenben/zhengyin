@@ -23,6 +23,21 @@ describe('preload 抄的那份频道名，得跟正本一字不差', () => {
       expect(preloadSrc).toContain(`'${value}'`);
     });
   }
+
+  /**
+   * 上一条只验「正本里的值在 preload 里出现过」，**抓不住对调**：
+   * 两个值都还在文件里，断言照样全绿。可对调恰恰是抄写时最容易出的错——
+   * 而它的后果不是报错，是「点打开数据文件夹却弹了换文件夹的框」。
+   * 所以这里按**名字→值**整张表比一次。
+   */
+  it('名字对得上值：整张表是一张表，不是各出现一次', () => {
+    const block = preloadSrc.slice(preloadSrc.indexOf('const CHANNEL = {'));
+    const copied: Record<string, string> = {};
+    for (const m of block.slice(0, block.indexOf('} as const')).matchAll(/(\w+):\s*'([^']+)'/g)) {
+      copied[m[1]] = m[2];
+    }
+    expect(copied).toEqual({ ...CHANNEL });
+  });
 });
 
 describe('频道名自己不能撞', () => {

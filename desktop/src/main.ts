@@ -37,6 +37,16 @@ let dataRoot = USER_DATA;
 let port = 0;
 let quitting = false;
 /**
+ * 保活的通知实例。
+ *
+ * **为什么必须留着它**：Windows 上通知的点击激活走的是**实例事件**，实例一旦被
+ * GC 掉，那个事件就再也收不到——Electron 自己的 `Notification.handleActivation()`
+ * 文档里明确列了这一条（"Notification object was garbage collected"）。
+ * 于是「点这条通知就能装上」会变成点了没反应；而 `autoInstallOnAppQuit` 是关的，
+ * 正常退出也不会装——**已经下好的更新就永远卡在那里**。
+ */
+let pendingNotification: Notification | null = null;
+/**
  * 正音自己的版本号。
  *
  * **不用 `app.getVersion()`**：开发模式下 Electron 读不到应用自己的 package.json，
@@ -134,6 +144,9 @@ function registerIpc(): void {
     devTools: !app.isPackaged,
     autoCheck: loadAutoCheck(PREFS_FILE),
     updateReady: updater?.versionReady() ?? null,
+    // 更新器现在在干什么。网页据此说「正在检查」「已是最新」，
+    // 也据此知道「重启以完成更新」这一刻到底能不能按。
+    updateState: updater?.state() ?? null,
   });
 
   ipcMain.handle(CHANNEL.state, () => state());
@@ -226,6 +239,14 @@ async function bootstrap(): Promise<void> {
     const healthy = await waitUntilHealthy(port);
     installPermissions();
 
+    // 「点通知装更新」不能只靠实例事件：实例被 GC 掉就收不到激活
+    // （Electron 的 `handleActivation` 文档里就写着这一条）。
+    // 它还管另外两种情况：冷启动（从通知点开应用）和通知中心里
+    // 没有内存副本的残留通知——那两种靠实例事件更收不到。
+    if (process.platform === 'win32' && Notification.isSupported()) {
+      Notification.handleActivation(() => { updater?.restartToInstall(); });
+    }
+
     // 更新器要在开窗**之前**起来：网页一打开就会问「有没有更新器」，
     // 那时候这个答案得是对的（晚一步的话，头一次问会得到「没有」，
     // 那一档按钮就永远不出现了）。
@@ -243,6 +264,7 @@ async function bootstrap(): Promise<void> {
           if (!Notification.isSupported()) return;
           const n = new Notification({ title, body: content });
           n.on('click', () => { updater?.restartToInstall(); });
+          pendingNotification = n;   // 保活：实例被回收就收不到点击了
           n.show();
         },
         showError: (m) => { void dialog.showMessageBox({ type: 'error', title: `${PRODUCT_NAME}更新`, message: m }); },

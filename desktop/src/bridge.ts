@@ -40,6 +40,14 @@ export const CHANNEL = {
 export type ChannelName = (typeof CHANNEL)[keyof typeof CHANNEL];
 
 /**
+ * 更新器现在停在哪一格。
+ *
+ * **这是给网页看的**：网页得知道「正在检查」「正在下载」「已是最新」，
+ * 否则点完「检查更新」界面上一动不动——用户分不清"没反应"和"没有新版"。
+ */
+export type UpdateState = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+
+/**
  * 网页看到的那份「这个应用现在是什么状态」。
  *
  * 网页不自己判断有没有更新器——**能不能更新取决于打包形态**（只有 Windows 的
@@ -56,6 +64,8 @@ export interface DesktopState {
   autoCheck: boolean;
   /** 已经下好、等着重启安装的版本；没有就是 null */
   updateReady: string | null;
+  /** 更新器现在在干什么。没有更新器就是 null */
+  updateState: UpdateState | null;
 }
 
 /**

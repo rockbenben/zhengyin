@@ -8,6 +8,9 @@
  * `web/src/lib/desktop.test.ts` 盯着——抄错不会报错，只会让按钮点了没反应。
  */
 
+/** 更新器现在停在哪一格。与服务端 server 侧 desktop/src/bridge.ts 的 UpdateState 一一对应。 */
+export type UpdateState = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+
 /** 这个应用现在是什么状态。网页不自己判断「有没有更新器」——那取决于打包形态。 */
 export interface DesktopState {
   version: string;
@@ -19,6 +22,8 @@ export interface DesktopState {
   autoCheck: boolean;
   /** 已经下好、等着重启安装的版本；没有就是 null */
   updateReady: string | null;
+  /** 更新器现在在干什么。没有更新器就是 null */
+  updateState: UpdateState | null;
 }
 
 /**
