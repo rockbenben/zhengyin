@@ -18,6 +18,7 @@ import { readEnvFile, readEnvValue } from './envfile.js';
 import { syncProfile } from './profile.js';
 import { reanalyzeEntries } from './reanalyze.js';
 import { reconcileAttempts } from './reconcile.js';
+import { acquireDataLock, DataLockBusyError } from './lock.js';
 import { missingFromTable, missingHowTo } from './analysis/articulation.js';
 
 // 两个根：只读资源（模板、前端产物、随附笔记）与可写数据（data/、.env、本机笔记）。
@@ -25,6 +26,22 @@ import { missingFromTable, missingHowTo } from './analysis/articulation.js';
 const runtime = resolveRuntime();
 const { appRoot, dataDir } = runtime;
 mkdirSync(join(dataDir, 'audio'), { recursive: true });
+
+// 同一个数据目录只允许一个正音进程。最现实的场景：桌面版指到了仓库文件夹，
+// 而 `npm start` 还开着。明确拒绝比让两边一起写 review-state / 档案 / SQLite 安全。
+let lock: ReturnType<typeof acquireDataLock>;
+try {
+  lock = acquireDataLock(dataDir);
+} catch (e) {
+  if (e instanceof DataLockBusyError) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  throw e;
+}
+process.on('exit', () => lock.release());
+process.on('SIGINT', () => { lock.release(); process.exit(0); });
+process.on('SIGTERM', () => { lock.release(); process.exit(0); });
 
 // 发音部位表漏了音素的话，界面上那个音的部位尺会静静地不画——不报错、不崩，只是空着。
 // 跟 notes.ts 的 validateTriggers 一样，把这种无声失效在启动时喊出来。
