@@ -18,7 +18,9 @@ set FOUND=0
 for %%P in (30031 30032) do (
   for /f "tokens=5" %%I in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
     echo   port %%P  ^-^-^>  killing PID %%I
-    REM /T also kills the children (concurrently -> node / uv -> python)
+    REM /T also kills the children (server -> asr -> uv -> python).
+REM Desktop build: close its window. The ports below belong to browser mode;
+REM the desktop app picks its own ports and stops everything when it exits.
     taskkill /F /T /PID %%I >nul 2>nul
     set FOUND=1
   )

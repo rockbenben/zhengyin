@@ -89,6 +89,13 @@
 因为版本比较写三份必然分裂，而且**得逐段比**——`'22.9.0' >= '22.22.2'` 按字符串是
 true，22.9 会被放行。
 
+**桌面版另带一份 `node.exe`**（`desktop/vendor/`，构建时按固定版本和 SHA256 下载）。
+原因不是省事，是 better-sqlite3：它的 `.node` 按 Node ABI 编译，在 Electron 自带的 Node 里
+加载不了；随包 Node 24 之后，桌面版和浏览器模式用的是同一种 ABI，不必为每次 Electron
+升级重编原生模块。打包 job 因此固定用 Node 24，而 `nodeFloor.test.ts` **故意不扫
+`desktop/package.json`**：Electron 的 `engines` 下限比本仓高，扫进去会顶穿 20.19 那条
+浏览器用户的下限。
+
 使用者是**中文母语者**，目标口音是**美式发音（General American）**。他把自己念不准、拿不准的音发过来，你用**中文**讲清楚该怎么发、要注意什么，然后把结论沉淀成 `notes/` 下的一篇笔记，并更新发音档案。
 
 ## 文件布局
@@ -97,16 +104,20 @@ true，22.9 会被放行。
 |---|---|
 | `data/users/<当前用户>/发音档案.md` | 使用者的口音设定 + 已确认的习惯性短板。**每次纠音前先读，纠音后回来更新**。当前用户是谁看 `data/当前用户.txt`。**这个文件不在版本库里**（`.gitignore`），第一次启动服务时从 `发音档案.template.md` 铺出来——文件不存在就说明这台机器还没跑过服务，如实说明即可。文件末尾有一块 `<!-- AUTO:发音统计 ... -->`，那是工具根据每次评测自动写的（`server/src/profile.ts`），**别手改那一块**，它下次评测就会被覆盖；标记之外的内容工具一个字节都不碰。想知道他最近实际错在哪些音，先看这一块，或者 `curl http://localhost:30031/api/stats` |
 | `notes/<音或词>-<中文描述>.md` | 一个音 / 一类问题一篇。**这是你产出的东西** |
+| `desktop/` | Electron 桌面外壳：窗口、首启向导、随包运行时、打包与更新。`desktop/vendor/` 和 `desktop/release*/` 是构建产物，不进版本库 |
+| `workflows/` | AI 的提示词正本（计划二补内容）；桌面版从只读资源根读它 |
+| `data/notes/` | 本机笔记，AI 写这里；随附 `notes/` 只读，同名时本机优先 |
 | `美音要点-中文母语者.md` | **通用先验**：中文母语者统计上容易错在哪。跟 `notes/` 的分工是"跟谁在念无关" vs "这个人的问题"——写笔记时别把先验写成对他的断言 |
 | `server/src/analysis/articulation.ts` | **每个音素客观上怎么发**（舌尖顶哪、气流走哪、唇形），全集覆盖。跟 `notes/` 分工同上。评测报错时即使还没有笔记，界面也答得出"那这个音该怎么发"。加音素时两张表（位置 + 怎么发）都要填，漏了启动会告警、测试会红 |
 | `README.md` | 面向新用户的上手文档 + 笔记索引表 |
 | `web/src/lib/ink.ts` | 纸与墨：主题（浅/深/跟随系统）和第二版油墨的四款颜色。墨屉全是冷色是**量出来的**——暖色半圈被琥珀（提醒）和红（破坏性操作）占着，落进去就撞 |
 | `.decisions/` | 决策记录（ADR），**不在版本库里**、只在作者本机。判定阈值、模型来源、复习节奏这类当初怎么定的都在那儿。如果这台机器上有，动对应逻辑之前值得翻一眼；没有就算了，不必去找 |
 
-一眼分清三类：**跟着发布走**的是代码、`notes/`、两份 md 文档和启动脚本；
+一眼分清三类：**跟着发布走**的是代码、`notes/`、`desktop/`、`workflows/`、两份 md 文档和启动脚本；
 **本机数据**是整个 `data/`（每个人的 `index.db`、`review-state.json`、`发音档案.md`
-都在 `data/users/<名字>/` 下）和 `.env`；
-**工具状态**是 `.claude/`、`.superpowers/`、`.decisions/`。后两类都在 `.gitignore` 里。
+都在 `data/users/<名字>/` 下，`data/notes/` 是本机笔记）和 `.env`；
+**工具状态**是 `.claude/`、`.superpowers/`、`.decisions/`，以及 `desktop/vendor/`、`desktop/release*/`
+这些构建产物。后两类都在 `.gitignore` 里。
 
 ## 常用命令
 
@@ -127,21 +138,28 @@ true，22.9 会被放行。
   三个平台同一条。之所以不直接叫人贴 `npm install && npm run build && npm start`：
   那串 `&&` 在 Windows PowerShell 5.1 里会失败，而 npm 执行脚本体走的是它自己的 shell，
   跟用户用什么终端无关。
-- `npm start` —— 只起服务（要先 `npm run build`）。会自动开浏览器，`NO_OPEN=1` 可关。
+- `npm start` —— 只起服务（要先 `npm run build`）。服务会自己拉起识别服务，退出时连带停掉；
+  会自动开浏览器，`NO_OPEN=1` 可关。桌面版不走这条命令：它用随包的 `node.exe` 起同一个服务。
 - **双击 `停止.cmd` / `.command` / `.sh`** —— 停掉服务。平时用不到（关掉启动那个窗口就会
   连带停掉整棵进程树），它是给"窗口找不着了"用的。**按端口找进程**（30031/30032），
   不按程序名——杀掉所有 node 会顺手带走编辑器和别的开发服务器。
-  刻意**没有**做成"网页上点一下关服务"：那要先把绑定从 0.0.0.0 收到本机（否则局域网里
-  谁都能触发关机），而且**关不掉识别服务**——concurrently 不会因为主服务退出就杀那个 Python
-  进程，它占着 1.2GB 模型继续挂着。应用的设置页里把这件事如实写清了，没有做那个按钮。
+  刻意**没有**做成"网页上点一下关服务"：服务现在默认只绑 `127.0.0.1`，而且自己管边车
+  （退出按进程树杀）——关窗口/停止脚本已经覆盖，页面上再放一个按钮只会多一条容易误解的路径。
+  30032 只在开发模式（`npm run asr` 单跑）或手工固定 `ASR_PORT` 时出现；服务托管的边车
+  用动态端口，会跟着 30031 的服务进程树一起停。
 - `npm run dev` —— 开发模式：server（30031）+ vite（5173）一起起，改代码热更新
 - `npm run build && npm start` —— 生产模式：构建后单进程跑在 http://localhost:30031（前端也从这个端口托管，`/word/click`、`/review` 这类深链接直接输网址也能打开，不会 404）
 - `npm test` —— Vitest 全量测试
+- `npm run desktop` / `npm run dist:desktop` / `npm run dist:desktop:zip` —— 开发时起桌面壳 /
+  打 NSIS 安装版 / 打 zip。**先跑一次 `npx install-electron`**（Electron 42 起 npm install
+  不再代下二进制），并让 `npm run fetch-runtime` 把 node/uv 放进 `desktop/vendor/`。
+  `npm run check:package` 对依赖闭包，`npm run smoke:package` 在仓库外真起一次打包布局。
 - `npm run asr` —— 起本地**音素识别服务**（Python/FastAPI，30032 端口。**代码注释和测试里一律叫它「边车」/ sidecar**，那个词只在仓库内部用；文档和界面上说「识别服务」，别让用户去理解一个服务网格的黑话）。评测的主路径靠它：录音转成 IPA 之后跟 CMUdict 的目标音素逐个对齐，能说出"第几个音发成了什么 / 漏了 / 多了"。首次运行会下模型（约 1.2GB，缓存在 `~/.cache/huggingface`），之后启动约十几秒。
   **它走 `scripts/asr.mjs` 这层包装，不是直接调 uv**：`dotenv/config` 只在 server 那个进程里
-  import，而识别服务是 concurrently 拉起的**兄弟进程**，`.env` 本来管不到它——于是「双击启动」的人
+  import，而手工单跑的边车是**兄弟进程**，`.env` 本来管不到它——于是「双击启动」的人
   没有任何办法换模型源。包装只干两件事：把 `.env` 合并进环境再 spawn uv；认出连接类失败时补一段
-  中文说明（界面上那条「回来看终端」才不至于指向一段英文栈）。**模型默认从 ModelScope 下**
+  中文说明。**服务自己拉起边车时不需要这层包装**：它已经读过 appRoot 下的 `.env`，并把
+  `MODEL_SOURCE` / `HF_ENDPOINT` 传进子进程。**模型默认从 ModelScope 下**
   （`asr-service/main.py` 的 `resolve_model`）：**先查本地 HF 缓存**——已经下过的人
   升上来一个字节都不该重下；要下才走 ModelScope；ModelScope 不通自动回落 HuggingFace。
   `.env` 里 `MODEL_SOURCE=hf|modelscope` 可以钉死（钉死 modelscope 却取不到会明确报错，
@@ -588,7 +606,9 @@ aɪ 和 aʊ 完全同点，ɔ 和 ɔɪ 也完全同点。要画得清就得给�
 
 **换端口在 `.env` 里写 `PORT=30041`**，不要写成 `PORT=30041 npm start`——那是 POSIX shell
 语法，Windows 的 cmd 和 PowerShell 都跑不通（这行提示曾经就这么写在端口冲突的报错里，
-而作者本人就在 Windows 上）。识别服务的 30032 是写死的，见 `phonemeAsr.ts` 的注释。
+而作者本人就在 Windows 上）。识别服务在浏览器模式默认 30032；桌面版由服务挑空闲端口，
+`ASR_PORT` 可固定。服务默认只绑 `127.0.0.1`；要局域网访问才在 `.env` 里写
+`HOST=0.0.0.0`（浏览器在非本机地址本来也不给麦克风）。
 
 端口被占时不会甩栈追踪：如果占用者就是本应用自己（最常见——上次没关掉），它会说
 "已经在跑着了，直接打开就行"并正常退出（exit 0）；是别的程序才提示换端口（exit 1）。
