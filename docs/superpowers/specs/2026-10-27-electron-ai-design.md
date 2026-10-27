@@ -58,10 +58,16 @@ Electron 主进程（desktop/dist/main.js）
   决定性理由是 `better-sqlite3` 是原生模块：它的 `.node` 按 Node ABI 编译，
   在 Electron 的 Node 里加载不了；而给它按 Electron ABI 重编，等于把服务
   和 Electron 的版本绑死，每次升 Electron 都要重编一次。
-  随包一份 Node 之后，桌面版和浏览器模式跑的是同一种运行时、同一个预编译二进制。
+  代价是多一份运行时，收益是原生模块继续用 Node 生态的预编译包。
+  **硬约束：打包时打进 `node_modules` 的那份 `better_sqlite3.node`，
+  必须由与 `runtime/node.exe` 同大版本的 Node 安装出来**（ABI 按大版本走）。
+  所以桌面打包 job 固定用那个大版本的 Node 跑 `npm ci`，
+  不能让它跟着 CI 矩阵里 20.19 / 22 的 runner 走。
 - 构建时按固定版本下载 `node.exe` 与 `uv.exe` 到 `desktop/vendor/`（不进版本库），
   连同各自的 LICENSE 一起进 `extraResources`。版本与校验和写死在下载脚本里。
-- 关窗口 = 退出：主进程先停服务子进程，服务自己停边车（按进程树杀，见下）。
+- 关窗口 = 退出：主进程先给服务发一次优雅退出（服务在处理器里停边车），
+  设一个短超时；超时就按进程树强制杀（`taskkill /T`），
+  保证不会因为服务卡住而留下一个隐藏的 Python。两条路共用同一份「谁还活着」的判断。
 - 麦克风权限显式设 `setPermissionRequestHandler`：只放 `media`，其余拒绝。
   不依赖 Electron 的默认行为——默认行为是什么，本仓没有先例可引，
   冒烟清单里要真录一次音。
@@ -72,6 +78,9 @@ Electron 主进程（desktop/dist/main.js）
   探活超时（窗口里给一句人话 + 日志路径，不留白屏）、
   spawn 就失败（没有退出码，只有 errno：文件不在 / 系统拒绝创建进程，多半被安全软件拦）、
   起来之后又退了（给退出码）。这三种的处置法各不相同，混成一句用户无从下手。
+- 单实例锁：第二次双击只把已有窗口拉到前台并聚焦，不启第二个服务；
+  主进程退出时释放。两套数据同时写的问题由数据锁兜底（见下），
+  但用户能遇到的日常情况是「图标点了一下没反应，其实窗口在后面」。
 
 ### 端口
 
@@ -84,6 +93,9 @@ Electron 主进程（desktop/dist/main.js）
   （`@hono/node-server` 的 `server.listen(port, options.hostname)`，hostname 未传），
   而 AI 密钥与「能写文件的代理」都挂在它上面，必须收成本机。
   `HOST=0.0.0.0` 仍可显式放开，代价写在 README。
+- 顺带把 `web/src/lib/brand.ts` 的 `localAppUrl()` 从写死 `localhost` 改成
+  `location.hostname`：桌面版加载的是 `127.0.0.1`，而某些机器的 `localhost`
+  先解析到 `::1`，服务只绑在 `127.0.0.1` 时那句提示会把人引到一个连不上的地址。
 
 ## 运行时路径
 
@@ -121,6 +133,8 @@ Electron 主进程（desktop/dist/main.js）
 `userData` 显式设成 `%APPDATA%\zhengyin`（ASCII），显示名仍是「正音」。
 理由跟 035 一样：Electron 默认按 productName 建目录，而服务端自己的数据目录
 按 ASCII 名走，不对齐就会并排躺两个文件夹，看着像装了两个应用。
+`app.setPath('userData', …)` 必须在任何 `app.getPath('userData')` 之前调用——
+先读过一次默认值，Chromium 的 profile 已经按旧路径初始化了，再改只会两边都不对。
 
 ### 首启向导
 
@@ -136,6 +150,10 @@ Electron 主进程（desktop/dist/main.js）
 
 选择记在 `<userData>/desktop-settings.json`（不在 `APP_ROOT` 里——它可能指向别处）。
 原生菜单里给「更换数据文件夹…」，改完重启生效。
+
+选完目录要**先试一次数据锁再起服务**。被另一个正音进程占着时（最常见的是
+仓库里还开着 `npm start`），就在这一步说清「谁占着、怎么关」并让重新选，
+不能等主窗口开出来才在后台失败——那会表现成白屏或空库。
 
 ### 数据锁
 
@@ -205,6 +223,9 @@ uv run --frozen --project <SHIPPED_ROOT>/asr-service \
   `asr-service/__pycache__/main.cpython-311.pyc` 是同一件事的现场证据。
 - `--frozen` 依赖 `uv.lock` 与 `pyproject.toml` 同步；`uv lock --check` 要进 CI，
   否则每个用户的边车都会在启动时报一句跟他无关的锁文件错。
+- 启动前先看一次 uv 版本。低于支持 `--project` / `--frozen` 的版本就直接说
+  「uv 太旧，升级它」，不把 uv 自己的解析错误原样甩给用户——那条错误里
+  没有一个字提到版本。下限写在一处常量里，跟 `check-uv.mjs` 共用同一句提示。
 - 沿用现有的 `PYTHONIOENCODING=utf-8`、`DISABLE_SAFETENSORS_CONVERSION=1`，
   以及 `.env` 里的 `MODEL_SOURCE` / `HF_ENDPOINT`（现在由服务读出来传给子进程，
   不再需要 `scripts/asr.mjs` 那层包装来搬运 `.env`）。
@@ -232,6 +253,8 @@ uv 之下还有一层 Python，只杀 uv 会留下一个占着模型的孤儿。
 
 - 上游 `web-tools-by-ai/scripts/sync-provider-catalog.ts` 的 `CONSUMERS` 加一条本仓路径，
   生成物落在 `web/src/vendor/providerCatalog.generated.ts`，进版本库、永不手改。
+  那是**另一个 git 仓库**：本仓只提交生成物，上游那条改动是否提交、是否推送单独确认。
+  重新生成需要那个仓库在它文档写死的绝对路径上；日常构建不需要（生成物已在版本库）。
 - **先建 `web/src/vendor/` 目录再跑同步**：脚本对不存在的父目录只打一行 warn 就跳过，
   不报错。
 - 消费层 `web/src/lib/aiPresets.ts` 从目录派生服务商芯片、区域端点、默认模型、
@@ -284,6 +307,9 @@ uv 之下还有一层 Python，只杀 uv 会留下一个占着模型的孤儿。
   搬走要写迁移（已发布的应用，别人机器上有那份文件）；AI 设置是新的、
   而且天生是「一张表 + 选中哪一条」，塞进 `.env` 只会发明一套自己的分隔符语法。
   两者都在 `APP_ROOT` 之下、都不进版本库、都不进备份。
+- 密钥是明文存储（跟 `.env` 里的 MW key 一样），靠操作系统账户权限保护。
+  不引入 Electron 的 `safeStorage`：服务进程不是 Electron，拿不到它；
+  为一把钥匙把密钥搬进主进程，等于把「密钥不出服务进程」那条拆了。
 
 ## AI 调用
 
@@ -304,8 +330,8 @@ uv 之下还有一层 Python，只杀 uv 会留下一个占着模型的孤儿。
 - 请求体只放必需字段。不发 `temperature`，不发思考参数：档位是各家的私事，
   目录里的 `thinkingWire` 这一版不接，界面上也不摆档位——摆一个不发的档，
   就是「界面显示的档和实际跑的档不是一档」。
-- 超时：测试连接 30s，讲解/对话/笔记草稿 180s。取消用 `AbortController`，
-  用户点取消要真的断开上游，不是只在界面上收起来。
+- 超时：测试连接接口 30s、命令行 60s（CLI 冷启动要加载自己）；讲解/对话/笔记草稿 180s。
+  取消用 `AbortController`，用户点取消要真的断开上游，不是只在界面上收起来。
 - 错误映射成中文并带上完整地址：401/403 密钥被拒、404 地址路径不对、
   429 频率或额度、5xx 服务商故障、连不上、超时。原始英文错误放在下一行，
   不吞掉——猜错了比不猜更坏。
@@ -372,9 +398,13 @@ uv 之下还有一层 Python，只杀 uv 会留下一个占着模型的孤儿。
 ### 讲解
 
 词条页一个 `AiCoach` 面板：`POST /api/ai/explain`，返回 markdown 与「参考了哪几篇」。
+回复上要标明是谁答的（接口·模型名 / 命令行·claude）——同一个问题换一条路
+答案会不一样，不标就分不清自己在看谁的判断。
 未配置 AI 时，面板整个换成一张「还没接上 AI」的卡——说清有接口和命令行两条路、
 给设置页入口，**不做一颗点下去才失败的按钮**。
 词典里查不到的词（没有逐音素归属）不给这颗按钮，那是条死路。
+面板另给一个「继续问助教」入口，带上当前词跳到 `/assistant`，
+省得用户自己把词再敲一遍。
 
 ### 存成笔记
 
@@ -386,7 +416,15 @@ uv 之下还有一层 Python，只杀 uv 会留下一个占着模型的孤儿。
 contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 校验复用现有的 `validateTriggers` / `validateShape`：自检法与对比训练缺一节就拒，
 并说清缺哪一节；trigger 用了形近字符（ASCII `g` 与 IPA `ɡ`）时给出「是否想用」。
-写入本机笔记根，写完 `NoteStore` 重扫、`reconcileAttempts`、`syncProfile`，
+`contrasts` 也要按合法 IPA 集合校验——`validateTriggers` 只管 triggers，
+不管这个字段，漏了的话一个写错的错法会静默存进去，而它只影响「谁来讲这处错」。
+
+`id` 与文件名都由服务端生成、都对**三个根**去重（随附笔记里已经有的 id 也要避开），
+并且要过路径安全：斜杠、`..`、点开头、控制字符、Windows 保留字符一律拒——
+id 来自 AI 的输出，不是可信字符串，直接当文件名就是一次目录穿越。
+
+写入失败（目录只读、权限、磁盘满）要说清是哪个路径、什么原因，不吞成一句「保存失败」。
+写入成功后 `NoteStore` 重扫、`reconcileAttempts`、`syncProfile`，
 词条页立刻能看到新笔记挂上来。
 
 表单上要写明：笔记对这台机器的所有使用者可见，只写知识、不写个人诊断。
@@ -411,6 +449,11 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 运行前确认一次，确认框里逐条列出它**能改什么**（本机笔记、当前用户的发音档案）
 和**不能改什么**（词条库、录音记录、复习进度、随附笔记）。
 
+发音档案的「已确认的习惯问题」只按模板的门槛写（用户自己认，或 ≥3 次且跨 ≥2 个词），
+不够的进「待观察」。结果以 diff 呈现、可撤销——不把「AI 说你有这个问题」
+直接落成一条定论。这一条跟笔记里「不写个人断言」是同一个理由，
+只是换了个文件。
+
 - 代理 cwd = `APP_ROOT`；随附笔记与 workflows 在 `SHIPPED_ROOT`，
   不在 cwd 之下，而四家 CLI 的跨目录授权方式各不相同
   （claude `--add-dir`、codex 的 `--add-dir` 语义是**可写**、gemini `--include-directories`、agy 未知）。
@@ -433,6 +476,28 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
   而那没有任何界面提示，所以这里要主动喊。
 - 单飞锁 + 10 分钟超时 + 取消（按进程树杀）。日志流式展示，可取消。
 
+## 新增接口
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/runtime` | `desktop` / `version` / `appRoot` / `userNotes`，界面文案分叉用 |
+| GET | `/api/asr/status` | 边车状态 + 端口 + 日志尾 |
+| POST | `/api/asr/restart` | 重起边车 |
+| GET / PUT | `/api/ai/settings` | 读（密钥打码）/ 存 AI 设置（含 consent） |
+| GET | `/api/ai/status` | 当前模式、是否就绪、CLI 是否找得到、缺哪一格 |
+| POST | `/api/ai/test` | 真发一条最小请求（接口或 CLI） |
+| POST | `/api/ai/explain` | `{word, target?}` → `{markdown, sources}` |
+| POST | `/api/ai/note-draft` | 同样的入参 → 结构化草稿 |
+| POST | `/api/notes` | 保存本机笔记（校验 + 写盘 + 重扫） |
+| GET / POST / DELETE | `/api/ai/chat` | 读历史 / 发一条 / 清空 |
+| POST | `/api/ai/agent/run` | 起一次整理 |
+| GET | `/api/ai/agent/status` | 状态、日志、变更清单 |
+| POST | `/api/ai/agent/cancel` | 取消 |
+| POST | `/api/ai/agent/undo` | 撤销最近一次 |
+
+`/api/pronounce/health` 保留不动（旧前端仍可能在用），新界面读 `/api/asr/status`。
+`/api/health` 不塞新字段：桌面标志放在 `/api/runtime`，一处就够。
+
 ## 安全
 
 - 服务绑 `127.0.0.1`（见端口一节）。
@@ -445,6 +510,15 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
     不拦就等于谁都能触发 AI 调用与代理写文件。
 - 密钥：只存本机、只回打码、不进日志、不进备份、错误消息里脱敏。
 - AI 回复按 markdown 渲染，沿用现有 react-markdown 配置，不启用原始 HTML。
+- 窗口里的链接交给系统浏览器：`setWindowOpenHandler` 一律 deny，
+  `will-navigate` 拦下非本应用的导航。不做的话，笔记正文或 AI 回复里一个链接
+  就能把应用本身导航走（窗口没有地址栏，回不来），或者弹出一个没有菜单的
+  第二个 Electron 窗口。
+- AI 接口地址只接受 `http` / `https`，保存时就拒掉其它协议。服务端是替用户发请求的，
+  不能让它顺带成为任意协议或本机端口的跳板。
+- 本机 JSON（AI 设置、对话历史、桌面设置）写入一律「临时文件 + rename」，
+  不直接覆盖。写到一半断电或两个请求撞上，留下半个文件的表现是设置全丢，
+  而没有任何报错。
 - 代理模式在确认框里逐条说明权限边界（见上）。
 
 ## 界面文案随运行时分叉
@@ -473,9 +547,15 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
   （`-win-setup.exe`），免安装版是 `-win.zip`。三条理由 035 的 builder 配置里都有实测记录。
 - 免安装那份用 zip，不用 portable：portable 每次双击都重解压整个应用。
 - 图标直接用 `web/public/icon-512.png`（实测 512×512）复制成 `desktop/build/icon.png`，
-  不新做资产；加一条守卫断言两份字节相同。
-- `asarUnpack` 只放需要被操作系统直接读的文件（本仓没有 toast XML，
-  但图标仍留在 asar 外，理由同 035）。
+  不新做资产；加一条守卫断言两份字节相同。这份图标要进 builder 的 `files`。
+- 窗口图标的运行时路径从 `dist` 那一层往上取，**不用 `app.getAppPath()`**：
+  开发模式它指到 `desktop/dist`，打包后指到 `app.asar` 根，两者差一层。
+  035 在这条上栽过——开发模式起不来，而打包版正常，所以一直没人发现。
+- **不需要 `asarUnpack`。** 本仓没有 Windows toast、没有托盘，
+  运行时的窗口图标由 Electron 的 nativeImage 读，它能穿 asar；
+  `build/icon.png` 另外只在打包时被 builder 用来生成 exe 图标。
+  035 把图标解出 asar 是因为 toast 的 `<image src>` 由操作系统直接读，
+  那条理由在这个应用里不存在，照抄只会多一份没人需要的解包。
 - `extraResources` 清单：`server/dist`、`web/dist`、`notes/`、`workflows/`、
   `asr-service/`（pyproject、uv.lock、.python-version、main.py）、
   `发音档案.template.md`、`scripts/vosk-models.json`、
@@ -496,8 +576,13 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 
 - Windows x64：NSIS（可自动更新）+ zip（免安装，手动更新）。未签名，
   README 写清 SmartScreen 的「更多信息 → 仍要运行」。
-- `electron-updater` 只在 NSIS 那条路点亮；自动检查默认关，开关状态落
-  `<userData>/update-prefs.json`。原生菜单给「检查更新」与「重启以完成更新」。
+- `electron-updater` 只在 **NSIS 安装版**点亮。判据不能只看 `app.isPackaged`——
+  zip 免安装版也是 packaged，它没有可覆盖的安装根，更新器一跑就是一句
+  跟用户无关的报错。用构建期常量（或两套 builder 配置）把 zip 那份整个关掉，
+  不初始化更新器、菜单里也不出那两项。
+- 自动检查默认关，开关状态落 `<userData>/update-prefs.json`。
+  原生菜单给「检查更新」「自动检查更新」（勾选项）、以及下载完成后的
+  「重启以完成更新」。
 - GitHub Actions：`validate`（版本对账 + `npm test`）→ `build`（`--publish never`，上传 Artifacts）
   → 单一 `publish` job（`gh release`）。tag 必须等于 `desktop/package.json` 的 version。
   版本号与 tag 由发版时单独确认，不在本设计里定死。
@@ -524,7 +609,12 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 - 前端测试：设置页的服务商切换与密钥保持、讲解面板、笔记编辑器、
   对话页、代理页的日志与撤销、ASR 日志展开、运行时文案分叉。
   按中文找 antd 按钮先 `.replace(/\s/g, '')`（「评测」那颗会被自动插空格）。
-- `uv lock --check` 进 CI。
+- `uv lock --check` 进 CI。CI 为此要装 uv，但**只装 uv**——不下模型、不起边车，
+  那件事仍然留给手工冒烟。
+- 服务端的新代码必须继续跑在 `engines.node` 的下限上。现有 CI 矩阵里的
+  20.19 那一项是这条的唯一证人，不能为了「反正桌面版带 Node 24」就随手用
+  只有新版本才有的 API。桌面打包 job 反过来固定用与 `runtime/node.exe`
+  同大版本的 Node（better-sqlite3 的 ABI），并显式跑一次 `npx install-electron`。
 - 跨仓拷贝（provider 目录、桌面身份字面量、STOP_HINT）一律用「对不上就红」的守卫，
   不靠人记得回来改。`brand.test.ts` 的 SKIP 要加 `desktop/release`、`desktop/vendor`。
 - 桌面身份守卫：`APP_NAME` ↔ `desktop/package.json` 的 productName ↔
@@ -554,8 +644,9 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 ## 实施阶段
 
 1. **桌面底座**：workspace、路径解析、随包 node/uv 的下载脚本、服务子进程、
-   首启向导、数据锁、`SHIPPED_ROOT`/`APP_ROOT` 拆分、窗口与菜单、打包与冒烟守卫。
-   这一阶段结束时桌面版能查词、放音、录音、评测、复习，功能与浏览器版一致。
+   首启向导、数据锁、`SHIPPED_ROOT`/`APP_ROOT` 拆分、窗口与原生菜单。
+   这一阶段结束时桌面版能在开发模式下起来，查词、放音、录音、评测、复习、
+   笔记、设置都与浏览器版一致；安装包留给阶段 7。
 2. **边车接管**：ASR 管理器、动态端口、状态与日志接口、进程树停止、
    `npm start` / `npm run dev` 语义调整、`AsrStatus` 改造。
 3. **AI 底座**：provider 目录同步与消费层、AI 设置与 consent 闸、
@@ -574,11 +665,12 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 这份设计覆盖两个能独立交付的子系统，**分成两份实施计划**，各自单独批准、
 跑完一份再进下一份：
 
-- **计划一 · 桌面化**：阶段 1、2，加上阶段 7 里的打包与发布骨架。
-  结束时桌面版功能与浏览器版一致（查词、真人音、逐音素评测、复习、笔记、设置），
-  边车由服务接管，能打出可安装的包。这一份里没有任何 AI 代码。
-- **计划二 · AI**：阶段 3–6。它只依赖计划一落下的路径与安全底座，反向不依赖——
-  所以计划一卡住时，AI 那部分照旧可以先在浏览器模式里做。
+- **计划一 · 桌面化**：阶段 1、2、7。结束时桌面版功能与浏览器版一致
+  （查词、真人音、逐音素评测、复习、笔记、设置），边车由服务接管，
+  能打出可安装的包。这一份里没有任何 AI 代码。
+- **计划二 · AI**：阶段 3–6。它只依赖计划一落下的两个根与桌面壳，
+  安全中间件和 AI 自己的路径都在这一份里做——所以计划一卡住时，
+  AI 那部分照旧可以先在浏览器模式里做（浏览器模式同样需要那两道中间件）。
 
 拆开的理由是验收面不同：计划一验的是「装出来的包在干净机器上跑得起来」，
 计划二验的是「AI 的四种输出都对、且没有越界写」。合成一份的话，
@@ -588,8 +680,15 @@ contrasts、正文（markdown + 预览）。保存走 `POST /api/notes`，
 
 - Electron 对 `media` 权限的默认行为。做法是显式设 handler 且冒烟清单里真录一次，
   不以「默认应该会放行」为依据。
+- 选定版本的 electron 是否仍然「不带二进制、没有 install 脚本」。
+  「把 desktop 放进 workspaces 不会拖累浏览器用户」这个结论依赖这一条，
+  换版本要复核；取二分之一的入口（`install-electron`）也要确认还在。
 - `gemini -o json`、`codex --output-last-message`、`agy` 的实际输出形状。
   实施时各跑一次；解析器一律有「回落到原始 stdout」这条兜底。
+- agy 的只出文字 / 代理两套标志是否仍然成立。这一家本仓没有官方 help 依据，
+  只有 035 的用法可抄，抄之前先在真机上跑一次。
+- 本机 uv 的最低可用版本（`--project`、`--frozen`、`PYTHONPYCACHEPREFIX` 的配合）。
+  低于该版本时给一句能照做的升级提示，而不是把 uv 的解析错误原样甩给用户。
 - 真·只读安装目录下的 uv 与 Python 环境创建。
 - 数据锁与现有测试的相互作用（有没有用例在同一目录开两次服务）。
 - 首启向导选旧文件夹时，旧 `notes/` 与新版随附笔记的同名冲突实际有多少
