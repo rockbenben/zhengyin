@@ -2,6 +2,7 @@
 #
 # validate（版本对账 + 全量测试 + uv lock）→ Windows 打包（NSIS + zip，--publish never）
 # → 单一 publish（校验 feed / SHA256 / attestation / 人工审批 / 匿名核验）。
+# 发布说明由 GitHub 自动生成提交笔记，前面补一段固定的未签名 / SmartScreen 说明。
 #
 # 平台首发只有 Windows x64，见 .desktop-policy.json；mac/Linux 的偏离和复查条件也写在那里。
 # 本文件必须留在默认分支：tag 触发跑的是被打 tag 那个提交里的 workflow。
@@ -39,8 +40,8 @@ jobs:
           v="${TAG#v}"
           root=$(node -p "require('./package.json').version")
           desk=$(node -p "require('./desktop/package.json').version")
-          [ "$root" = "$v" ] || { echo "::error::root package.json $root != $v"; exit 1; }
-          [ "$desk" = "$v" ] || { echo "::error::desktop/package.json $desk != $v"; exit 1; }
+          if [ "$root" != "$v" ]; then echo "::error::version mismatch: root package.json $root != tag $v"; exit 1; fi
+          if [ "$desk" != "$v" ]; then echo "::error::version mismatch: desktop/package.json $desk != tag $v"; exit 1; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
@@ -62,10 +63,12 @@ jobs:
       - run: npm ci
       - run: npx install-electron
       - run: npm run build
+      - run: npm run build -w desktop
       - run: npm run fetch-runtime
       - run: npm run check:package
-      - run: npm run dist:desktop
-      - run: npm run dist:desktop:zip
+      - run: npm run smoke:package
+      - run: npm run pack:desktop
+      - run: npm run pack:desktop:zip
       - uses: actions/upload-artifact@v7
         with:
           name: dist-win
@@ -100,17 +103,29 @@ jobs:
           while read -r u; do
             [ -f "$u" ] || { echo "::error::latest.yml 指向不存在的 $u"; exit 1; }
           done < <(grep -E '^\s*-?\s*url:' latest.yml | awk '{print $NF}')
+      - name: 校验两种 Windows 产物都在
+        run: |
+          ls dist/*-setup.exe >/dev/null 2>&1 || { echo "::error::缺 NSIS 安装包"; exit 1; }
+          ls dist/*.zip >/dev/null 2>&1 || { echo "::error::缺免安装 zip"; exit 1; }
       - name: SHA256SUMS（LF）
         run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/attest@v4
         with: { subject-checksums: dist/SHA256SUMS }
       - name: 建/复用草稿并上传
+        env:
+          # 不用 CHANGELOG：自动生成提交笔记，这里只补发布前必须让用户看到的事。
+          RELEASE_NOTICE: |
+            **Windows 安装版 / installer**：`zhengyin-<版本>-win-setup.exe`，之后可自动更新。
+            **Windows 免安装版 / portable**：`zhengyin-<版本>-win.zip`，解压覆盖更新，不自动更新。
+            **未签名 / unsigned**：首次运行会出现 SmartScreen 警告，点「更多信息 → 仍要运行」/ “More info → Run anyway”。
+            完整改动由 GitHub 根据本次 tag 的提交记录自动生成（见下方）；更新前请先备份数据。
         run: |
           if gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
             echo "::error::$TAG 已经发布过了，改版本号"; exit 1
           fi
           gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || \
-            gh release create "$TAG" -R "$REPO" --draft --verify-tag --title "$TAG" --notes "见 CHANGELOG.md"
+            gh release create "$TAG" -R "$REPO" --draft --verify-tag --title "$TAG" \
+              --generate-notes --fail-on-no-commits --notes "$RELEASE_NOTICE"
           gh release upload "$TAG" -R "$REPO" dist/* --clobber
       - name: 发布并设 latest
         run: |

@@ -92,6 +92,9 @@ jobs:
       - run: uv lock --check --project asr-service
 
   desktop-package:
+    # 只做门禁，不上传产物：发布包由 release.yml 按 tag 重新构建。
+    # needs: test 先等 6 个测试矩阵跑完，红树不再白打一次几百 MB 的包。
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -102,17 +105,9 @@ jobs:
       - run: npm ci
       - run: npx install-electron
       - run: npm run build
+      - run: npm run build -w desktop
       - run: npm run fetch-runtime
       - run: npm run check:package
       - run: npm run smoke:package
-      - run: npm run dist:desktop
-      - run: npm run dist:desktop:zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: desktop-package
-          if-no-files-found: error
-          path: |
-            desktop/release/*.exe
-            desktop/release/latest.yml
-            desktop/release/*.blockmap
-            desktop/release-zip/*.zip
+      - run: npm run pack:desktop
+      - run: npm run pack:desktop:zip
