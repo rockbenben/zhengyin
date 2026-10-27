@@ -63,7 +63,7 @@ export default function AiSettingsSection() {
   if (loadError) {
     return <Alert type="error" showIcon message="读取 AI 设置失败" description={loadError} />;
   }
-  if (!settings) return <Card><Spin /></Card>;
+  if (!settings || !status) return <Card><Spin /></Card>;
 
   const setMode = (mode: AiMode) => {
     setSettings((s) => (s ? { ...s, mode } : s));
@@ -196,20 +196,24 @@ export default function AiSettingsSection() {
           查词、真人发音、逐音素评测和复习都在本机跑。
         </Typography.Paragraph>
 
-        {status && (
-          <Typography.Text type={ready ? 'success' : 'secondary'}>
-            {ready
-              ? `已就绪：${status.provider}`
-              : status.configured
-                ? `已经找到 ${status.provider}，但还没同意把它需要的资料发出去。`
-                : `还差一步：${status.reason ?? '还没配好'}`}
-          </Typography.Text>
-        )}
+        <Typography.Text type={ready ? 'success' : 'secondary'}>
+          {ready
+            ? `已就绪：${status.provider}`
+            : status.configured
+              ? `已经找到 ${status.provider}，但还没同意把它需要的资料发出去。`
+              : `还差一步：${status.reason ?? '还没配好'}`}
+        </Typography.Text>
 
         <Radio.Group value={settings.mode} onChange={(e) => setMode(e.target.value as AiMode)}>
           <Radio value="api">调接口</Radio>
           <Radio value="cli">用本机命令行</Radio>
         </Radio.Group>
+
+        {status.mode !== settings.mode && (
+          <Typography.Text type="warning" className="measure" style={{ fontSize: 13 }}>
+            你切换了模式：上面的状态说的还是已经保存的那一套，按「保存」之后才生效。
+          </Typography.Text>
+        )}
 
         {settings.mode === 'api' ? (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -289,9 +293,13 @@ export default function AiSettingsSection() {
 
                 <div>
                   <Typography.Text strong>密钥</Typography.Text>
-                  <Input.Password
+                  {/* 普通输入框，不是密码框：服务端只回打码后的值，用密码框会把它整串
+                      变成圆点，反而看不到「末四位」——而那句话就写在下面。 */}
+                  <Input
                     aria-label="密钥"
                     value={active.key}
+                    autoComplete="off"
+                    spellCheck={false}
                     placeholder="粘贴 API key"
                     onChange={(e) => patchActive({ key: e.target.value })}
                   />
@@ -370,6 +378,9 @@ export default function AiSettingsSection() {
             测试连接
           </Button>
         </Space>
+        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+          改完按「保存」生效；「测试连接」会先保存再测。
+        </Typography.Text>
 
         {err && <Alert type="error" showIcon message={err} />}
         {testResult?.ok && (

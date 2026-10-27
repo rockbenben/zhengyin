@@ -130,6 +130,15 @@ describe('AI 设置：接口模式', () => {
     expect(screen.getByText('协议')).toBeTruthy();
     expect((screen.getByLabelText('接口地址') as HTMLInputElement).value).toBe('');
   });
+
+  it('切了模式还没保存时，说清状态还是旧的那一套', async () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf());
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
+    render(<AiSettingsSection />);
+
+    fireEvent.click(await screen.findByRole('radio', { name: /用本机命令行/ }));
+    expect(screen.getByText(/按「保存」之后才生效/)).toBeTruthy();
+  });
 });
 
 describe('AI 设置：命令行模式', () => {
