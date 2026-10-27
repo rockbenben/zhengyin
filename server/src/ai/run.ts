@@ -2,19 +2,43 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { activeAi, type AiSettings } from './settings.js';
 import { AiError, callAi, type AiMessage } from './protocols.js';
-import { resolveCliInvocation, runCliText } from './cli.js';
+import { resolveCliInvocation, runCliText, type CliOverrides } from './cli.js';
 
 export interface AiRunResult { text: string; provider: string }
+
+export interface AiTextOptions {
+  timeoutMs?: number;
+  cwd?: string;
+  fetchFn?: typeof fetch;
+  /**
+   * 连接测试用的**最简配置**：不套用用户设的模型和档位，推理档压到最低。
+   *
+   * 它只回答「这条命令行能不能连上」，不回答「讲解好不好」——用重配置去测，
+   * 一次测试要等十几秒（实测 agy 默认档回一句「OK」要 11.8 秒）。
+   */
+  light?: boolean;
+}
+
+/**
+ * 连接测试用的覆盖：最轻的配置。
+ *
+ * **不套用用户设的模型和档位**——测试只回答「这条命令行能不能连上」，
+ * 用重配置去测，一次要等十几秒（实测 agy 默认档回一句「OK」要 11.8 秒）。
+ * 空串 = 不传那个参数。
+ */
+export function cliOverrides(light: boolean): CliOverrides {
+  return light ? { effort: 'low', model: '' } : {};
+}
 
 /** 接口和命令行两条路对调用方是同一个函数，路由不用各写一份。 */
 export async function runAiText(
   settings: AiSettings,
   messages: AiMessage[],
-  opts: { timeoutMs?: number; cwd?: string; fetchFn?: typeof fetch } = {},
+  opts: AiTextOptions = {},
 ): Promise<AiRunResult> {
   if (settings.mode === 'cli') {
     const prompt = messages.map((m) => `${m.role.toUpperCase()}:\n${m.content}`).join('\n\n');
-    const inv = resolveCliInvocation(settings, prompt, 'text');
+    const inv = resolveCliInvocation(settings, prompt, 'text', cliOverrides(Boolean(opts.light)));
     const text = await runCliText(inv, {
       timeoutMs: opts.timeoutMs ?? 180_000,
       cwd: opts.cwd,

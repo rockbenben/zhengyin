@@ -22,6 +22,20 @@ const PROTOCOL_LABELS: Record<AiProtocol, string> = {
   gemini: 'Gemini',
 };
 
+/**
+ * 推理档位。空串 = 不传这个参数，用命令行工具自己的默认。
+ *
+ * 与服务端 server/src/ai/settings.ts 的 AI_CLI_EFFORTS 一一对应。
+ */
+const CLI_EFFORT_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '用它自己的默认' },
+  { value: 'low', label: '低（快）' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'xhigh', label: '极高' },
+  { value: 'max', label: '最大' },
+];
+
 /** 超过这个数就先折叠——目录里几十家平铺出来比选不出来更难受（家数跟着目录变，不写死） */
 const CHIP_LIMIT = 8;
 
@@ -357,6 +371,36 @@ export default function AiSettingsSection() {
               </div>
             )}
 
+            {settings.cli.kind === 'agy' && (
+              <>
+                <div>
+                  <Typography.Text strong>推理档位</Typography.Text>
+                  <div style={{ marginTop: 8 }}>
+                    <Select
+                      aria-label="推理档位"
+                      value={settings.cli.effort}
+                      style={{ minWidth: 200 }}
+                      onChange={(v) => patchCli({ effort: v })}
+                      options={CLI_EFFORT_OPTIONS}
+                    />
+                  </div>
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    {'Antigravity 默认拿的是带思考的档——回一句「OK」也要先想一遍（实测要等近十秒）。'}
+                    {'调到「低」会快一些，讲解的质量也会差一点。'}
+                  </Typography.Text>
+                </div>
+                <div>
+                  <Typography.Text strong>模型</Typography.Text>
+                  <Input
+                    aria-label="命令行模型"
+                    value={settings.cli.model}
+                    placeholder="留空就用它自己配的模型"
+                    onChange={(e) => patchCli({ model: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
+
             <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
               走的是本机已经装好、已经登录的工具；正音只把提示词交给它，不保存你的登录凭证。
             </Typography.Text>
@@ -379,7 +423,8 @@ export default function AiSettingsSection() {
           </Button>
         </Space>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          改完按「保存」生效；「测试连接」会先保存再测。
+          {'改完按「保存」生效；「测试连接」会先保存再测。'}
+          {settings.mode === 'cli' && '命令行模式下它用最轻的配置跑一句（不套用你上面设的模型和档位），只验这条命令行能不能连上。'}
         </Typography.Text>
 
         {err && <Alert type="error" showIcon message={err} />}

@@ -16,7 +16,7 @@ const stored = (): AiSettings => ({
   endpoints: {
     deepseek: { protocol: 'openai', baseUrl: 'https://a.test/v1', key: 'sk-12345678', model: 'm' },
   },
-  cli: { kind: 'claude', path: '', customArgs: '' },
+  cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
 });
 
 describe('AI 设置', () => {
@@ -77,5 +77,17 @@ describe('AI 设置', () => {
   it('选中一条不存在的记录就等于没选', () => {
     const s = mergeAiSettings({ ...stored(), endpointId: 'nope' }, stored());
     expect(s.endpointId).toBe('');
+  });
+
+  it('档位只认那五个，空串表示不传；写错的直接拒绝', () => {
+    const ok = mergeAiSettings({ ...stored(), cli: { ...stored().cli, effort: 'low', model: ' m ' } }, stored());
+    expect(ok.cli.effort).toBe('low');
+    expect(ok.cli.model).toBe('m');
+
+    const empty = mergeAiSettings({ ...stored(), cli: { ...stored().cli, effort: '  ' } }, stored());
+    expect(empty.cli.effort).toBe('');
+
+    expect(() => mergeAiSettings({ ...stored(), cli: { ...stored().cli, effort: 'ultra' } }, stored()))
+      .toThrow(/档位/);
   });
 });

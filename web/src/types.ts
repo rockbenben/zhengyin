@@ -398,7 +398,8 @@ export interface AiSettings {
   mode: AiMode;
   endpointId: string;
   endpoints: Record<string, AiEndpointRecord>;
-  cli: { kind: AiCliKind; path: string; customArgs: string };
+  // effort / model 是空串时**不传**给命令行工具，由它自己决定用哪个。
+  cli: { kind: AiCliKind; path: string; customArgs: string; effort: string; model: string };
 }
 
 /** GET /api/ai/status */

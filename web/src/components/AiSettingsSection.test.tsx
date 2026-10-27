@@ -10,7 +10,7 @@ const settingsOf = (over: Partial<AiSettings> = {}): AiSettings => ({
   mode: 'api',
   endpointId: '',
   endpoints: {},
-  cli: { kind: 'claude', path: '', customArgs: '' },
+  cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
   ...over,
 });
 
@@ -145,7 +145,7 @@ describe('AI 设置：命令行模式', () => {
   it('选命令行后给出工具、路径和状态，不再显示接口地址', async () => {
     vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
       mode: 'cli',
-      cli: { kind: 'codex', path: '', customArgs: '' },
+      cli: { kind: 'codex', path: '', customArgs: '', effort: '', model: '' },
     }));
     vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf({
       mode: 'cli', configured: false, provider: 'codex', reason: '没找到 codex',
@@ -155,5 +155,47 @@ describe('AI 设置：命令行模式', () => {
     expect(await screen.findByText(/没找到 codex/)).toBeTruthy();
     expect(screen.getByLabelText('命令行路径')).toBeTruthy();
     expect(screen.queryByLabelText('接口地址')).toBeNull();
+  });
+
+  it('选 Antigravity 才给档位和模型：别的工具没有这两项', async () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      mode: 'cli',
+      cli: { kind: 'agy', path: '', customArgs: '', effort: '', model: '' },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf({ mode: 'cli', configured: true, provider: 'agy' }));
+    render(<AiSettingsSection />);
+
+    expect(await screen.findByLabelText('推理档位')).toBeTruthy();
+    expect(screen.getByLabelText('命令行模型')).toBeTruthy();
+    expect(screen.getByText(/默认拿的是带思考的档/)).toBeTruthy();
+  });
+
+  it('档位和模型会跟着保存走', async () => {
+    const save = vi.spyOn(api, 'saveAiSettings').mockImplementation(async (s) => s);
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      consent: true,
+      mode: 'cli',
+      cli: { kind: 'agy', path: '', customArgs: '', effort: '', model: '' },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf({ mode: 'cli', configured: true, provider: 'agy' }));
+
+    render(<AiSettingsSection />);
+    const model = await screen.findByLabelText('命令行模型');
+    fireEvent.change(model, { target: { value: 'gpt-oss-120b-medium' } });
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0][0].cli.model).toBe('gpt-oss-120b-medium');
+  });
+
+  it('命令行模式下说清测试连接用最轻的配置', async () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      mode: 'cli',
+      cli: { kind: 'agy', path: '', customArgs: '', effort: '', model: '' },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf({ mode: 'cli', configured: true, provider: 'agy' }));
+    render(<AiSettingsSection />);
+
+    expect(await screen.findByText(/用最轻的配置跑一句/)).toBeTruthy();
   });
 });

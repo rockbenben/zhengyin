@@ -8,6 +8,15 @@ export type AiProtocol = typeof AI_PROTOCOLS[number];
 export const AI_CLI_KINDS = ['claude', 'codex', 'gemini', 'agy', 'custom'] as const;
 export type AiCliKind = typeof AI_CLI_KINDS[number];
 
+/**
+ * 推理档位。空串 = 不传这个参数，用命令行工具自己的默认。
+ *
+ * agy 默认拿的是**带思考**的档：回一句「OK」也要先想一遍，实测要等近十秒。
+ * 调低一档只快一两秒（真正的大头是它每次都要重起一遍），但讲解质量会差一点。
+ */
+export const AI_CLI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type AiCliEffort = typeof AI_CLI_EFFORTS[number];
+
 export type AiMode = 'api' | 'cli';
 
 export interface AiEndpointRecord {
@@ -23,7 +32,8 @@ export interface AiSettings {
   mode: AiMode;
   endpointId: string;
   endpoints: Record<string, AiEndpointRecord>;
-  cli: { kind: AiCliKind; path: string; customArgs: string };
+  /** effort / model 是空串时**不传**给命令行工具，由它自己决定用哪个。 */
+  cli: { kind: AiCliKind; path: string; customArgs: string; effort: string; model: string };
 }
 
 const defaults = (): AiSettings => ({
@@ -32,7 +42,7 @@ const defaults = (): AiSettings => ({
   mode: 'api',
   endpointId: '',
   endpoints: {},
-  cli: { kind: 'claude', path: '', customArgs: '' },
+  cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
 });
 
 const fileOf = (dataDir: string): string => join(dataDir, 'ai-settings.json');
@@ -50,6 +60,8 @@ const isProtocol = (v: unknown): v is AiProtocol =>
   typeof v === 'string' && (AI_PROTOCOLS as readonly string[]).includes(v);
 const isCliKind = (v: unknown): v is AiCliKind =>
   typeof v === 'string' && (AI_CLI_KINDS as readonly string[]).includes(v);
+const isCliEffort = (v: unknown): v is AiCliEffort =>
+  typeof v === 'string' && (AI_CLI_EFFORTS as readonly string[]).includes(v);
 
 function sanitizeEndpoint(raw: unknown, stored: AiEndpointRecord | undefined): AiEndpointRecord | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -97,6 +109,13 @@ export function mergeAiSettings(body: unknown, stored: AiSettings): AiSettings {
       : gave ? '' : (Object.hasOwn(endpoints, stored.endpointId) ? stored.endpointId : '');
 
   const cli = (b.cli ?? {}) as Partial<AiSettings['cli']>;
+  // 档位只认那五个（或空串=不传）。写错的档位直接拒绝：它会被原样拼进命令行，
+  // 工具报错时用户只会看到一句英文参数错误，压根不知道是这里填错了。
+  const effort = typeof cli.effort === 'string' ? cli.effort.trim() : (stored.cli.effort ?? '');
+  if (effort !== '' && !isCliEffort(effort)) {
+    throw new Error(`推理档位只支持 ${AI_CLI_EFFORTS.join(' / ')}，或者留空用工具自己的默认`);
+  }
+  const model = typeof cli.model === 'string' ? cli.model.trim() : (stored.cli.model ?? '');
   return {
     schemaVersion: 1,
     consent: b.consent === true,
@@ -107,6 +126,8 @@ export function mergeAiSettings(body: unknown, stored: AiSettings): AiSettings {
       kind: isCliKind(cli.kind) ? cli.kind : stored.cli.kind,
       path: typeof cli.path === 'string' ? cli.path.trim() : stored.cli.path,
       customArgs: typeof cli.customArgs === 'string' ? cli.customArgs : stored.cli.customArgs,
+      effort,
+      model,
     },
   };
 }

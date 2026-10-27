@@ -12,6 +12,7 @@ import { ReviewStore } from './review.js';
 import { CONFIDENT } from './analysis/espeak.js';
 import { invalidUserName } from './users.js';
 import type { AgentStatus } from './ai/agent.js';
+import { cliWorkspace } from './ai/workspace.js';
 
 export function idleAgentStatus(): AgentStatus {
   return {
@@ -781,7 +782,7 @@ describe('AI api', () => {
     mode: 'api',
     endpointId: 'x',
     endpoints: { x: { protocol: 'openai', baseUrl: 'https://a.test/v1', key: 'sk-12345678', model: 'm' } },
-    cli: { kind: 'claude', path: '', customArgs: '' },
+    cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
   };
   const putSettings = (app: ReturnType<typeof createApp>, body: unknown) =>
     app.request('/api/ai/settings', {
@@ -891,6 +892,41 @@ describe('AI api', () => {
     expect(typeof d.latencyMs).toBe('number');
   });
 
+  it('测试连接走最简配置：只验连得上，不套用重配置', async () => {
+    const deps = testDeps();
+    const aiRun = vi.fn(async (
+      _messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+      _opts?: { timeoutMs?: number; light?: boolean; cwd?: string },
+    ) => ({ text: 'OK', provider: '命令行·agy' }));
+    deps.aiRun = aiRun;
+    const app = createApp(deps);
+    await putSettings(app, aiSettingsBody);
+    await postJson(app, '/api/ai/test', {});
+    expect(aiRun.mock.calls[0][1]).toMatchObject({ light: true });
+  });
+
+  it('命令行调用在专用的空目录里跑，不继承服务所在的目录', async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    await putSettings(app, {
+      ...aiSettingsBody,
+      mode: 'cli',
+      cli: {
+        kind: 'custom',
+        path: process.execPath,
+        // 让这个假命令行把自己的工作目录打出来
+        customArgs: '-e "console.log(process.cwd())"',
+        effort: '',
+        model: '',
+      },
+    });
+    const d = await (await postJson(app, '/api/ai/test', {})).json();
+    expect(d.ok).toBe(true);
+    expect(d.sample).toMatch(/ai-workspace$/);
+    expect(d.sample).not.toBe(process.cwd());
+    expect(cliWorkspace(deps.dataDir)).toMatch(/ai-workspace$/);
+  });
+
   describe('助教对话', () => {
     type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -976,7 +1012,7 @@ describe('AI api', () => {
     const cliBody = {
       ...aiSettingsBody,
       mode: 'cli',
-      cli: { kind: 'claude', path: '', customArgs: '' },
+      cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
     };
 
     function fakeAgent(initial: Partial<AgentStatus> = {}) {

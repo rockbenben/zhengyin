@@ -12,6 +12,16 @@ export interface CliInvocation {
   displayName: string;
 }
 
+/**
+ * 单次调用的覆盖。空串 = **不传**这个参数（用命令行工具自己的默认）。
+ *
+ * 连接测试走这里：它只验「这条命令行能不能连上」，不套用用户设的模型和档位。
+ */
+export interface CliOverrides {
+  effort?: string;
+  model?: string;
+}
+
 /** 按空格分词，保留单双引号；`{prompt}` 占位，没写就追加 */
 export function parseCustomArgs(template: string, prompt: string): string[] {
   const tokens: string[] = [];
@@ -43,6 +53,7 @@ export function resolveCliInvocation(
   settings: Pick<AiSettings, 'cli'>,
   prompt: string,
   mode: 'text' | 'agent',
+  over: CliOverrides = {},
 ): CliInvocation {
   const { kind, path, customArgs } = settings.cli;
   const custom = path.trim();
@@ -62,12 +73,20 @@ export function resolveCliInvocation(
     };
   }
   if (kind === 'agy') {
+    // agy 默认拿的是**带思考**的档：回一句「OK」也要先想一遍。档位和模型都能调，
+    // 空串就不传这个参数，交给 agy 自己的默认。实测参数放在提示词前后都认
+    // （它的日志里 promptLength 没变），放后面是为了跟别的分支的写法一致。
+    const effort = (over.effort ?? settings.cli.effort ?? '').trim();
+    const model = (over.model ?? settings.cli.model ?? '').trim();
+    const args = mode === 'agent'
+      ? ['-p', prompt, '--mode', 'accept-edits', '--dangerously-skip-permissions']
+      : ['-p', prompt];
+    if (model) args.push('--model', model);
+    if (effort) args.push('--effort', effort);
     return {
       command: custom || 'agy',
       displayName: 'agy',
-      args: mode === 'agent'
-        ? ['-p', prompt, '--mode', 'accept-edits', '--dangerously-skip-permissions']
-        : ['-p', prompt],
+      args,
     };
   }
   if (kind === 'custom') {

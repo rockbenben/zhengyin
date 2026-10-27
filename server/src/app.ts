@@ -36,12 +36,13 @@ import { AiError, type AiMessage } from './ai/protocols.js';
 import { aiStatus, readCoach, runAiText } from './ai/run.js';
 import { buildChatContext, buildWordContext } from './ai/context.js';
 import { commandExists } from './ai/cli.js';
+import { cliWorkspace } from './ai/workspace.js';
 import { appendChat, clearChat, readChat } from './ai/chat.js';
 import type { AgentController, AgentTask } from './ai/agent.js';
 
 export type AiRun = (
   messages: AiMessage[],
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; light?: boolean; cwd?: string },
 ) => Promise<{ text: string; provider: string }>;
 
 /** AiError 的 status 是数字（协议层不依赖 Hono）；到这里才落成 Hono 认的状态码。 */
@@ -285,7 +286,12 @@ export function createApp(deps: AppDeps) {
   // 设置是**整机**的（api-settings.json 在 dataDir 下），不跟当前用户走：
   // 换个人用同一台机器，不该让他重新填一遍密钥。
   const aiSettings = () => readAiSettings(deps.dataDir);
-  const run: AiRun = deps.aiRun ?? ((messages, opts) => runAiText(aiSettings(), messages, opts));
+  // 命令行调用在**一个空的专用目录**里跑：不继承服务进程所在的目录，
+  // 否则工具会把它当工作区，把那儿的大规则文件读成上下文（见 ai/workspace.ts）。
+  const run: AiRun = deps.aiRun ?? ((messages, opts) => runAiText(aiSettings(), messages, {
+    ...opts,
+    cwd: opts?.cwd ?? cliWorkspace(deps.dataDir),
+  }));
   const requireConsent = () => {
     if (!aiSettings().consent) {
       throw new AiError(409, '先在设置里确认：使用 AI 会把发音档案、相关笔记和这次的错误发给你选的服务。');
@@ -320,7 +326,8 @@ export function createApp(deps: AppDeps) {
     try {
       requireConsent();
       const t0 = Date.now();
-      const r = await run([{ role: 'user', content: '只回复 OK 两个字母。' }], { timeoutMs: 60_000 });
+      // 最简配置：只验「连得上吗」，不套用用户设的模型和档位。
+      const r = await run([{ role: 'user', content: '只回复 OK 两个字母。' }], { timeoutMs: 60_000, light: true });
       return c.json({ ok: true, latencyMs: Date.now() - t0, sample: r.text.slice(0, 80), provider: r.provider });
     } catch (e) {
       return c.json({ ok: false, error: (e as Error).message }, aiErrorStatus(e));

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { commandExists, parseCustomArgs, resolveCliInvocation } from './cli.js';
 import type { AiCliKind } from './settings.js';
 
-const s = (kind: AiCliKind, path = '', customArgs = '') => ({ cli: { kind, path, customArgs } });
+const s = (kind: AiCliKind, path = '', customArgs = '', effort = '', model = '') =>
+  ({ cli: { kind, path, customArgs, effort, model } });
 
 describe('CLI 参数', () => {
   it('claude 文本模式禁掉全部工具', () => {
@@ -30,6 +31,31 @@ describe('CLI 参数', () => {
     expect(parseCustomArgs('--x {prompt}', 'P')).toEqual(['--x', 'P']);
     expect(parseCustomArgs('--x', 'P')).toEqual(['--x', 'P']);
     expect(parseCustomArgs('', 'P')).toEqual(['P']);
+  });
+
+  it('agy 的档位和模型：填了才传，空着就不传', () => {
+    const bare = resolveCliInvocation(s('agy'), 'P', 'text');
+    expect(bare.args).not.toContain('--effort');
+    expect(bare.args).not.toContain('--model');
+
+    const set = resolveCliInvocation(s('agy', '', '', 'low', 'gpt-oss-120b-medium'), 'P', 'text');
+    expect(set.args[set.args.indexOf('--effort') + 1]).toBe('low');
+    expect(set.args[set.args.indexOf('--model') + 1]).toBe('gpt-oss-120b-medium');
+    expect(set.args[0]).toBe('-p');
+    expect(set.args[1]).toBe('P');
+  });
+
+  it('覆盖优先于设置：连接测试用最低档、不带模型', () => {
+    const inv = resolveCliInvocation(s('agy', '', '', 'high', 'some-model'), 'P', 'text', { effort: 'low', model: '' });
+    expect(inv.args[inv.args.indexOf('--effort') + 1]).toBe('low');
+    expect(inv.args).not.toContain('--model');
+  });
+
+  it('代理模式也带档位和模型（整理是一次长活）', () => {
+    const inv = resolveCliInvocation(s('agy', '', '', 'medium', 'm'), 'P', 'agent');
+    expect(inv.args).toContain('--mode');
+    expect(inv.args[inv.args.indexOf('--effort') + 1]).toBe('medium');
+    expect(inv.args[inv.args.indexOf('--model') + 1]).toBe('m');
   });
 
   it('自定义路径优先生效', () => {

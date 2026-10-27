@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AiSettings } from './settings.js';
 import { AiError } from './protocols.js';
-import { aiStatus, readCoach, runAiText } from './run.js';
+import { aiStatus, cliOverrides, readCoach, runAiText } from './run.js';
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   schemaVersion: 1,
@@ -12,7 +12,7 @@ const settings = (over: Partial<AiSettings> = {}): AiSettings => ({
   mode: 'api',
   endpointId: 'x',
   endpoints: { x: { protocol: 'openai', baseUrl: 'https://a.test/v1', key: 'sk-1', model: 'm' } },
-  cli: { kind: 'claude', path: '', customArgs: '' },
+  cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
   ...over,
 });
 
@@ -52,9 +52,19 @@ describe('aiStatus', () => {
   });
 
   it('命令行看的是命令在不在 PATH 上', () => {
-    const s = settings({ mode: 'cli', cli: { kind: 'claude', path: '', customArgs: '' } });
+    const s = settings({ mode: 'cli', cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' } });
     expect(aiStatus(s, () => true)).toMatchObject({ configured: true, provider: 'claude', reason: null });
     expect(aiStatus(s, () => false)).toMatchObject({ configured: false, reason: '没找到 claude' });
+  });
+});
+
+describe('cliOverrides', () => {
+  it('连接测试用最轻的配置：最低档、不带模型', () => {
+    expect(cliOverrides(true)).toEqual({ effort: 'low', model: '' });
+  });
+
+  it('平时不覆盖，用用户自己设的档位和模型', () => {
+    expect(cliOverrides(false)).toEqual({});
   });
 });
 

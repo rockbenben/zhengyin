@@ -240,7 +240,7 @@ triggers: [phoneme:l]
     const deps = agentDeps();
     writeFileSync(join(deps.dataDir, 'ai-settings.json'), JSON.stringify({
       schemaVersion: 1, consent: true, mode: 'api', endpointId: '', endpoints: {},
-      cli: { kind: 'claude', path: '', customArgs: '' },
+      cli: { kind: 'claude', path: '', customArgs: '', effort: '', model: '' },
     }), 'utf8');
     const before = readFileSync(deps.profileFile, 'utf8');
 
