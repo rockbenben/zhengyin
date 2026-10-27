@@ -221,4 +221,13 @@ export const api = {
   saveNote: (draft: T.NoteDraft) => jx<T.SavedNote>(fetch('/api/notes', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft),
   })),
+
+  // 助教对话。历史按当前用户存在服务端，这里读、发、清。
+  aiChat: () => j<{ messages: T.ChatMessage[] }>(fetch('/api/ai/chat')),
+  sendAiChat: (message: string, word?: string) => jx<T.ChatReply>(fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(word ? { message, word } : { message }),
+  })),
+  clearAiChat: () => jx<{ ok: boolean }>(fetch('/api/ai/chat', { method: 'DELETE' })),
 };

@@ -9,6 +9,7 @@ import NoteDetailPage from './pages/NoteDetailPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
+import AssistantPage from './pages/AssistantPage';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/notes/:id" element={<NoteDetailPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

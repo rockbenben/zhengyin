@@ -72,10 +72,11 @@ export default function AppLayout() {
   }, [refreshCounts]);
 
   /**
-   * 导航分两组，因为这六项本来就不是同级的东西。
+   * 导航分三组，因为这些项本来就不是同级的东西。
    *
-   * 六个平铺的同级项会让人以为它们地位相当，而实际上只有前两项是**要每天做的**，
-   * 后三项是查阅用的。分组之后"这工具怎么用"从导航上就看得出来，不用先读一段说明。
+   * 全部平铺会让人以为它们地位相当，而实际上只有前两项是**要每天做的**，
+   * 后面几项是查阅和 AI 辅助。分组之后"这工具怎么用"从导航上就看得出来，
+   * 不用先读一段说明。
    *
    * 第一项原来叫「查询历史」——那是个**日志的名字**，而那一页恰恰是整个流程的入口
    * （输入框按「查这个词」就建词条）。而且页面自己的标题写的是「先查一个词」/
@@ -89,6 +90,8 @@ export default function AppLayout() {
     { prefix: '/notes', key: '/notes' },
     { prefix: '/review', key: '/review' },
     { prefix: '/stats', key: '/stats' },
+    { prefix: '/assistant', key: '/assistant' },
+    { prefix: '/organize', key: '/organize' },
     { prefix: '/settings', key: '/settings' },
   ];
   const selected = NAV.find((n) => loc.pathname.startsWith(n.prefix))?.key ?? '/';
@@ -115,6 +118,14 @@ export default function AppLayout() {
           // 蓝是这个应用的动作色（「去复习」那个链接就是蓝的），数字跟动作同色才对得上。
           label: navLink('/review', <>复习{dueCount > 0 && <span className="due-count">{dueCount}</span>}</>),
         },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: <span className="slug">AI</span>,
+      children: [
+        { key: '/assistant', label: navLink('/assistant', 'AI 助教') },
+        { key: '/organize', label: navLink('/organize', 'AI 整理') },
       ],
     },
     {

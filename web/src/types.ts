@@ -442,3 +442,18 @@ export interface NoteDraft {
 
 /** POST /api/notes */
 export interface SavedNote { id: string; title: string; file: string }
+
+/** GET /api/ai/chat 的历史条目；POST 之后也会按这个形状追加 */
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  at: string;
+}
+
+/** POST /api/ai/chat */
+export interface ChatReply {
+  reply: string;
+  sources: AiSource[];
+  provider: string;
+  at?: string;
+}

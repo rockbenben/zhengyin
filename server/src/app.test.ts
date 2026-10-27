@@ -875,6 +875,87 @@ describe('AI api', () => {
     expect(d).toMatchObject({ ok: true, sample: 'OK', provider: '接口·测试' });
     expect(typeof d.latencyMs).toBe('number');
   });
+
+  describe('助教对话', () => {
+    type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
+
+    async function chatDeps(): Promise<{ deps: AppDeps; app: ReturnType<typeof createApp>; aiRun: ReturnType<typeof vi.fn> }> {
+      const deps = testDeps();
+      const aiRun = vi.fn(async (_messages: Msg[], _opts?: { timeoutMs?: number }) => ({
+        text: '先捏住鼻子，发得出声就是 /l/。',
+        provider: '接口·test',
+      }));
+      deps.aiRun = aiRun;
+      const app = createApp(deps);
+      await putSettings(app, aiSettingsBody);
+      return { deps, app, aiRun };
+    }
+
+    const send = (app: ReturnType<typeof createApp>, body: unknown) =>
+      postJson(app, '/api/ai/chat', body);
+
+    it('成功后历史里有来有回，第二轮把历史带进上下文', async () => {
+      const { app, aiRun } = await chatDeps();
+
+      const first = await send(app, { message: 'l 怎么发？' });
+      expect(first.status, await first.clone().text()).toBe(200);
+      expect((await first.json()).reply).toContain('捏住鼻子');
+
+      const hist = await (await app.request('/api/ai/chat')).json();
+      expect(hist.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+      expect(hist.messages[0].content).toBe('l 怎么发？');
+      expect(hist.messages[1].content).toContain('捏住鼻子');
+
+      await send(app, { message: '那 n 呢？' });
+      const second = aiRun.mock.calls[1][0] as Msg[];
+      expect(second.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+      expect(second[1].content).toBe('l 怎么发？');
+      expect(second[3].content).toBe('那 n 呢？');
+    });
+
+    it('失败时不往历史里写半截对话', async () => {
+      const { deps, app } = await chatDeps();
+      deps.aiRun = vi.fn(async () => { throw new Error('服务商故障'); });
+      // run 在 createApp 时就挑好了注入函数，所以换桩之后要重建一次 app
+      const failing = createApp(deps);
+
+      const r = await send(failing, { message: 'l 怎么发？' });
+      expect(r.status).toBe(502);
+      expect((await (await app.request('/api/ai/chat')).json()).messages).toEqual([]);
+    });
+
+    it('缺 message、太长、没同意都不发', async () => {
+      const { app } = await chatDeps();
+      expect((await send(app, { message: '  ' })).status).toBe(400);
+      expect((await send(app, { message: 'x'.repeat(4001) })).status).toBe(400);
+
+      const deps = testDeps();
+      deps.aiRun = vi.fn();
+      const noConsent = createApp(deps);
+      expect((await send(noConsent, { message: 'hi' })).status).toBe(409);
+      expect(deps.aiRun).not.toHaveBeenCalled();
+    });
+
+    it('词条页带来的 word 只作为焦点提示，历史里存原话', async () => {
+      const { deps, app, aiRun } = await chatDeps();
+      await addEntry(app, 'click');
+
+      await send(app, { message: '这个词怎么练？', word: 'click' });
+      const messages = aiRun.mock.calls[0][0] as Msg[];
+      expect(messages.at(-1)?.content).toContain('正在词条页看「click」');
+      const hist = await (await app.request('/api/ai/chat')).json();
+      expect(hist.messages[0].content).toBe('这个词怎么练？');
+      expect(deps.users.current()).toBe('默认');
+    });
+
+    it('清空只清当前用户', async () => {
+      const { app } = await chatDeps();
+      await send(app, { message: 'hi' });
+      const del = await app.request('/api/ai/chat', { method: 'DELETE' });
+      expect(del.status).toBe(200);
+      expect((await (await app.request('/api/ai/chat')).json()).messages).toEqual([]);
+    });
+  });
 });
 
 describe('asr api', () => {

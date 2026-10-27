@@ -646,3 +646,16 @@ code { white-space: nowrap; }
   letter-spacing: .05em;
   color: var(--quiet);
 }
+
+/* ── AI 助教对话 ─────────────────────────────────────────────────────── */
+.chat-log { display: flex; flex-direction: column; gap: 22px; }
+.chat-msg { border-left: 2px solid var(--rule); padding-left: 14px; }
+.chat-msg.user { border-left-color: var(--blue); }
+.chat-msg .chat-who { display: block; margin-bottom: 6px; }
+.chat-msg .chat-text {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

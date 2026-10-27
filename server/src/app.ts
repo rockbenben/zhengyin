@@ -34,8 +34,9 @@ import { saveAiNote, parseNoteDraft, type NoteDraft } from './ai/notes.js';
 import { maskAiSettings, mergeAiSettings, readAiSettings, writeAiSettings } from './ai/settings.js';
 import { AiError, type AiMessage } from './ai/protocols.js';
 import { aiStatus, readCoach, runAiText } from './ai/run.js';
-import { buildWordContext } from './ai/context.js';
+import { buildChatContext, buildWordContext } from './ai/context.js';
 import { commandExists } from './ai/cli.js';
+import { appendChat, clearChat, readChat } from './ai/chat.js';
 
 export type AiRun = (
   messages: AiMessage[],
@@ -376,6 +377,50 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: (e as Error).message }, aiErrorStatus(e));
     } finally {
       release();
+    }
+  });
+
+  // ── 助教对话。历史按当前用户存，跟这台机器上的其他人分开。 ──
+  app.get('/api/ai/chat', (c) => c.json({ messages: readChat(deps.dataDir, deps.users.current()) }));
+
+  app.post('/api/ai/chat', async (c) => {
+    const release = tryLock('chat');
+    if (!release) return c.json({ error: '上一条消息还在等 AI 回复，等它结束再试' }, 409);
+    try {
+      requireConsent();
+      const body = await c.req.json().catch(() => null) as { message?: string; word?: string } | null;
+      const message = (body?.message ?? '').trim();
+      if (!message) return c.json({ error: '缺 message' }, 400);
+      if (message.length > 4000) return c.json({ error: '这条消息太长了（上限 4000 字）' }, 400);
+
+      const user = deps.users.current();
+      const history = readChat(deps.dataDir, user).slice(-20);
+      const focus = (body?.word ?? '').trim().toLowerCase();
+      const asked = focus ? `用户正在词条页看「${focus}」。\n${message}` : message;
+      const ctx = buildChatContext(deps, focus ? `${focus} ${message}` : message);
+      const coach = readCoach(deps.workflowsDir);
+      const r = await run([
+        { role: 'system', content: `${coach}\n\n${ctx.text}` },
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: asked },
+      ]);
+      const at = deps.now();
+      appendChat(deps.dataDir, user, { role: 'user', content: message, at });
+      appendChat(deps.dataDir, user, { role: 'assistant', content: r.text, at: deps.now() });
+      return c.json({ reply: r.text, sources: ctx.sources, provider: r.provider, at });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, aiErrorStatus(e));
+    } finally {
+      release();
+    }
+  });
+
+  app.delete('/api/ai/chat', (c) => {
+    try {
+      clearChat(deps.dataDir, deps.users.current());
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 500);
     }
   });
 
