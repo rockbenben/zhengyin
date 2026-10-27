@@ -12,24 +12,23 @@
 # 界面上「该怎么发」整块消失。**Linux runner 复现不了这个条件**（那边永远是 LF），
 # 只有 windows 会。
 #
-# ── 为什么 node 是 20.19.0 / 22 / 24 ──
+# ── 为什么 node 是 24.15.0 / 26 ──
 #
-# **20.19.0 是这三项里唯一不能撤的。** 它是 `engines.node` 的下限，
-# 而下限这件事上 better-sqlite3 骗过两次，两次方向还不一样：
+# **24.15.0 是 `engines.node` 的下限，也是这条矩阵的第一项。**
+# 它不是一个随便挑的 LTS 小版本：which@7 的 engines 是
+# `^22.22.2 || ^24.15.0 || >=26.0.0`，而 24.0–24.14 正好落在空档里；
+# 下限必须落在它允许的区间内，nodeFloor.test.ts 会逐项核对。
 #
-#   13.x    声明 >=22          Node 22.12 上 new Database() 直接段错误（exit=139），
-#                              崩之前一行输出都没有
-#   12.10+  声明 20.x || 22.x  不再发 Node 20 的预编译包，装到 Node 20 上转 node-gyp，
-#                              在没有 MSVC 的机器上倒进一屏英文
+# 26 是当前 LTS，也是桌面版随包 node.exe 的版本。两条都测：
+# 24.15 代表"最低还能装"的那一端，26 代表桌面实际运行时。
+# 都写大版本/精确下限、不钉日常小版本——"哪个小版本又出事了"正是要暴露的东西。
 #
-# 第二行**任何元数据扫描都查不出来**——"有没有预编译包"根本不在 engines 里，
-# 而 engines 里写的是允许。只有在真的 Node 20 上装一遍才看得见，也就是这一行矩阵。
-# 所以 server 那边钉的是 `~12.9.0`（不是 `^`，^ 会装到 12.11）。
+# **better-sqlite3 必须钉 `~12.11.1`。** 12.9.0 没有 Node 26（ABI 147）的预编译包；
+# 13.x 目前没有可用的 GitHub 预编译资产。12.11.1 同时有 24（137）和 26（147）的
+# win32-x64 预编译包，所以这一行矩阵是在**真的 Node 24.15 和 Node 26 上各装一遍**。
+# 元数据扫描查不出"有没有预编译包"，只有真装才知道。
 #
-# 22 和 24 是当前的两条 LTS。都写大版本、不钉小版本：
-# setup-node 会解析成该线最新的一个，而"哪个小版本又出事了"正是要暴露的东西。
-#
-# 不跑 Current（26）：它几个月后就会被顶掉，而 better-sqlite3 是原生模块，
+# 不跑 Current（27）：它几个月后就会被顶掉，而 better-sqlite3 是原生模块，
 # 新线上未必有预编译包，编不出来的红跟这个仓库没关系。真正要防的"新版本弃用旧写法"
 # 那类问题，靠的是 spawnShell.test.ts 那种扫源码的断言，不是靠多跑一个 runner。
 #
@@ -53,10 +52,8 @@ jobs:
       fail-fast: false          # 一个平台红了，另一个的结果照样要看得到
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # 头一个必须是 engines 声明的下限（nodeFloor.test.ts 盯着）。
-        # 20.19.0 尤其不能撤：better-sqlite3 12.10 起停发 Node 20 的预编译包，
-        # 而 engines 里照旧写着 20.x——只有在真的 Node 20 上装一遍才看得出来。
-        node: ['20.19.0', '22', '24']
+        # 头一项必须是 engines 声明的下限（nodeFloor.test.ts 盯着）。
+        node: ['24.15.0', '26']
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} · node ${{ matrix.node }}
 
@@ -100,7 +97,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
       - run: npm ci
       - run: npx install-electron

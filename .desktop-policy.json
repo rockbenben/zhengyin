@@ -6,7 +6,7 @@
   "channel": "stable",
   "platforms": ["windows-x64"],
   "packageManager": "npm (npm ci in CI; package-lock.json is the source of truth)",
-  "node": "24 for desktop builds; server floor 20.19.0 (CI matrix 20.19/22/24)",
+  "node": "26 for desktop builds and bundled runtime; server floor 24.15.0 (CI matrix 24.15/26)",
   "distribution": {
     "primary": "github-releases",
     "windows": "nsis (updatable) + zip (manual update)"

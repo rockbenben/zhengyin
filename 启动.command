@@ -11,7 +11,7 @@ echo
 if ! command -v node >/dev/null 2>&1; then
   echo "  没找到 Node.js —— 这个工具要靠它才能跑。"
   echo
-  echo "  去 https://nodejs.org 下载安装（选 LTS 那个版本，需要 20.19 或更新），"
+  echo "  去 https://nodejs.org 下载安装（选 LTS 那个版本，需要 24.15 或更新），"
   echo "  装完之后再双击这个文件就行。"
   echo
   read -n 1 -s -r -p "  按任意键关闭"

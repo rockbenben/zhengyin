@@ -15,8 +15,8 @@ import { join } from 'node:path';
  * 只查直接依赖，间接的由 npm 自己警告。
  *
  * **这个文件查不出的那一类**：依赖声明允许某个 Node，却不为它发预编译二进制。
- * better-sqlite3 12.10+ 就是（见下面那条 `~12.9.0` 的用例）。那种只有 CI 里
- * 真装一遍才看得见。
+ * better-sqlite3 12.9.0 就是（它没有 Node 26 的 ABI 147 预编译包），所以本仓
+ * 现在钉 12.11.1；那种只有 CI 里真装一遍才看得见。
  */
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -79,27 +79,20 @@ describe('engines.node 声明的下限，每个依赖都得允许', () => {
       .toEqual([]);
   });
 
-  // ── better-sqlite3 必须钉在 12.9.x ──
+  // ── better-sqlite3 必须钉在 12.11.x ──
   //
-  // **上面那条 engines 扫描看不见这个问题。** better-sqlite3 从 12.10 起不再为
-  // Node 20 发预编译二进制，而 `engines.node` 里照旧写着 `20.x || 22.x || …`。
-  // 于是元数据全是绿的，实际装在 Node 20 上却是：
-  //     prebuild-install warn install No prebuilt binaries found (target=20.20.2 … win32)
-  //     → 转 node-gyp → 在没有 MSVC 的机器上倒进一屏英文
-  // 写成 `^12.9.0` 的话 npm 会自己装到 12.11，这条路就悄悄断了。
+  // **上面那条 engines 扫描看不见这个问题。** 12.9.0 的 engines 只写到 25.x，
+  // 也没有 Node 26（ABI 147）的预编译包；12.11.1 同时有 24（137）和 26（147）
+  // 的 win32-x64 预编译包。13.x 目前没有可用的 GitHub 预编译资产，不能放成 ^。
   //
-  // 同一个包还有个更凶的版本：13.x 声明 `>=22`，但在 Node 22.12 上
-  // **`new Database()` 直接段错误，崩之前一行输出都没有**（实测 exit=139）。
-  // 「声明 ≠ 跑得起来」在这个包上出现过两次，方向还不一样。
-  //
-  // 唯一真正查得出来的是 CI 里那个 20.19.0 的矩阵项——它真的装一遍。
-  it('better-sqlite3 钉在 12.9.x，不能放成 ^', () => {
+  // 唯一真正查得出来的是 CI 里真的在 Node 24.15 和 Node 26 上各装一遍。
+  it('better-sqlite3 钉在 12.11.x，不能放成 ^', () => {
     const spec: string = JSON.parse(
       readFileSync(join(ROOT, 'server', 'package.json'), 'utf8'),
     ).dependencies['better-sqlite3'];
-    expect(spec, `better-sqlite3 写成了 "${spec}"——^ 会装到 12.10+，`
-      + '那些版本不再为 Node 20 发预编译包（engines 里却还写着 20.x，扫不出来）')
-      .toMatch(/^~12\.9\./);
+    expect(spec, `better-sqlite3 写成了 "${spec}"——^ 会装到 13.x，`
+      + '13.x 目前没有可用的预编译资产，而且 12.9.0 也没有 Node 26 的 ABI 147')
+      .toMatch(/^~12\.11\./);
   });
 
   // ── 声明了下限，还得有人拦 ──
@@ -116,15 +109,15 @@ describe('engines.node 声明的下限，每个依赖都得允许', () => {
 
   it('版本比较是逐段的，不是字符串比', async () => {
     const { meetsFloor } = await import('../../../scripts/check-node.mjs');
-    // 这一条是全部理由：字符串比 '22.9.0' >= '22.22.2' 为 true，22.9 会被放行
-    expect('22.9.0' >= '22.22.2', '前提变了：字符串比不再出错，这条用例可以撤').toBe(true);
-    expect(meetsFloor('22.9.0', '>=22.22.2'), '22.9 < 22.22，逐段比才看得出').toBe(false);
+    // 这一条是全部理由：字符串比 '24.9.0' >= '24.15.0' 为 true，24.9 会被放行
+    expect('24.9.0' >= '24.15.0', '前提变了：字符串比不再出错，这条用例可以撤').toBe(true);
+    expect(meetsFloor('24.9.0', '>=24.15.0'), '24.9 < 24.15，逐段比才看得出').toBe(false);
 
-    for (const v of ['18.20.8', '20.20.2', '22.22.1']) {
-      expect(meetsFloor(v, '>=22.22.2'), `${v} 该被拦下`).toBe(false);
+    for (const v of ['20.20.2', '22.30.0', '24.14.9']) {
+      expect(meetsFloor(v, '>=24.15.0'), `${v} 该被拦下`).toBe(false);
     }
-    for (const v of ['22.22.2', '22.30.0', '24.15.0']) {
-      expect(meetsFloor(v, '>=22.22.2'), `${v} 该放行`).toBe(true);
+    for (const v of ['24.15.0', '24.22.1', '26.12.1']) {
+      expect(meetsFloor(v, '>=24.15.0'), `${v} 该放行`).toBe(true);
     }
     // 看不懂的区间就放行——拦错人比不拦更糟
     expect(meetsFloor('18.0.0', '^22 || >=24')).toBe(true);

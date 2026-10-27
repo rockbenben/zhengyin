@@ -61,40 +61,42 @@
 （jsdom + @testing-library/react，扫 `web/src/**/*.test.tsx`；纯函数在 `node` 档，
 扫 `web/src/lib/**/*.test.ts` 和 `server/src/**/*.test.ts`）。
 
-**根目录的 `typecheck` 刻意不走 `npm run typecheck -w web`**，直接调两个 `tsc`。
-改回 `-w` 会报 `'tsc' 不是内部或外部命令`——npm 10 不把根 `node_modules/.bin`
-放进嵌套 workspace 脚本的 PATH，而 **Node 20 和 22 全线带 npm 10**（npm 11 从 Node 24 起）。
-下限是 20.19，所以这条对大多数用户成立，不是边角情况。
+**根目录的 `typecheck` 可以直接调两个 `tsc`**：下限 24.15 起全线是 npm 11，
+嵌套 workspace 也能找到根 `node_modules/.bin`，`npm run typecheck -w web` 已经不再是坑。
+保留直接调用只是少一层 npm 转发；要改回去，先在 Node 24.15 和 26 上各跑一次。
 
-## Node 版本：下限 20.19，而且 better-sqlite3 得钉着
+## Node 版本：下限 24.15，而且 better-sqlite3 得钉着
 
-**`engines.node` 是 `>=20.19.0`，`better-sqlite3` 必须写 `~12.9.0`——不能是 `^`。**
+**`engines.node` 是 `>=24.15.0`，`better-sqlite3` 必须写 `~12.11.1`——不能是 `^`。**
 
-这个包在这个项目里骗过两次，方向还不一样，两次都是「声明 ≠ 跑得起来」：
+下限不是随手挑的 LTS：`which@7` 的 engines 是
+`^22.22.2 || ^24.15.0 || >=26.0.0`，24.0–24.14 正好落在空档里；而
+`react-router@8` / `chokidar@6` 要求 Node 22.22 起。24.15 是这几条线的干净交集，
+也意味着 **Node 20 / 22 不再支持**——README、启动提示和 CI 矩阵都跟着抬。
+
+better-sqlite3 是个「声明 ≠ 跑得起来」的老熟人：
 
 | 版本 | 它声明什么 | 实际 |
 |---|---|---|
-| **13.x** | `>=22` | Node 22.12 上 `new Database()` **直接段错误**，崩之前一行输出都没有（exit=139） |
-| **12.10+** | `20.x \|\| 22.x \|\| …` | **不再发 Node 20 的预编译包**，装到 Node 20 上转 node-gyp，在没有 MSVC 的机器上倒进一屏英文 |
+| **12.9.0** | `20.x \|\| … \|\| 25.x` | **没有 Node 26（ABI 147）的预编译包**，在 Node 26 上会转 node-gyp |
+| **12.11.1** | `20.x \|\| … \|\| 26.x` | 同时有 Node 24（137）和 Node 26（147）的 win32-x64 预编译包 |
+| **13.x** | `>=22` | 目前没有可用的 GitHub 预编译资产，不能靠 `^` 自动升过去 |
 
-所以 `^12.9.0` 会自己装到 12.11，把 Node 20 这条路悄悄弄断。逐版本量出来的边界：
-**12.9.0 ✓、12.10.1 ✗、12.11.1 ✗**。
-
-**元数据扫描查不出第二行那种。** `nodeFloor.test.ts` 逐个核对依赖的 `engines`，
-而"有没有预编译包"根本不在 `engines` 里。唯一真查得出来的是 CI 矩阵里那个
-`20.19.0`——它真的在 Node 20 上装一遍。两道守卫缺一不可，都别撤。
+所以锁在 `~12.11.1`（不是 `^`，^ 会装到 13）。**元数据扫描查不出「有没有预编译包」**：
+`nodeFloor.test.ts` 核对依赖的 `engines`，而预编译包不在 `engines` 里。唯一真查得出来的
+是 CI 矩阵：在真的 Node 24.15 和 Node 26 上各装一遍，Windows 这一格尤其不能撤。
 
 **Node 太老由 `preinstall` 拦下**（`scripts/check-node.mjs`，跟 `check-uv.mjs` 同一个
 路子：把没信息量的报错换成能照做的中文）。它挂在 npm 生命周期上而不是三个启动脚本里，
-因为版本比较写三份必然分裂，而且**得逐段比**——`'22.9.0' >= '22.22.2'` 按字符串是
-true，22.9 会被放行。
+因为版本比较写三份必然分裂，而且**得逐段比**——`'24.9.0' >= '24.15.0'` 按字符串是
+true，24.9 会被放行。
 
-**桌面版另带一份 `node.exe`**（`desktop/vendor/`，构建时按固定版本和 SHA256 下载）。
-原因不是省事，是 better-sqlite3：它的 `.node` 按 Node ABI 编译，在 Electron 自带的 Node 里
-加载不了；随包 Node 24 之后，桌面版和浏览器模式用的是同一种 ABI，不必为每次 Electron
-升级重编原生模块。打包 job 因此固定用 Node 24，而 `nodeFloor.test.ts` **故意不扫
-`desktop/package.json`**：Electron 的 `engines` 下限比本仓高，扫进去会顶穿 20.19 那条
-浏览器用户的下限。
+**桌面版另带一份 `node.exe` 26.12.1**（`desktop/vendor/`，构建时按固定版本和 SHA256
+下载）。原因不是省事，是 better-sqlite3：它的 `.node` 按 Node ABI 编译，在 Electron
+自带的 Node 里加载不了；桌面版用随包的 Node 26 跑服务端，和浏览器模式隔离，不必为每次
+Electron 升级重编原生模块。打包 job 因此固定用 Node 26，而 `nodeFloor.test.ts`
+**故意不扫 `desktop/package.json`**：Electron 的 `engines` 下限比本仓高，扫进去会顶穿
+24.15 那条浏览器用户的下限。
 
 使用者是**中文母语者**，目标口音是**美式发音（General American）**。他把自己念不准、拿不准的音发过来，你用**中文**讲清楚该怎么发、要注意什么，然后把结论沉淀成 `notes/` 下的一篇笔记，并更新发音档案。
 

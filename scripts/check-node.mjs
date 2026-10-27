@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
  * 够不够下限。`engines` 的形状由 web/src/lib/nodeFloor.test.ts 钉着（必须是 `>=x.y.z`）；
  * 万一以后写成了复杂区间，这里**放行**而不是瞎猜——拦错人比不拦更糟。
  *
- * **逐段比，别拿字符串比**：`'22.9.0' >= '22.22.2'` 是 true，于是 22.9 被放行。
+ * **逐段比，别拿字符串比**：`'24.9.0' >= '24.15.0'` 是 true，于是 24.9 被放行。
  * 这也是不在 .cmd / .command / .sh 里解析 `node -v` 的理由之一——那个比较要写三份。
  */
 export function meetsFloor(version, range) {

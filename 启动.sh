@@ -30,7 +30,7 @@ echo
 if ! command -v node >/dev/null 2>&1; then
   echo "  没找到 Node.js —— 这个工具要靠它才能跑。"
   echo
-  echo "  用发行版的包管理器装，或者去 https://nodejs.org 下 LTS 版本（需要 20.19 或更新）。"
+  echo "  用发行版的包管理器装，或者去 https://nodejs.org 下 LTS 版本（需要 24.15 或更新）。"
   echo
   read -n 1 -s -r -p "  按任意键关闭"
   exit 1

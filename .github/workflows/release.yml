@@ -44,7 +44,7 @@ jobs:
           if [ "$desk" != "$v" ]; then echo "::error::version mismatch: desktop/package.json $desk != tag $v"; exit 1; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v7
-        with: { node-version: 24, cache: npm }
+        with: { node-version: 26, cache: npm }
       - run: npm ci
       - run: npm test
       - name: uv lock 与 pyproject 同步
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v7
         with: { ref: '${{ env.TAG }}' }
       - uses: actions/setup-node@v7
-        with: { node-version: 24, cache: npm }
+        with: { node-version: 26, cache: npm }
       - run: npm ci
       - run: npx install-electron
       - run: npm run build

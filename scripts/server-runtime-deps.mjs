@@ -40,11 +40,15 @@ export function serverRuntimeDeps(root) {
 }
 
 export function serverRuntimeResources(root) {
+  const serverRoot = join(root, 'server');
   return [...collect(root).entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .flatMap(([, dirs]) => dirs.map((dir) => {
       const from = relative(root, dir);
-      // resources 下是 server/node_modules/…；嵌套安装的包保留它原来的相对层级
-      return { from, to: join('server', from) };
+      const relServer = relative(serverRoot, dir);
+      // 从 server/ 自己解析出来的包（which@7 跟 Electron 的 which@5 冲突时就是这种）
+      // 已经带 `node_modules/...`；再从 root 拼一次会变成 server/server/node_modules。
+      const toServer = relServer.startsWith('..') ? from : relServer;
+      return { from, to: join('server', toServer) };
     }));
 }
