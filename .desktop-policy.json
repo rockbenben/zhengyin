@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "status": "project-deviations",
+  "framework": "electron",
+  "channel": "stable",
+  "platforms": ["windows-x64"],
+  "packageManager": "npm (npm ci in CI; package-lock.json is the source of truth)",
+  "node": "24 for desktop builds; server floor 20.19.0 (CI matrix 20.19/22/24)",
+  "distribution": {
+    "primary": "github-releases",
+    "windows": "nsis + zip"
+  },
+  "updater": "electron-updater on NSIS only; zip is manual-update",
+  "versionSource": "git tag vX.Y.Z; desktop/package.json asserted equal",
+  "deviations": []
+}

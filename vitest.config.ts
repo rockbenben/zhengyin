@@ -24,7 +24,7 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          include: ['server/src/**/*.test.ts', 'web/src/lib/**/*.test.ts'],
+          include: ['server/src/**/*.test.ts', 'web/src/lib/**/*.test.ts', 'desktop/src/**/*.test.ts'],
           environment: 'node',
           testTimeout: TIMEOUT,
         },

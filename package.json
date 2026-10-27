@@ -31,7 +31,8 @@
   "type": "module",
   "workspaces": [
     "server",
-    "web"
+    "web",
+    "desktop"
   ],
   "scripts": {
     "preinstall": "node scripts/check-node.mjs",
@@ -43,7 +44,13 @@
     "fetch-model": "node scripts/fetch-model.mjs",
     "preasr": "node scripts/check-uv.mjs",
     "asr": "node scripts/asr.mjs",
-    "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p server/tsconfig.typecheck.json"
+    "desktop": "npm run build && npm run build -w desktop && electron desktop/dist/main.js",
+    "dist:desktop": "npm run build && npm run build -w desktop && electron-builder --config desktop/electron-builder.config.mjs --publish never",
+    "dist:desktop:zip": "npm run build && npm run build -w desktop && electron-builder --config desktop/electron-builder-zip.config.mjs --publish never",
+    "fetch-runtime": "node scripts/fetch-runtime.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p server/tsconfig.typecheck.json && tsc -p desktop/tsconfig.typecheck.json"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",

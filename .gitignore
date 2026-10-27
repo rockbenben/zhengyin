@@ -36,3 +36,11 @@ review-state.json.*
 web/design-preview/
 *.bak
 .qoder*
+
+# ── 桌面版的构建产物与随包运行时 ──
+# node.exe / uv.exe 由 scripts/fetch-runtime.mjs 按固定版本下载，不进版本库。
+desktop/vendor/
+desktop/release/
+desktop/release-zip/
+# 浏览器模式下 APP_ROOT 就是仓库根，代理的参考副本会落在这里。
+.ai-reference/

@@ -26,3 +26,7 @@
 *.tar.gz   binary
 *.zip      binary
 *.png      binary
+
+# 跨仓生成的 provider 目录：生成器一律写 LF，钉住它，别让检出时的换行
+# 取决于克隆方的 core.autocrlf。
+*.generated.ts text eol=lf

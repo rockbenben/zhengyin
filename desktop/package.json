@@ -1,0 +1,23 @@
+{
+  "name": "desktop",
+  "productName": "正音",
+  "version": "1.0.0",
+  "private": true,
+  "description": "正音的桌面外壳：窗口、更新、随包运行时",
+  "author": {
+    "name": "rockbenben"
+  },
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  }
+}
