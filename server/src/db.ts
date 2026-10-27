@@ -375,6 +375,47 @@ export function errorsOnWord(db: Database.Database, entryText: string): PhonemeS
   return rows.map((r) => ({ ...r, words: [entryText] }));
 }
 
+export interface LatestAttempt {
+  id: number;
+  target: string;
+  at: string;
+  targetIpa: string[];
+  heardIpa: string[];
+  errors: Array<{ kind: 'sub' | 'del' | 'ins'; targetIpa: string | null; heardIpa: string | null; atIndex: number }>;
+}
+
+/**
+ * 最近一次录音的逐处错；没有就 null。AI 讲解和对话要它，不用自己拼 SQL。
+ *
+ * 短语词条可以只录其中一个词，这时 `target` 必须一起过滤：不过滤的话，
+ * 录了 black 之后打开 cat，讲 cat 的上下文里会摆着 black 的错。
+ */
+export function latestAttemptFor(
+  db: Database.Database,
+  entryText: string,
+  target?: string,
+): LatestAttempt | null {
+  const row = (target
+    ? db.prepare(
+      'SELECT id, target, at, target_ipa, heard_ipa FROM attempt WHERE entry_text = ? AND target = ? ORDER BY id DESC LIMIT 1',
+    ).get(entryText, target)
+    : db.prepare(
+      'SELECT id, target, at, target_ipa, heard_ipa FROM attempt WHERE entry_text = ? ORDER BY id DESC LIMIT 1',
+    ).get(entryText)) as { id: number; target: string; at: string; target_ipa: string; heard_ipa: string } | undefined;
+  if (!row) return null;
+  const errors = db.prepare(
+    'SELECT kind, target_ipa, heard_ipa, at_index FROM attempt_error WHERE attempt_id = ? ORDER BY at_index',
+  ).all(row.id) as Array<{ kind: 'sub' | 'del' | 'ins'; target_ipa: string | null; heard_ipa: string | null; at_index: number }>;
+  return {
+    id: row.id,
+    target: row.target,
+    at: row.at,
+    targetIpa: row.target_ipa.split(' ').filter(Boolean),
+    heardIpa: row.heard_ipa.split(' ').filter(Boolean),
+    errors: errors.map((e) => ({ kind: e.kind, targetIpa: e.target_ipa, heardIpa: e.heard_ipa, atIndex: e.at_index })),
+  };
+}
+
 export interface WordStat { attempts: number; clean: number; lastAt: string | null }
 
 /** 某个词条练过几次、几次全对 */

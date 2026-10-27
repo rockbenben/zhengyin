@@ -28,6 +28,7 @@ import { invalidUserName } from './users.js';
 import { maskKey, readEnvFile, readEnvValue, upsertEnvValue, writeEnvFile } from './envfile.js';
 import { loadRegistry, modelState, resolveModel } from './models.js';
 import { writeGuard } from './httpGuard.js';
+import { entryHasNote, relevantNotes } from './noteLinks.js';
 
 /**
  * 低于这个信噪比，评测结果照给，但**不写进发音档案和复习队列**。
@@ -74,52 +75,11 @@ export interface AppDeps {
   runtime: { desktop: boolean; version: string; appRoot: string; userNotes: string };
 }
 
-// 共享谓词：判断某词条是否命中某笔记（笔记 triggers 与词条各词 tags 的并集有交集）。
-// /api/notes 的 exampleCount 和 /api/notes/:id 的 examples 都靠它反查，避免两处各写一份同样的逻辑。
-function entryHasNote(entry: store.EntryRow, note: Note): boolean {
-  const tags = new Set(entry.words.flatMap((w) => w.tags));
-  // 两条路都算：讲音的笔记看 trigger，讲词的笔记看词条本身（见 notes.ts 的 Note.words）
-  return note.triggers.some((t) => tags.has(t)) || note.words.includes(entry.text);
-}
-
 // 类型守卫写成一个具名 type predicate，而不是内联 `typeof x === 'string' && SET.has(x as T)`——
 // 后者 TS 不会把 x 的类型窄化成 T，下游还得再 cast 一次；这样写一次，调用点直接拿到窄化后的
 // Grade 类型，也顺带把"合法 grade 是什么"这份知识只放这一处。
 function isGrade(g: unknown): g is Grade {
   return typeof g === 'string' && GRADES.has(g as Grade);
-}
-
-/**
- * 这个词上「跟你有关」的笔记：笔记 id → 是哪几处错把它拉出来的（`i→aɪ` 这样）。
- * 讲这个词本身的（`words:`）也算，那种不需要你先错一次。
- *
- * **抽出来是因为两处在数同一个东西，而数出来不一样。** 词条页摆在外面的是这一档，
- * 而首页那张表的「讲解」列数的是 `matchNotes` 的全部命中——实测 comfortable
- * 列上写着「5 篇」，点进去一篇都没摆出来（五篇全收在折叠里）。列表许了一个
- * 到了目的地不兑现的诺，而笔记越攒越多这个差越大：85 篇时长词命中 26 篇，
- * 那一列就从「有多少讲解可看」变成了「这个词有多长」。
- */
-function relevantNotes(deps: AppDeps, text: string, hits: ReturnType<typeof matchNotes>) {
-  // **只让替换说话**，理由见下面 entryDetail 里那段注释
-  const myErrors = store.errorsOnWord(deps.db, text).filter(
-    (e) => e.kind === 'sub' && e.targetIpa !== null,
-  );
-  const becauseOf = new Map<string, string[]>();
-  for (const e of myErrors) {
-    for (const n of notesCovering(e, deps.noteStore.all())) {
-      const label = `${e.targetIpa}→${e.heardIpa}`;
-      const cur = becauseOf.get(n.id) ?? [];
-      if (!cur.includes(label)) cur.push(label);
-      becauseOf.set(n.id, cur);
-    }
-  }
-  // 讲这个词的笔记：它整篇就是关于这个词的，没有「你还没在这儿错过」这一说
-  for (const h of hits) {
-    if (h.matched.some((m) => m.startsWith('word:')) && !becauseOf.has(h.note.id)) {
-      becauseOf.set(h.note.id, []);
-    }
-  }
-  return becauseOf;
 }
 
 function entryDetail(deps: AppDeps, text: string) {

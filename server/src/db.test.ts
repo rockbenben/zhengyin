@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { heardByPosition, logAttempt, openDb, upsertEntry, getEntry, listEntries, deleteEntry, addAudio, getAudio, audioFileInUse } from './db.js';
+import { heardByPosition, latestAttemptFor, logAttempt, openDb, upsertEntry, getEntry, listEntries, deleteEntry, addAudio, getAudio, audioFileInUse } from './db.js';
 
 const words = [{
   word: 'click', found: true, arpabet: ['K', 'L', 'IH1', 'K'], ipa: 'ˈklɪk', tags: ['phoneme:l'],
@@ -93,5 +93,46 @@ describe('heardByPosition', () => {
       targetIpa: ['l', 'aɪ', 't'], heardIpa: ['n', 'aɪ', 't'], ops: [], clean: false,
     });
     expect(heardByPosition(db, 'night', ['n', 'aɪ', 't'])[0]).toEqual({});
+  });
+});
+
+describe('latestAttemptFor', () => {
+  it('给出最近一次的错误与位置', () => {
+    const db = openDb(':memory:');
+    const id = logAttempt(db, {
+      entryText: 'click', target: 'click', at: 't1',
+      targetIpa: ['k', 'l', 'ɪ', 'k'], heardIpa: ['k', 'n', 'ɪ', 'k'],
+      clean: false,
+      ops: [
+        { kind: 'match', targetIpa: 'k', heardIpa: 'k' },
+        { kind: 'sub', targetIpa: 'l', heardIpa: 'n' },
+        { kind: 'match', targetIpa: 'ɪ', heardIpa: 'ɪ' },
+        { kind: 'match', targetIpa: 'k', heardIpa: 'k' },
+      ],
+    });
+    const a = latestAttemptFor(db, 'click');
+    expect(a?.id).toBe(id);
+    expect(a?.errors).toEqual([{ kind: 'sub', targetIpa: 'l', heardIpa: 'n', atIndex: 1 }]);
+  });
+
+  it('短语词条按 target 取，不把另一个词的录音端上来', () => {
+    const db = openDb(':memory:');
+    const black = logAttempt(db, {
+      entryText: 'black cat', target: 'black', at: 't1',
+      targetIpa: ['b', 'l', 'æ', 'k'], heardIpa: ['b', 'l', 'æ', 'k'],
+      clean: true, ops: [],
+    });
+    logAttempt(db, {
+      entryText: 'black cat', target: 'cat', at: 't2',
+      targetIpa: ['k', 'æ', 't'], heardIpa: ['k', 'ɑ', 't'],
+      clean: false, ops: [{ kind: 'sub', targetIpa: 'æ', heardIpa: 'ɑ' }],
+    });
+    expect(latestAttemptFor(db, 'black cat', 'black')?.id).toBe(black);
+    expect(latestAttemptFor(db, 'black cat')?.target).toBe('cat');
+    expect(latestAttemptFor(db, 'black cat', 'dog')).toBeNull();
+  });
+
+  it('没录过就是 null', () => {
+    expect(latestAttemptFor(openDb(':memory:'), 'click')).toBeNull();
   });
 });
