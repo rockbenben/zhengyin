@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { join, resolve } from 'node:path';
-import { resolveDesktopPaths } from './paths.js';
+import { resolveDesktopPaths, desktopUserData } from './paths.js';
 
 const repo = resolve('/repo');
 const userData = resolve('/appdata/zhengyin');
@@ -32,4 +32,9 @@ describe('桌面路径', () => {
     expect(p.asrProjectDir).toBe(join(resources, 'asr-service'));
     expect(p.logFile).toBe(join(userData, 'logs', 'server.log'));
   });
+});
+
+it('uses an explicit Electron profile without changing the default profile layout', () => {
+  expect(desktopUserData('/roaming')).toBe(join('/roaming', 'zhengyin'));
+  expect(desktopUserData('/roaming', userData)).toBe(userData);
 });

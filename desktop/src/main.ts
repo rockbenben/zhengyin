@@ -3,9 +3,9 @@ import electronUpdater from 'electron-updater';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveDesktopPaths } from './paths.js';
+import { resolveDesktopPaths, desktopUserData } from './paths.js';
 import { readDesktopSettings, writeDesktopSettings, type DesktopSettings } from './settings.js';
-import { askFirstRun, validateDataRoot, type FirstRunDialog } from './firstRun.js';
+import { askFirstRun, askLockedDataRoot, validateDataRoot, type FirstRunDialog } from './firstRun.js';
 import { decideLink } from './links.js';
 import { decidePermission } from './permissions.js';
 import { LogSink } from './logs.js';
@@ -18,7 +18,7 @@ import {
 } from './updater.js';
 import { APP_ID, PRODUCT_NAME } from './product.js';
 
-const USER_DATA = join(app.getPath('appData'), 'zhengyin');
+const USER_DATA = desktopUserData(app.getPath('appData'), app.commandLine.getSwitchValue('user-data-dir'));
 mkdirSync(USER_DATA, { recursive: true });
 app.setPath('userData', USER_DATA);
 app.setAppUserModelId(APP_ID);
@@ -50,7 +50,7 @@ let pendingNotification: Notification | null = null;
  * 正音自己的版本号。
  *
  * **不用 `app.getVersion()`**：开发模式下 Electron 读不到应用自己的 package.json，
- * 那个调用给的是 **Electron 的版本**（45.0.0）——界面上写「正音 45.0.0」是句假话。
+ * 那个调用给的是 **Electron 的版本**（如 45.3.3）——界面上写「正音 45.3.3」是句假话。
  * `desktop/package.json` 里那份才是正音的版本，打包时 electron-builder 也用它。
  */
 let appVersion = '';
@@ -133,8 +133,9 @@ function showAbout(): void {
  * 网页那边拿到的是 preload 递过来的 `window.zhengyinDesktop`，一个方法对应这里
  * 一个 handler。**动作清单的正本是 bridge.ts**，这里只管实现。
  *
- * handler 一律不回值：这些动作的结果要么是界面自己变了（重新加载、退出），
+ * 动作 handler 一律不回值：这些动作的结果要么是界面自己变了（重新加载、退出），
  * 要么是弹了个对话框（换数据文件夹、关于），网页那边不需要等一个结果。
+ * （`CHANNEL.state` 是查询，要回一份状态，不在这条里。）
  */
 function registerIpc(): void {
   const state = (): DesktopState => ({
@@ -144,8 +145,9 @@ function registerIpc(): void {
     devTools: !app.isPackaged,
     autoCheck: loadAutoCheck(PREFS_FILE),
     updateReady: updater?.versionReady() ?? null,
-    // 更新器现在在干什么。网页据此说「正在检查」「已是最新」，
-    // 也据此知道「重启以完成更新」这一刻到底能不能按。
+    // 更新器现在在干什么。网页据此说「正在检查」「已是最新」。
+    // 「重启以完成更新」能不能按看的是 updateReady，不是这一格——状态会漂
+    // （见 updater.ts 的 restartToInstall）。
     updateState: updater?.state() ?? null,
   });
 
@@ -224,9 +226,21 @@ async function bootstrap(): Promise<void> {
   port = await pickFreePort();
 
   try {
-    child = await startServer({ paths, port, log, version: app.getVersion() });
+    child = await startServer({ paths, port, log, version: appVersion });
+    let lockFailed = false;
     child.onExit((code, killedByUs, launchError) => {
       if (killedByUs) return;
+      if (launchError?.code === 'DATA_LOCK_BUSY') {
+        lockFailed = true;
+        void askLockedDataRoot(dialog as unknown as FirstRunDialog, launchError.message, dataRoot).then((dir) => {
+          if (dir && settings) {
+            writeDesktopSettings(SETTINGS_FILE, { ...settings, appRoot: dir });
+            app.relaunch();
+          }
+          app.quit();
+        }).catch(() => app.quit());
+        return;
+      }
       const why = launchError ? describeLaunchFailure(launchError) : `退出码 ${code ?? '未知'}`;
       void dialog.showMessageBox({
         type: 'error',
@@ -236,7 +250,8 @@ async function bootstrap(): Promise<void> {
       });
     });
 
-    const healthy = await waitUntilHealthy(port);
+    const healthy = await waitUntilHealthy(port, { shouldStop: () => lockFailed });
+    if (lockFailed) return;
     installPermissions();
 
     // 「点通知装更新」不能只靠实例事件：实例被 GC 掉就收不到激活
@@ -249,7 +264,7 @@ async function bootstrap(): Promise<void> {
 
     // 更新器要在开窗**之前**起来：网页一打开就会问「有没有更新器」，
     // 那时候这个答案得是对的（晚一步的话，头一次问会得到「没有」，
-    // 那一档按钮就永远不出现了）。
+    // 更新那一档得等网页下一次三秒轮询才冒出来）。
     const channel = updateChannelFromPackage(pkg());
     if (shouldEnableUpdater({ isPackaged: app.isPackaged, platform: process.platform, channel })) {
       const { autoUpdater } = electronUpdater;

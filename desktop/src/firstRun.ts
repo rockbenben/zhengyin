@@ -24,12 +24,29 @@ export function validateDataRoot(dir: string): string | null {
   return '这个文件夹不像正音的数据根（里面没有 data/、notes/ 或 发音档案.template.md）。';
 }
 
+export async function askLockedDataRoot(dialog: FirstRunDialog, message: string, current: string): Promise<string | null> {
+  for (;;) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning', title: '数据文件夹正在使用中', message,
+      detail: '先关闭占用进程后重试，或者重选数据文件夹。不会强行解锁或终止占用进程。',
+      buttons: ['重选数据文件夹', '重试', '退出'], defaultId: 0, cancelId: 2,
+    });
+    if (response === 2) return null;
+    if (response === 1) return current;
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) continue;
+    const bad = validateDataRoot(r.filePaths[0]);
+    if (!bad) return r.filePaths[0];
+    await dialog.showMessageBox({ type: 'error', title: '这个文件夹用不了', message: bad });
+  }
+}
+
 export async function askFirstRun(dialog: FirstRunDialog): Promise<FirstRunChoice> {
   const { response } = await dialog.showMessageBox({
     type: 'question',
     title: '正音',
     message: '要使用已有的正音数据吗？',
-    detail: '可以选旧的「正音」文件夹（数据原样继续用），也可以导入备份文件，或者从空白开始。',
+    detail: '可以选旧的「正音」文件夹（数据原样继续用），也可以导入备份文件（只含词条、录音判定和复习进度，不含发音档案和笔记），或者从空白开始。',
     buttons: ['选旧文件夹', '导入备份', '全新开始'],
     defaultId: 2,
     cancelId: 2,

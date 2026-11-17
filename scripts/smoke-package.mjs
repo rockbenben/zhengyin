@@ -3,6 +3,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serverRuntimeResources } from './server-runtime-deps.mjs';
@@ -101,7 +102,36 @@ try {
     if (!notes.groups || typeof notes.groups !== 'object') throw new Error('/api/notes 形状不对');
     const phonemes = await (await wait('/api/phonemes')).json();
     if (!Array.isArray(phonemes.phones)) throw new Error('/api/phonemes 形状不对');
-    console.log('[smoke-package] ok：服务、数据库、笔记与音素表都正常（不依赖外网）');
+    // Exercise the packaged workflow resource and actual HTTP-to-file submission path offline.
+    const model = createHttpServer((_req, response) => response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      notes: [{ file: 'smoke-organize.md', note: { title: '边音练习', triggers: ['phoneme:l'], words: [], contrasts: [],
+        body: '## 自检法\n舌尖抵住上齿龈，让气流从舌头两侧通过。\n## 对比训练\n先对比中文老和脑，再练 light / night。' } }], summary: '完成合成笔记',
+    }) } }] })));
+    model.listen(0, '127.0.0.1');
+    await new Promise(resolve => model.once('listening', resolve));
+    try {
+      const json = async (path, method, body) => {
+        const response = await fetch(base + path, { method, headers: { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+        if (!response.ok) throw new Error(`${path} 返回 ${response.status}：${await response.text()}`);
+        return response.json();
+      };
+      await json('/api/ai/settings', 'PUT', { mode: 'api', consent: true, endpointId: 'smoke', endpoints: {
+        smoke: { protocol: 'openai', baseUrl: `http://127.0.0.1:${model.address().port}`, model: 'smoke', key: '' },
+      } });
+      await json('/api/ai/agent/run', 'POST', { task: 'organize' });
+      let status;
+      for (let i = 0; i < 60; i++) {
+        status = await json('/api/ai/agent/status', 'GET');
+        if (status.state !== 'running') break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const file = join(appRoot, 'data/notes/smoke-organize.md');
+      if (status.state !== 'done' || !existsSync(file)) throw new Error(`接口整理未保存：${status.error ?? status.state}`);
+      const undone = await json('/api/ai/agent/undo', 'POST');
+      if (undone.state !== 'undone' || existsSync(file)) throw new Error('接口整理撤销失败');
+    } finally { model.closeAllConnections(); await new Promise(resolve => model.close(resolve)); }
+    console.log('[smoke-package] ok：服务、数据库、笔记、音素表及接口整理/撤销正常（不依赖外网）');
   } catch (e) {
     fail(e.message);
   } finally {

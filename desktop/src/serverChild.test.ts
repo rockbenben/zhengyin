@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { serverEnv, waitUntilHealthy } from './serverChild.js';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import type { LogSink } from './logs.js';
+import { serverEnv, waitUntilHealthy, startServer } from './serverChild.js';
 import type { DesktopPaths } from './paths.js';
 
 const paths: DesktopPaths = {
@@ -15,6 +20,45 @@ const paths: DesktopPaths = {
   logDir: 'C:/logs',
   logFile: 'C:/logs/server.log',
 };
+
+describe('启动接线', () => {
+  it('开发壳与服务共用应用包版本', () => {
+    const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+    expect(main).toContain('appVersion = pkg().version');
+    expect(main).toContain('startServer({ paths, port, log, version: appVersion })');
+  });
+  it('stderr 排空后保留锁持有 pid，已退出子进程不再杀树', async () => {
+    const proc = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn() });
+    const handle = await startServer({ paths, port: 1, log: { write: vi.fn() } as unknown as LogSink,
+      spawnFn: (() => proc as unknown as ChildProcess) as typeof spawn });
+    const cb = vi.fn();
+    handle.onExit(cb);
+    proc.emit('exit', 1);
+    expect(cb).not.toHaveBeenCalled();
+    const message = '这个数据文件夹正被另一个正音进程使用（pid 123，host）。先关掉它再试。';
+    const bytes = Buffer.from(message);
+    proc.stderr.write(bytes.subarray(0, 5));
+    proc.stderr.write(bytes.subarray(5));
+    proc.emit('close', 1);
+    expect(cb).toHaveBeenCalledWith(1, false, { code: 'DATA_LOCK_BUSY', message });
+    await handle.stop();
+    expect(proc.kill).not.toHaveBeenCalled();
+  });
+  it('真实 Node 子进程的锁拒绝能传回 pid 与完整提示', async () => {
+    const message = '这个数据文件夹正被另一个正音进程使用（pid 456，host.name）。先关掉它再试。';
+    const handle = await startServer({ paths, port: 1, log: { write: vi.fn() } as unknown as LogSink,
+      spawnFn: ((_file: string, _args: readonly string[], opts: SpawnOptions) => spawn(process.execPath,
+        ['-e', 'console.error(' + JSON.stringify(message) + '); process.exit(1)'], opts)) as unknown as typeof spawn });
+    const result = await new Promise<unknown[]>((resolve) => handle.onExit((...args) => resolve(args)));
+    expect(result).toEqual([1, false, { code: 'DATA_LOCK_BUSY', message }]);
+    await handle.stop();
+  });
+  it('锁失败不再等健康超时', async () => {
+    const fetchFn = vi.fn();
+    expect(await waitUntilHealthy(1, { shouldStop: () => true, fetchFn })).toBe(false);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
 
 describe('serverEnv', () => {
   it('把两个根、运行时与桌面标志都传下去，并清掉 ELECTRON_RUN_AS_NODE', () => {

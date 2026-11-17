@@ -6,7 +6,7 @@
   "channel": "stable",
   "platforms": ["windows-x64"],
   "packageManager": "npm (npm ci in CI; package-lock.json is the source of truth)",
-  "node": "26 for desktop builds and bundled runtime; server floor 24.15.0 (CI matrix 24.15/26)",
+  "node": "26 for CI, desktop builds and bundled runtime; engines.node >=26.0.0",
   "distribution": {
     "primary": "github-releases",
     "windows": "nsis (updatable) + zip (manual update)"
@@ -35,6 +35,12 @@
       "rule": "zip-no-updater",
       "reason": "the zip has no install root to replace; updater metadata is produced only by the NSIS build",
       "revisitWhen": "a portable update path is implemented and verified on a real machine"
+    },
+    {
+      "rule": "installer-ui-language",
+      "value": ["zh_CN"],
+      "reason": "项目为中文母语者的发音纠正工具，全中文界面与文档，安装包明确只使用简体中文向导",
+      "revisitWhen": "项目引入多语言或国际化支持时"
     }
   ]
 }

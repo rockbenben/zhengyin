@@ -45,6 +45,8 @@ const base = {
     artifactName: 'zhengyin-${version}-win-setup.${ext}',
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+    installerLanguages: ['zh_CN'],
+    displayLanguageSelector: false,
   },
 };
 

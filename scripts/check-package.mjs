@@ -1,5 +1,6 @@
 // 校验「打包会带上的东西」与「编译产物真正会 require 的东西」是同一份。
-// 跑之前先 npm run build（server/dist、web/dist 要有）。
+// 跑之前先 npm run build 和 npm run fetch-runtime（server/dist、web/dist、
+// desktop/vendor/ 都要有）。
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';

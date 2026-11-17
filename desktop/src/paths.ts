@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export interface HostInfo {
   isPackaged: boolean;
@@ -48,4 +48,9 @@ export function resolveDesktopPaths(host: HostInfo, settings: DesktopPathSetting
     logDir,
     logFile: join(logDir, 'server.log'),
   };
+}
+
+/** Respect Electron's explicit profile override for isolated installations and diagnostics. */
+export function desktopUserData(appData: string, override = ''): string {
+  return override.trim() ? resolve(override) : join(appData, 'zhengyin');
 }

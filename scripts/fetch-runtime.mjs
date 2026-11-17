@@ -1,7 +1,7 @@
 // 下载随包的 node.exe 与 uv.exe。版本与校验和在 scripts/runtime-versions.json。
 //
 // 第一次（或换版本）：node scripts/fetch-runtime.mjs --record
-//   —— 下载、打印并写回 SHA256；这一步是「信任首次下载」，之后必须校验。
+//   —— 下载并写回 SHA256；这一步是「信任首次下载」，之后必须校验。
 // 之后：                 node scripts/fetch-runtime.mjs
 //   —— 哈希不匹配就失败，不把可疑的二进制放进安装包。
 //

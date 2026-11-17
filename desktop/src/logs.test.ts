@@ -23,3 +23,10 @@ describe('LogSink', () => {
     expect(s.tail(2)).toEqual(['2', '3']);
   });
 });
+
+it('appends split lines exactly once on disk', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'logs-split-')), 'server.log');
+  const sink = new LogSink(file);
+  sink.write('hel'); sink.write('lo\n');
+  expect(readFileSync(file, 'utf8')).toBe('hello\n');
+});

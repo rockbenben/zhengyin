@@ -28,12 +28,12 @@ export class LogSink {
       if (this.lines.length > MAX_LINES) this.lines.splice(0, this.lines.length - MAX_LINES);
     }
     try {
-      if (this.size() + Buffer.byteLength(text) > this.maxBytes) {
+      if (this.size() + Buffer.byteLength(chunk) > this.maxBytes) {
         const old = `${this.file}.1`;
         rmSync(old, { force: true });
         if (existsSync(this.file)) renameSync(this.file, old);
       }
-      appendFileSync(this.file, text, 'utf8');
+      appendFileSync(this.file, chunk, 'utf8');
     } catch (e) {
       // 盘满/目录被删都不能让服务启动失败；控制台里留一句就够
       console.warn(`[desktop] 写日志失败：${(e as Error).message}`);

@@ -48,6 +48,7 @@ export async function waitUntilHealthy(port: number, opts: {
   nowFn?: () => number;
   timeoutMs?: number;
   intervalMs?: number;
+  shouldStop?: () => boolean;
 } = {}): Promise<boolean> {
   const fetchFn = opts.fetchFn ?? fetch;
   const sleepFn = opts.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -56,6 +57,7 @@ export async function waitUntilHealthy(port: number, opts: {
   const intervalMs = opts.intervalMs ?? 300;
   const deadline = nowFn() + timeoutMs;
   for (;;) {
+    if (opts.shouldStop?.()) return false;
     try {
       const r = await fetchFn(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
       if (r.ok && (await r.json() as { ok?: unknown }).ok === true) return true;
@@ -79,7 +81,12 @@ export async function startServer(o: {
     windowsHide: true,
   });
   child.stdout?.on('data', (b: Buffer) => o.log.write(b.toString()));
-  child.stderr?.on('data', (b: Buffer) => o.log.write(b.toString()));
+  let stderr = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (text: string) => {
+    stderr = (stderr + text).slice(-8192);
+    o.log.write(text);
+  });
 
   let killedByUs = false;
   let exited: number | null | undefined;
@@ -89,19 +96,23 @@ export async function startServer(o: {
   const settle = (code: number | null, err?: NodeJS.ErrnoException) => {
     if (exited !== undefined) return;
     exited = code;
-    launchError = err ? { code: err.code, syscall: err.syscall, message: err.message } : null;
+    const busy = stderr.match(/^这个数据文件夹正被另一个正音进程使用（pid [0-9]+，.+$/mu)?.[0].trim();
+    launchError = err ? { code: err.code, syscall: err.syscall, message: err.message }
+      : busy ? { code: 'DATA_LOCK_BUSY', message: busy } : null;
     cb?.(code, killedByUs, launchError);
   };
-  child.on('exit', (code) => settle(code));
+  // close 在 stderr 排空后触发，避免漏掉服务退出前写出的锁持有者。
+  child.on('close', (code) => settle(code));
   child.on('error', (err: NodeJS.ErrnoException) => settle(null, err));
 
   return {
     async stop() {
-      if (killedByUs) return;
+      if (killedByUs || exited !== undefined) return;
       killedByUs = true;
       const pid = child.pid;
       child.kill();
-      // 给它一点时间走优雅退出（服务自己的处理器会停边车），然后按树强杀。
+      // 给它一点时间退出，再按树强杀兜底。Windows 上 kill 是强制终止（没有信号处理器
+      // 可跑）；POSIX 上才走服务自己的 SIGTERM 处理器，由它停掉边车。
       await new Promise<void>((r) => setTimeout(r, 1500));
       if (!pid) return;
       if (process.platform === 'win32') {

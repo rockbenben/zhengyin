@@ -9,11 +9,11 @@
  * **频道名为什么会有两份**：preload 跑在沙箱里，而沙箱里的 `require` 只认白名单
  * （electron / events / timers / url），**取不到旁边的文件**——所以 preload 那份
  * 频道名只能是抄的。抄错不会报错，只会调不通（点了没反应），所以
- * `bridge.test.ts` 盯着两份对不对得上。同理，网页那边
- * （`web/src/lib/desktop.ts`）也是抄的，那份由网页侧的守卫盯着。
+ * `bridge.test.ts` 盯着两份对不对得上。网页那边（`web/src/lib/desktop.ts`）
+ * 抄的是**动作名**，那份由网页侧的守卫盯着。
  */
 
-/** 主进程 ⇄ 渲染进程之间的频道名。正本在这儿，preload 与网页各抄一份。 */
+/** 主进程 ⇄ 渲染进程之间的频道名。正本在这儿，preload 抄一份；网页抄的是动作名。 */
 export const CHANNEL = {
   /** 渲染进程问：这个应用现在是什么状态（版本、有没有更新器、自动检查开没开） */
   state: 'desktop:state',
