@@ -125,18 +125,19 @@ jobs:
         with: { subject-checksums: dist/SHA256SUMS }
       - name: 建/复用草稿并上传
         run: |
-          if gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
-            echo "::error::$TAG 已经发布过了，改版本号"; exit 1
-          fi
           # 发布说明是**仓库里的中文文件**，不是 GitHub 自动生成的提交笔记。
           # 后者是从英文 commit 生成的，等于在一份中文说明里塞一段英文——
           # 本项目只有中文，说明也就只该有中文。缺文件就停：宁可发布失败，
           # 也不要发出一份说明不全的版本。
           notes="docs/releases/$TAG.md"
           [ -f "$notes" ] || { echo "::error::缺发布说明 $notes，先写好这一版的中文说明再打 tag"; exit 1; }
-          gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || \
+          if is_draft=$(gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null); then
+            [ "$is_draft" = true ] || { echo "::error::$TAG 已经发布过了，改版本号"; exit 1; }
+            gh release edit "$TAG" -R "$REPO" --notes-file "$notes"
+          else
             gh release create "$TAG" -R "$REPO" --draft --verify-tag --title "$TAG" \
               --notes-file "$notes" --fail-on-no-commits
+          fi
           gh release upload "$TAG" -R "$REPO" dist/* --clobber
       - name: 发布并设 latest
         run: |
