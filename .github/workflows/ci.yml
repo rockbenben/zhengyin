@@ -1,9 +1,9 @@
-# 跑测试和构建。**矩阵里那两个维度都不是凑数的**，各自防一类真出过的问题。
+# 跑测试和构建。**windows 那一格不是凑数的**——它防一类 linux 上复现不了的问题。
 #
 # ── 为什么必须有 windows ──
 #
-# `.gitattributes` 只钉了启动脚本的换行（.cmd 必须 CRLF、.sh 必须 LF），
-# **没管 .md**——所以笔记的换行跟着克隆方的 `core.autocrlf` 走。
+# `.gitattributes` 只钉了启动脚本和生成文件的换行（.cmd 必须 CRLF、.sh 必须 LF、
+# *.generated.ts 必须 LF），**没管 .md**——所以笔记的换行跟着克隆方的 `core.autocrlf` 走。
 # Git for Windows 默认 autocrlf=true，于是别人在 Windows 上 clone 到的 notes/*.md
 # 是 CRLF，而开发机工作区里是 LF。
 #
@@ -12,30 +12,27 @@
 # 界面上「该怎么发」整块消失。**Linux runner 复现不了这个条件**（那边永远是 LF），
 # 只有 windows 会。
 #
-# ── 为什么 node 是 24.15.0 / 26 ──
+# ── 为什么 node 固定 26 ──
 #
-# **24.15.0 是 `engines.node` 的下限，也是这条矩阵的第一项。**
-# 它不是一个随便挑的 LTS 小版本：which@7 的 engines 是
-# `^22.22.2 || ^24.15.0 || >=26.0.0`，而 24.0–24.14 正好落在空档里；
-# 下限必须落在它允许的区间内，nodeFloor.test.ts 会逐项核对。
+# 26 是当前 LTS，也是桌面版随包 node.exe 的版本（desktop/vendor/），打包 job 同样用 26。
+# 三处并成一条线，是因为 better-sqlite3 是原生模块、ABI 按 Node 大版本走：本机一份
+# node_modules 只能装出一个大版本的 `.node`。以前矩阵还跑 24.15（ABI 137），测试和
+# 打桌面包就得来回重编，忘了重编的那一侧会几百条一起红在一行 NODE_MODULE_VERSION 上
+# ——看着像代码坏了，其实只是换过 Node。
 #
-# 26 是当前 LTS，也是桌面版随包 node.exe 的版本。两条都测：
-# 24.15 代表"最低还能装"的那一端，26 代表桌面实际运行时。
-# 都写大版本/精确下限、不钉日常小版本——"哪个小版本又出事了"正是要暴露的东西。
-#
+# `engines.node` 因此也是 >=26.0.0，README / 启动提示 / nodeFloor.test.ts 一起钉着。
 # **better-sqlite3 必须钉 `~12.11.1`。** 12.9.0 没有 Node 26（ABI 147）的预编译包；
-# 13.x 目前没有可用的 GitHub 预编译资产。12.11.1 同时有 24（137）和 26（147）的
-# win32-x64 预编译包，所以这一行矩阵是在**真的 Node 24.15 和 Node 26 上各装一遍**。
-# 元数据扫描查不出"有没有预编译包"，只有真装才知道。
+# 13.x 目前没有可用的 GitHub 预编译资产。12.11.1 有 Node 26 的 win32-x64 预编译包，
+# 这一格是在**真的 Node 26 上装一遍**——元数据扫描查不出"有没有预编译包"，只有真装才知道。
 #
-# 不跑 Current（27）：它几个月后就会被顶掉，而 better-sqlite3 是原生模块，
-# 新线上未必有预编译包，编不出来的红跟这个仓库没关系。真正要防的"新版本弃用旧写法"
-# 那类问题，靠的是 spawnShell.test.ts 那种扫源码的断言，不是靠多跑一个 runner。
+# 不跑 Current（27）：它几个月后就会被顶掉，而原生模块在新线上未必有预编译包，
+# 编不出来的红跟这个仓库没关系。真正要防的"新版本弃用旧写法"那类问题，靠的是
+# spawnShell.test.ts 那种扫源码的断言，不是靠多跑一个 runner。
 #
 # ── 没做什么 ──
 #
-# 不装 uv、不跑 Python 边车：模型 1.2GB，而边车没有测试。
-# 逐音素评测那条路在单测里是打桩的，装了也测不到额外的东西。
+# Python 契约测试只装锁定依赖，不下载模型权重、不启动识别服务。
+# 音频预处理和 CTC 折叠使用合成输入，真实模型推理仍由实物冒烟覆盖。
 # `wav.real.test.ts` 要 ffmpeg 和 data/audio，CI 里两样都没有——它自己会跳过，
 # 那是写在文件头里的有意设计，不是漏跑。
 
@@ -51,11 +48,10 @@ jobs:
     strategy:
       fail-fast: false          # 一个平台红了，另一个的结果照样要看得到
       matrix:
+        # 只剩平台这一维：Node 固定 26（理由见文件头），nodeFloor.test.ts 盯着它。
         os: [ubuntu-latest, windows-latest]
-        # 头一项必须是 engines 声明的下限（nodeFloor.test.ts 盯着）。
-        node: ['24.15.0', '26']
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    name: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v7
@@ -71,7 +67,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 26
           cache: npm
 
       - run: npm ci
@@ -87,10 +83,14 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: uv lock --check --project asr-service
+      - name: Python 音频与 CTC 契约
+        env:
+          HF_HUB_OFFLINE: '1'
+        run: uv run --frozen --project asr-service python -m unittest discover -s asr-service -p test_main.py -v
 
   desktop-package:
     # 只做门禁，不上传产物：发布包由 release.yml 按 tag 重新构建。
-    # needs: test 先等 6 个测试矩阵跑完，红树不再白打一次几百 MB 的包。
+    # needs: test 先等两个平台的测试跑完，红树不再白打一次几百 MB 的包。
     needs: test
     runs-on: windows-latest
     steps:

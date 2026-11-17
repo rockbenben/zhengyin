@@ -26,7 +26,7 @@
     "url": "https://github.com/rockbenben/zhengyin/issues"
   },
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=26.0.0"
   },
   "allowScripts": {
     "better-sqlite3@12.11.1": true,
@@ -46,6 +46,7 @@
     "dev": "concurrently -n server,web,asr -c cyan,green,magenta \"node scripts/dev-server.mjs\" \"npm run dev -w web\" \"npm run --silent asr\"",
     "build": "npm run build -w web && npm run build -w server",
     "start": "node server/dist/index.js",
+    "pretest": "node scripts/check-node.mjs",
     "test": "npm run typecheck && vitest run",
     "fetch-model": "node scripts/fetch-model.mjs",
     "preasr": "node scripts/check-uv.mjs",

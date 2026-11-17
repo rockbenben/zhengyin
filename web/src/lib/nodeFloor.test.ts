@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * `engines.node` 声明的下限，必须**每个依赖都真的允许**。
+ * `engines.node` 声明的下限，必须**每个依赖都真的允许**，而且 CI 和本机都跑在这条线上。
  *
  * 升个依赖就可能把下限顶上去，而本机毫无感觉（开发机版本高，一切正常）。
  * 踩过一次：engines 写着 `>=22.12`，当时的 jsdom 和 react-router 早就要 22.22 了，
@@ -15,8 +15,15 @@ import { join } from 'node:path';
  * 只查直接依赖，间接的由 npm 自己警告。
  *
  * **这个文件查不出的那一类**：依赖声明允许某个 Node，却不为它发预编译二进制。
- * better-sqlite3 12.9.0 就是（它没有 Node 26 的 ABI 147 预编译包），所以本仓
- * 现在钉 12.11.1；那种只有 CI 里真装一遍才看得见。
+ * better-sqlite3 13.x 就是（engines 写 `>=22`、声明上允许 26，却没有可用的预编译
+ * 资产），所以本仓现在钉 12.11.1；那种只有 CI 里真装一遍才看得见。
+ *
+ * **下限现在是 26.0.0**：26 是当前 LTS，也是桌面版随包 node.exe 的版本
+ * （`desktop/vendor/`），打包 job 同样用 26。以前这里是 24.15、CI 跑 24.15 + 26
+ * 两条线；并成一条是因为 better-sqlite3 的 ABI 按 Node 大版本走——本机一份
+ * `node_modules` 只装得出一版原生二进制，测试和打桌面包来回切 Node，忘了重编的
+ * 那一侧几百条用例会一起红在 `NODE_MODULE_VERSION` 上。代价是 Node 24 不再支持，
+ * preinstall 会拦下并提示升级。
  */
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -43,11 +50,16 @@ function satisfies(version: string, range: string): boolean {
   });
 }
 
-describe('engines.node 声明的下限，每个依赖都得允许', () => {
-  const root = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-  const declared: string | undefined = root.engines?.node;
-  const floor = declared?.replace(/^>=\s*/, '') ?? '';
+/** `26` 这种大版本写法补成 `26.0.0`：CI 和 `.nvmrc` 都允许只写大版本 */
+function normalize(version: string): string {
+  return /^\d+$/.test(version) ? `${version}.0.0` : version;
+}
 
+const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const declared: string | undefined = pkg.engines?.node;
+const floor = declared?.replace(/^>=\s*/, '') ?? '';
+
+describe('engines.node 声明的下限，每个依赖都得允许', () => {
   it('前提：根 package.json 真的声明了下限，而且带到小版本', () => {
     expect(declared, 'package.json 没有 engines.node —— 这条守卫失去意义').toBeTruthy();
     expect(floor, '下限要精确到 x.y.z——实测过 22.12 装得上却跑不了').toMatch(/^\d+\.\d+\.\d+$/);
@@ -74,18 +86,19 @@ describe('engines.node 声明的下限，每个依赖都得允许', () => {
 
     expect(checked, '一个声明了 engines 的依赖都没查到，这条断言是空的').toBeGreaterThan(3);
     expect(blockers, `这些依赖不允许 Node ${floor}。要么把它们降回去，`
-      + `要么把 engines.node / README / 启动提示 / CI 矩阵四处一起往上抬——`
+      + `要么把 engines.node / README / 启动提示 / CI 四处一起往上抬——`
       + `**并且在真的那个版本上跑一遍**，声明对了不等于跑得起来：\n  ${blockers.join('\n  ')}`)
       .toEqual([]);
   });
 
   // ── better-sqlite3 必须钉在 12.11.x ──
   //
-  // **上面那条 engines 扫描看不见这个问题。** 12.9.0 的 engines 只写到 25.x，
-  // 也没有 Node 26（ABI 147）的预编译包；12.11.1 同时有 24（137）和 26（147）
-  // 的 win32-x64 预编译包。13.x 目前没有可用的 GitHub 预编译资产，不能放成 ^。
+  // **上面那条 engines 扫描只管声明，查不出有没有预编译包。** 12.9.0 的 engines
+  // 只写到 25.x（下限抬到 26 之后，它光凭声明就不合格）；12.11.1 有 26（147）的
+  // win32-x64 预编译包。13.x 的 engines 是 `>=22`——声明上允许 26，却没有可用的
+  // GitHub 预编译资产，不能放成 ^。
   //
-  // 唯一真正查得出来的是 CI 里真的在 Node 24.15 和 Node 26 上各装一遍。
+  // 唯一真正查得出来的，是 CI 里真的在 Node 26 上装一遍。
   it('better-sqlite3 钉在 12.11.x，不能放成 ^', () => {
     const spec: string = JSON.parse(
       readFileSync(join(ROOT, 'server', 'package.json'), 'utf8'),
@@ -101,32 +114,60 @@ describe('engines.node 声明的下限，每个依赖都得允许', () => {
   // better-sqlite3 找不到预编译二进制 → 转 node-gyp 现场编译 → 在没有 MSVC 的机器上
   // 倒在一屏英文里，而那屏东西跟"版本不对"看不出任何关系。
   // 双击启动的人只会读成"坏了"。
-  it('preinstall 上挂着版本检查——npm 的 EBADENGINE 只警告不拦', () => {
-    expect(root.scripts?.preinstall, 'preinstall 没了，Node 太老的人会撞进 node-gyp 那屏英文')
+  //
+  // 同一道闸也挂在 pretest 上：preinstall 只管装依赖那一次，测试可能在换过 Node
+  // 之后才跑——那正是 ABI 不匹配最常见的撞法。
+  it('preinstall 和 pretest 都挂着版本检查——npm 的 EBADENGINE 只警告不拦', () => {
+    expect(pkg.scripts?.preinstall, 'preinstall 没了，Node 太老的人会撞进 node-gyp 那屏英文')
+      .toContain('check-node');
+    expect(pkg.scripts?.pretest, 'pretest 没了，换过 Node 之后 npm test 会红成几百条 NODE_MODULE_VERSION')
       .toContain('check-node');
     expect(existsSync(join(ROOT, 'scripts', 'check-node.mjs'))).toBe(true);
   });
 
   it('版本比较是逐段的，不是字符串比', async () => {
     const { meetsFloor } = await import('../../../scripts/check-node.mjs');
-    // 这一条是全部理由：字符串比 '24.9.0' >= '24.15.0' 为 true，24.9 会被放行
-    expect('24.9.0' >= '24.15.0', '前提变了：字符串比不再出错，这条用例可以撤').toBe(true);
-    expect(meetsFloor('24.9.0', '>=24.15.0'), '24.9 < 24.15，逐段比才看得出').toBe(false);
+    // 这一条是全部理由：字符串比 '26.9.0' >= '26.15.0' 为 true，26.9 会被放行
+    expect('26.9.0' >= '26.15.0', '前提变了：字符串比不再出错，这条用例可以撤').toBe(true);
+    expect(meetsFloor('26.9.0', '>=26.15.0'), '26.9 < 26.15，逐段比才看得出').toBe(false);
 
-    for (const v of ['20.20.2', '22.30.0', '24.14.9']) {
-      expect(meetsFloor(v, '>=24.15.0'), `${v} 该被拦下`).toBe(false);
+    for (const v of ['20.20.2', '24.15.0', '25.9.9']) {
+      expect(meetsFloor(v, '>=26.0.0'), `${v} 该被拦下`).toBe(false);
     }
-    for (const v of ['24.15.0', '24.22.1', '26.12.1']) {
-      expect(meetsFloor(v, '>=24.15.0'), `${v} 该放行`).toBe(true);
+    for (const v of ['26.0.0', '26.12.1', '27.0.0']) {
+      expect(meetsFloor(v, '>=26.0.0'), `${v} 该放行`).toBe(true);
     }
     // 看不懂的区间就放行——拦错人比不拦更糟
     expect(meetsFloor('18.0.0', '^22 || >=24')).toBe(true);
   });
+});
 
-  it('CI 矩阵里跑的就是这个下限，不是另一个数', () => {
-    const ci = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
-    expect(ci, 'CI 里没有 node 矩阵了，这条可以撤').toMatch(/node:\s*\[/);
-    expect(ci, `CI 矩阵没跑 engines 声明的下限 ${floor}——那个数就没人验`)
-      .toContain(`'${floor}'`);
+/**
+ * 下面两条守的是同一件事：本机与 CI 别跑在曲线外。
+ *
+ * 它们查的是**声明**，不是运行时——`npm test` 真跑在哪个 Node 上由 `pretest`
+ * 那道闸负责（见上）。这里管的是"文件里写的版本别各说各的"。
+ */
+describe('CI 和本机的版本管理器都跑在声明的下限上', () => {
+  it('CI 里出现的每个 node-version 都不低于下限', () => {
+    const files = ['.github/workflows/ci.yml', '.github/workflows/release.yml'];
+    const versions = files.flatMap((f) => {
+      const text = readFileSync(join(ROOT, f), 'utf8');
+      return [...text.matchAll(/node-version:\s*['"]?([0-9][0-9.]*)/g)].map((m) => m[1]);
+    });
+    expect(versions.length, 'CI 里没有 node-version 了，这条可以撤').toBeGreaterThan(0);
+
+    const tooOld = versions.filter((v) => !satisfies(normalize(v), declared ?? ''));
+    expect(tooOld, `CI 里有低于 engines 下限 ${floor} 的 Node：${tooOld.join('、')}——`
+      + '原生模块一份 node_modules 只装得出一版，要么别跑那条线，要么把下限一起抬')
+      .toEqual([]);
+  });
+
+  it('.nvmrc 钉的大版本也不低于下限', () => {
+    const nvmrc = readFileSync(join(ROOT, '.nvmrc'), 'utf8').trim();
+    expect(nvmrc, '.nvmrc 空了，fnm / nvm 会退回机器上的默认 Node').toMatch(/^\d+(\.\d+){0,2}$/);
+    expect(satisfies(normalize(nvmrc), declared ?? ''),
+      `.nvmrc 写着 ${nvmrc}，低于下限 ${floor}——本机装出来的 better-sqlite3 `
+      + '会和跑测试的 Node 差一个 ABI').toBe(true);
   });
 });
