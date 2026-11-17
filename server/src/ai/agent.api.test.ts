@@ -159,6 +159,67 @@ it('preserves concurrent profile edits and rejects the entire proposed batch', a
   expect(existsSync(join(deps.localNotes, 'lesson.md'))).toBe(false);
 });
 
+it('undo restores only AI-edited sections and preserves concurrent and later edits', async () => {
+  const deps = fixture();
+  const edit = (from: string, to: string) =>
+    writeFileSync(deps.profileFile, readFileSync(deps.profileFile, 'utf8').replace(from, to));
+  const runner = new AgentRunner(deps, { runText: async () => {
+    edit('保留设定', '人工同期编辑');
+    return { text: plan([], { confirmed: '模型确认', watching: '模型观察' }), provider: 'fixture' };
+  } });
+  await runner.run('profile');
+  expect(runner.status().state).toBe('done');
+  edit('模型观察', '人工后续编辑');
+  runner.undo();
+  const result = readFileSync(deps.profileFile, 'utf8');
+  expect(result).toContain('人工同期编辑');
+  expect(result).toContain('人工后续编辑');
+  expect(result).toContain('原确认');
+  expect(result).not.toContain('模型确认');
+  expect(runner.status().noteWarnings).toContain('保留档案的后续编辑：待观察');
+});
+
+it('sends only parsed top-level Markdown notes and preserves other local files', async () => {
+  const deps = fixture();
+  const nested = join(deps.localNotes, 'drafts');
+  mkdirSync(nested);
+  const backup = join(deps.localNotes, 'old.bak');
+  writeFileSync(backup, 'BACKUP_SENTINEL');
+  writeFileSync(join(nested, 'draft.md'), 'DRAFT_SENTINEL');
+  writeFileSync(join(deps.localNotes, 'existing.md'),
+    '---\nid: existing\ntitle: 已有笔记\ntriggers: [phoneme:l]\nextra: METADATA_SENTINEL\n---\n' + note.body);
+  const runText = vi.fn(async () => ({ provider: 'fixture', text: plan([{ file: 'new.md', note }]) }));
+  const runner = new AgentRunner(deps, { runText });
+  await runner.run('organize');
+  expect(runner.status().state, runner.status().error ?? '').toBe('done');
+  const payload = JSON.stringify(runText.mock.calls);
+  expect(payload).toContain('existing.md');
+  expect(payload).not.toMatch(/old\.bak|draft\.md|BACKUP_SENTINEL|DRAFT_SENTINEL|METADATA_SENTINEL/);
+  expect(readFileSync(backup, 'utf8')).toBe('BACKUP_SENTINEL');
+  expect(readFileSync(join(nested, 'draft.md'), 'utf8')).toBe('DRAFT_SENTINEL');
+  expect(existsSync(join(deps.localNotes, 'new.md'))).toBe(true);
+});
+
+it('undo preserves duplicated manual sections and restores the other section and notes', async () => {
+  const deps = fixture();
+  const runner = new AgentRunner(deps, { runText: async () => ({
+    text: plan([{ file: 'lesson.md', note }], { confirmed: '模型确认', watching: '模型观察' }),
+    provider: 'fixture',
+  }) });
+  await runner.run('organize');
+  expect(runner.status().state).toBe('done');
+  const current = readFileSync(deps.profileFile, 'utf8');
+  writeFileSync(deps.profileFile, current.replace('## 待观察', '## 待观察\n用户补记\n\n## 待观察'));
+  runner.undo();
+  const restored = readFileSync(deps.profileFile, 'utf8');
+  expect(restored).toContain('原确认');
+  expect(restored).toContain('用户补记');
+  expect(restored).toContain('模型观察');
+  expect(existsSync(join(deps.localNotes, 'lesson.md'))).toBe(false);
+  expect(runner.status().state).toBe('undone');
+  expect(runner.status().noteWarnings).toContain('保留档案的后续编辑：待观察');
+});
+
 it('new notes cannot shadow an existing reference ID', async () => {
   const deps = fixture();
   const reference = join(deps.shippedNotes, 'reference.md');

@@ -22,8 +22,13 @@ function strings(v: unknown): string[] {
   return v.map(x => text(x, 120));
 }
 
-export function buildPlanMessages(before: Snapshot, store: NoteStore, workflows: string, task: string, user: string): AiMessage[] {
-  const context = JSON.stringify({ user, task, profile: before.profile, localNotes: before.notes,
+export function buildPlanMessages(before: Snapshot, store: NoteStore, staged: AgentSnapshotDeps, workflows: string, task: string, user: string): AiMessage[] {
+  const stagedNotes = new NoteStore([{ dir: staged.localNotes, source: 'local' }]);
+  stagedNotes.load();
+  const localNotes = Object.fromEntries(stagedNotes.all()
+    .filter(note => Object.hasOwn(before.notes, note.file))
+    .map(note => [note.file, serializeAiNote(note)]));
+  const context = JSON.stringify({ user, task, profile: before.profile, localNotes,
     references: store.all().filter(n => n.source !== 'local').map(n => ({ id: n.id, title: n.title,
       triggers: n.triggers, contrasts: n.contrasts, words: n.words, body: n.markdown })) });
   if (context.length > MAX_CHARS) throw new Error('整理资料超过 20 万字，请缩小本机笔记规模后重试；本次未发送资料。');

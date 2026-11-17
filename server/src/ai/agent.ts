@@ -11,7 +11,7 @@ import { openDb } from '../db.js';
 import { writeFileAtomic } from '../atomic.js';
 import { readAiSettings } from './settings.js';
 import { agentBoundaryError, killTree, resolveCliInvocation, runCliAgent } from './cli.js';
-import { prepareAgentWorkspace, commitAgentWorkspace } from './staging.js';
+import { prepareAgentWorkspace, commitAgentWorkspace, undoProfileSections, type ProfileChange } from './staging.js';
 import { buildAgentPrompt } from './context.js';
 import { aiStatus, runAiText } from './run.js';
 import { buildPlanMessages, stagePlan } from './plan.js';
@@ -47,7 +47,7 @@ export interface Snapshot {
   profile: string | null;
   /** 本机笔记：目录内相对路径（POSIX 分隔）→ 内容 */
   notes: Record<string, string>;
-  /** data/ 的基线（除 audio/models/asr/ai-runs/ai-workspace）：相对路径 → 内容 hash。只用于越界检测 */
+  /** data/ 的基线（排除缓存和运行记录）：相对路径 → 内容 hash。只用于越界检测 */
   data: Record<string, string>;
 }
 
@@ -211,7 +211,7 @@ const safeRel = (rel: string): boolean =>
   && rel.split('/').every((p) => p && p !== '.' && p !== '..');
 
 /**
- * 用快照恢复档案和本机笔记。
+ * 用快照恢复本机笔记，按提交记录恢复档案小节。注入的旧测试入口仍走档案快照。
  *
  * `snapshot` 是运行前的状态，`after` 是这次整理提交后的状态：只有两者不同的文件才算
  * 整理动过，也才可能回滚。运行结束之后又被改过的文件不覆盖——保留后来的编辑，
@@ -224,7 +224,7 @@ const safeRel = (rel: string): boolean =>
  * 档案路径仍然要校验在 appRoot 内、笔记相对路径不许带 `..`；写回**快照里那个用户**
  * 的位置，不是「现在切到的用户」——切了人再撤销，也不该把旧内容盖到新用户的档案上。
  */
-function restoreFromSnapshot(snapshot: Snapshot, after: Snapshot, deps: AgentSnapshotDeps): string[] {
+function restoreFromSnapshot(snapshot: Snapshot, after: Snapshot, deps: AgentSnapshotDeps, profileChanges: ProfileChange[] | null): string[] {
   const conflicts: string[] = [];
   const profilePath = resolve(deps.appRoot, snapshot.profileRel);
   const rel = relative(deps.appRoot, profilePath);
@@ -246,9 +246,11 @@ function restoreFromSnapshot(snapshot: Snapshot, after: Snapshot, deps: AgentSna
       writeFileAtomic(p, snapshot.notes[noteRel]);
     }
   }
-  if (current.profile !== after.profile) conflicts.push('保留档案的后续编辑');
-  if (current.profile === after.profile && snapshot.profile !== after.profile) {
-    if (snapshot.profile === null) {
+  if (profileChanges !== null) {
+    conflicts.push(...undoProfileSections(profilePath, profileChanges));
+  } else if (snapshot.profile !== after.profile) {
+    if (current.profile !== after.profile) conflicts.push('保留档案的后续编辑');
+    else if (snapshot.profile === null) {
       if (existsSync(profilePath)) unlinkSync(profilePath);
     } else {
       mkdirSync(dirname(profilePath), { recursive: true });
@@ -311,6 +313,7 @@ export class AgentRunner implements AgentController {
   private counter = 0;
   private lastSnapshot: Snapshot | null = null;
   private lastAfter: Snapshot | null = null;
+  private lastProfileChanges: ProfileChange[] = [];
   private lastDb: Database.Database | null = null;
   private apiAbort: AbortController | null = null;
 
@@ -362,7 +365,6 @@ export class AgentRunner implements AgentController {
     this.lastDb = db;
     let before: Snapshot | null = null;
     const submittedNotes = new Set<string>();
-    let submittedProfile = false;
 
     try {
       const settings = readAiSettings(this.deps.dataDir);
@@ -384,6 +386,7 @@ export class AgentRunner implements AgentController {
       writeFileAtomic(join(runDir, 'snapshot.json'), `${JSON.stringify(before, null, 2)}\n`);
       this.lastSnapshot = before;
       this.lastAfter = null;
+      this.lastProfileChanges = [];
       this.state.runId = runId;
 
       this.log('正在准备整理工作副本');
@@ -401,7 +404,7 @@ export class AgentRunner implements AgentController {
         const staged = prepareAgentWorkspace(join(runDir, 'workspace'), deps, this.deps.shippedNotes, this.deps.workflowsDir, settings.mode === 'cli');
         let r: AgentRunResult;
         if (settings.mode === 'api') {
-          const messages = buildPlanMessages(before!, this.deps.noteStore, this.deps.workflowsDir, taskText, userName);
+          const messages = buildPlanMessages(before!, this.deps.noteStore, staged, this.deps.workflowsDir, taskText, userName);
           const reservedIds = new Set(this.deps.noteStore.all().map(n => n.id));
           this.apiAbort = new AbortController();
           if (this.cancelRequested) this.apiAbort.abort();
@@ -418,9 +421,8 @@ export class AgentRunner implements AgentController {
         }
         if (r.code === 0 && !this.cancelRequested) {
           if (this.deps.db !== db || this.deps.profileFile !== deps.profileFile) throw new Error('整理期间用户已切换，本次改动未保存。');
-          commitAgentWorkspace(staged, deps, before!, name => {
-            if (name === null) submittedProfile = true;
-            else submittedNotes.add(name);
+          commitAgentWorkspace(staged, deps, before!, name => submittedNotes.add(name), changes => {
+            this.lastProfileChanges = changes;
           });
         }
         return r;
@@ -447,12 +449,11 @@ export class AgentRunner implements AgentController {
       // reconcile 会改 index.db、syncProfile 会改档案，晚一步就会把它们当成代理改的。
       this.state.outOfScope = this.detectOutOfScope(deps, before);
       const postWarnings = this.opts.runAgent || (result.code === 0 && !this.cancelRequested)
-        || submittedNotes.size > 0 || submittedProfile ? this.postProcess(deps, db) : [];
+        || submittedNotes.size > 0 || this.lastProfileChanges.length > 0 ? this.postProcess(deps, db) : [];
       const after = snapshotAllowed(deps);
       this.lastAfter = this.opts.runAgent ? after : {
         ...before,
         notes: { ...before.notes },
-        profile: submittedProfile ? after.profile : before.profile,
       };
       if (!this.opts.runAgent) for (const name of submittedNotes) {
         if (after.notes[name] === undefined) delete this.lastAfter.notes[name];
@@ -483,7 +484,7 @@ export class AgentRunner implements AgentController {
       if (before) {
         try {
           const after = snapshotAllowed(deps);
-          this.lastAfter = this.opts.runAgent ? after : { ...before, notes: { ...before.notes }, profile: submittedProfile ? after.profile : before.profile };
+          this.lastAfter = this.opts.runAgent ? after : { ...before, notes: { ...before.notes } };
           if (!this.opts.runAgent) for (const name of submittedNotes) {
             if (after.notes[name] === undefined) delete this.lastAfter.notes[name];
             else this.lastAfter.notes[name] = after.notes[name];
@@ -524,7 +525,7 @@ export class AgentRunner implements AgentController {
       dataDir: this.deps.dataDir,
       localNotes: this.deps.localNotes,
       profileFile: profilePath,
-    });
+    }, this.opts.runAgent ? null : this.lastProfileChanges);
 
     try {
       this.deps.noteStore.load();
