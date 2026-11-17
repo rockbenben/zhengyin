@@ -1,9 +1,11 @@
 // 起音素识别边车。**`npm run asr` 走这里，而不是直接调 uv。**
 //
-// 多这一层只为一件事：把 `.env` 合并进环境再 spawn uv。
-// 边车是 concurrently 拉起的**兄弟进程**，而 `dotenv/config` 只在 server 那个进程里
-// import——不经过这一层，`.env` 里的 MODEL_SOURCE / HF_ENDPOINT 根本传不进去，
-// 而双击启动的人没有别的地方能设它们。
+// 多这一层先是为了把 `.env` 合并进环境再 spawn uv；它还钉死两个不能被 `.env`
+// 覆盖的管道变量（见下面的说明），并在认出连接类失败时补一段中文。
+// 开发模式下边车是 concurrently 拉起的**兄弟进程**，而 `dotenv/config` 只在 server
+// 那个进程里 import——不经过这一层，`.env` 里的 MODEL_SOURCE / HF_ENDPOINT 根本
+// 传不进去。服务自己拉起边车时**不走这里**：它先读 appRoot 下的 `.env`，再把这两个
+// 值放进子进程环境（server/src/index.ts、server/src/audio/asrCommand.ts）。
 //
 
 import { spawn } from 'node:child_process';
@@ -40,8 +42,8 @@ export function parseEnv(text, already = {}) {
 /**
  * 这段输出像不像「模型下不下来」。
  *
- * 界面上那条「等了一分半还没起来」明确让人**回来看这个终端**，而这里原本只有
- * 一段英文 Python traceback——对一个中文母语、不写代码的使用者，那是死路。
+ * 开发模式下边车由 `npm run asr` 单独拉起，原始输出只落在这个终端里；而这里原本
+ * 只有一段英文 Python traceback——对中文母语的使用者，那是死路。
  *
  * **宁可漏报也不要误报**：正常启动时 HF 会打一句
  * 「Warning: You are sending unauthenticated requests to the HF Hub…」，
@@ -57,15 +59,17 @@ export function downloadHelp(endpoint) {
     '',
     '── 模型没下下来 ─────────────────────────────',
     '',
-    `逐音素评测要先下一个约 1.2GB 的模型，这次没连上：${endpoint || 'https://huggingface.co（默认）'}`,
+    `逐音素评测要先下一个约 1.2GB 的模型，这次没连上。默认先走 ModelScope，`
+      + `不通再回落到：${endpoint || 'https://huggingface.co'}`,
     '',
     '别的功能都不受影响——查词、真人发音、录音、A/B 对比、复习照常用，',
     '只有"你第几个音发成了什么"这一项要等它。',
     '',
     '可以试的两条：',
     '  1. 换个源。在正音这个文件夹里的 .env 里加一行，然后重新启动：',
-    '       HF_ENDPOINT=https://hf-mirror.com',
-    '     （想换回官方就把这行删掉。实测两边速度都不稳、哪个快每次都不一样，',
+    '       MODEL_SOURCE=hf                     （跳过 ModelScope，直接走 HuggingFace）',
+    '       HF_ENDPOINT=https://hf-mirror.com   （HuggingFace 走镜像；换回官方就删掉这行）',
+    '     （实测两边速度都不稳、哪个快每次都不一样，',
     '       所以这是个开关，不是"镜像一定更快"）',
     '  2. 网络本身不通的话，先把网络解决了再启动——下过一次就有缓存，不用再下。',
     '',
@@ -95,7 +99,7 @@ function main() {
   };
 
   // 命令整串传，别写成 ('uv', [...])——理由见 web/src/lib/spawnShell.test.ts。
-  // 这里每个词都是写死的字面量、没空格，拼一串不用管引号；带空格的 cwd 是单独传的。
+  // 除了 ASR_PORT 那个数字，每个词都是写死的字面量、没空格；带空格的 cwd 是单独传的。
   // 端口由 ASR_PORT 决定：npm start 的服务自己拉起边车时用动态端口，这一层只在
   // 开发模式（ASR_AUTOSTART=0）或手工单跑时用，默认仍是 30032。
   const port = process.env.ASR_PORT || 30032;

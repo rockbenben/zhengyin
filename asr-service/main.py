@@ -7,7 +7,9 @@
 跟 vosk 的根本区别：这个模型没有词表约束。它不会把你的音往真词上靠——你把 /n/ 发成
 /l/，它就写 /l/。这正是"什么都说对"的解药。
 
-启动：npm run asr（仓库根），或 uv run --project asr-service uvicorn main:app --port 30032
+启动：npm run asr（仓库根），或 uv run --project asr-service uvicorn main:app
+--app-dir asr-service --port 30032（这条也在仓库根跑；漏了 --app-dir 的话
+uvicorn 在仓库根找不到 main.py）。
 """
 
 import io
@@ -31,17 +33,17 @@ PAD_MS = 100
 # 上限挡住手滑传上来的长音频：这是练单词/短语的工具，十几秒足够，
 # 再长只会让一次请求卡住整个服务（模型是单实例，没有并发队列）。
 MAX_SECONDS = 30
+MAX_BYTES = 16 * 1024 * 1024
 
 # **必须自己配一次 handler**：只 getLogger 拿到的 logger 在 uvicorn 下一行都打不出来
 # （uvicorn 只给自己那几个 logger 配 handler，root 上没有，这个 logger 就没处输出）。
 # 一直如此，原来那句「模型已加载」从来没人见过。现在要紧了：模型从哪儿来、
-# 是不是正在下 1.2GB，恰恰是启动窗口里最该看见的东西——界面上那条
-# 「回来看终端」指的就是这里。
+# 是不是正在下 1.2GB，恰恰是状态条里最该看见的东西——页面上的日志就是这个进程的。
 #
 # **level 给 WARNING，只把自己这个 logger 抬到 INFO。** 原来这里是
 # `basicConfig(level=INFO)`——那是给 **root** 设的，于是每个第三方库的 INFO 一起开闸：
 # httpx 每发一个请求打一行 `HTTP Request: HEAD https://huggingface.co/...`，
-# 缓存命中的启动也有三十来行英文 URL，把本该只有三句中文的窗口整个淹掉。
+# 缓存命中的启动也有三十来行英文 URL，把本该只有三句中文的日志整个淹掉。
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 log = logging.getLogger("asr-service")
@@ -53,7 +55,8 @@ _state: dict = {}
 
 # 从哪儿取模型。`.env` 里写 MODEL_SOURCE=hf 或 modelscope 可以钉死；
 # 不写就按 resolve_model() 里的顺序自己挑。
-# （`.env` 能管到这个进程，是因为 npm run asr 走 scripts/asr.mjs 那层包装。）
+# （服务自己拉起边车时由 server 把 .env 里的这两个值传进子进程；手工单跑
+# `npm run asr` 时才经过 scripts/asr.mjs 那层包装。）
 MODEL_SOURCE = os.environ.get("MODEL_SOURCE", "").strip().lower()
 
 
@@ -113,10 +116,9 @@ def resolve_model() -> str:
     else:
         # ── 这句必须有 ──
         #
-        # 界面上那条「等了一分半还没连上」明确让人**回来看这个窗口**，说
-        # 「里面有一行 [asr] 开头的说明——首次启动多半是还在下模型」。
-        # 而在这句之前，第一次启动的人在这儿看到的只有一串英文进度条：
-        # 浏览器**承诺了一段说明，窗口里却没有**。
+        # 页面上的状态条这时只摆「正在启动」和最近几行日志，分不清「在下模型」和
+        # 「本地已有缓存」；这句中文就是那个分界。在这句之前，第一次启动的人在这里
+        # 看到的只有一串英文进度条。
         #
         # 措辞上说"获取"不说"下载"：MODEL_SOURCE=modelscope 时它可能命中
         # ModelScope 自己的缓存，那时一个字节都不会下，说"开始下载"就是假话。
@@ -162,7 +164,16 @@ def load_model() -> None:
     log.info("模型已加载：%s（来源 %s）", MODEL, src if src != MODEL else "HuggingFace")
 
 
+class AudioTooLong(ValueError):
+    pass
+
+
 def to_mono_16k(raw: bytes) -> np.ndarray:
+    info = sf.info(io.BytesIO(raw))
+    if info.duration > MAX_SECONDS:
+        raise AudioTooLong(f"音频超过 {MAX_SECONDS}s")
+    if info.channels > 8 or info.samplerate > 384000:
+        raise ValueError("音频超过支持的声道或采样率")
     data, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
     mono = data.mean(axis=1)
     if sr != SAMPLE_RATE:
@@ -185,12 +196,21 @@ async def recognize(request: Request) -> dict:
     if "model" not in _state:
         raise HTTPException(503, "模型还在加载")
 
-    raw = await request.body()
+    chunks = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_BYTES:
+            raise HTTPException(413, "音频文件超过 16MB")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     if not raw:
         raise HTTPException(400, "请求体是空的")
 
     try:
         audio = to_mono_16k(raw)
+    except AudioTooLong as e:
+        raise HTTPException(413, str(e)) from e
     except Exception as e:  # soundfile 对坏音频抛的异常类型不止一种，一律当成坏输入
         raise HTTPException(400, f"这段音频解不开：{e}") from e
 
