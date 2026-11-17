@@ -23,7 +23,7 @@ review-state.json.*
 
 # 发音档案。里面是这台机器的统计（每次评测后重写），发出去的话新用户读到的是
 # 别人的数据——而 AGENTS.md 让 AI「每次纠音前先读这里」。
-# 进版本库的是 发音档案.template.md，第一次启动时照它铺一份（server/src/index.ts）。
+# 进版本库的是 发音档案.template.md，第一次启动时照它铺一份（server/src/users.ts）。
 发音档案.md
 
 # API key。样板见 .env.example
@@ -33,7 +33,9 @@ review-state.json.*
 .decisions/
 .claude/
 .superpowers/
-# AI 整理代理每次运行前铺的只读参考副本（随附笔记与提示词的拷贝）
+# AI 整理的只读参考副本（随附笔记与提示词的拷贝）。生产里只有命令行模式铺在
+# data/ai-runs/<runId>/workspace/.ai-reference（随 data/ 一起被忽略）；接口模式直接拼进消息。
+# 这一条兜底的是测试注入时铺在仓库根的那份，正常跑不会出现。
 .ai-reference/
 web/design-preview/
 *.bak
@@ -44,5 +46,3 @@ web/design-preview/
 desktop/vendor/
 desktop/release/
 desktop/release-zip/
-# 浏览器模式下 APP_ROOT 就是仓库根，代理的参考副本会落在这里。
-.ai-reference/

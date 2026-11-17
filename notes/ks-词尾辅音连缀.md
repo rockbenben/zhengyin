@@ -24,10 +24,10 @@ triggers: [cluster-coda:ks, cluster-coda:sk, cluster-coda:st, cluster-coda:ts, c
 |---|---|---|
 | box / six / fix / detox | /bɑks/ /sɪks/ /fɪks/ /ˈdiˌtɑks/ | **/ks/** |
 | desk / ask / risk | /dɛsk/ /æsk/ /rɪsk/ | **/sk/** |
-| best / last / cost | /bɛst/ /læst/ /kɔst/ | **/st/** |
+| best / last / cost | /bɛst/ /læst/ /kɑst/ | **/st/** |
 | next / text | /nɛkst/ /tɛkst/ | **/kst/**（三个辅音） |
 
-**这些词全都只有 1 个音节。** 数音节是最快的自检——念出两个、三个音节就是踩坑了。
+**这些词里只有 detox 是两个音节（DEE-toks），其余都只有 1 个。** 数音节是最快的自检——比这个词本来的拍数多，就是踩坑了。
 
 ## 常见误区
 

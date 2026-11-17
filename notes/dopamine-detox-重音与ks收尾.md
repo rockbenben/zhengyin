@@ -32,7 +32,7 @@ words: [dopamine detox, dopamine, detox]
 **detox —— 两个坑**
 
 4. **词尾 `-ks` 中间加元音**：念成「dee-tock-**si**」，两个音节变三个。跟 [kl 辅音连缀](kl-click-辅音连缀.md) 是同一个毛病，只是位置不同：那篇讲词首的 /kl/，这里是**词尾的 /ks/**。
-5. **重音跑到后面**：念成 de-**TOX**。名词 detox 重音在**前**（DEE-toks）。动词 detoxify 才是 /dɪˈtɑksɪfaɪ/、重音在后。
+5. **重音跑到后面**：念成 de-**TOX**。名词 detox 重音在**前**（DEE-toks）。动词 detoxify 是 /dɪˈtɑksəˌfaɪ/，主重音在第二个音节。
 
 ## 发音原理
 
