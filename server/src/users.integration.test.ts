@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, type AppDeps } from './app.js';
 import { UserManager } from './users.js';
+import { getEntry, upsertEntry } from './db.js';
+import { analyzeText } from './service.js';
 import { testDeps } from './app.test.js';
 
 function realDeps(): { deps: AppDeps; um: UserManager } {
@@ -88,4 +90,54 @@ it('rejects an old review session after switching away and back', async () => {
   const response = await app.request('/api/review/cat', {method:'POST',headers:{'content-type':'application/json','x-user-session':queue.session},body:JSON.stringify({grade:'remembered'})});
   expect(response.status).toBe(409);
   um.current().db.close();
+});
+
+it('does not import a backup into a user switched during body reading', async () => {
+  const { deps, um } = realDeps();
+  try {
+    um.create('乙');
+    const app = createApp(deps);
+    let upload!: ReadableStreamDefaultController<Uint8Array>;
+    const init = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      duplex: 'half',
+      body: new ReadableStream<Uint8Array>({ start(controller) { upload = controller; } }),
+    };
+    const importing = app.request('/api/backup', init);
+    um.switchTo('乙');
+    const at = '2026-01-01';
+    upload.enqueue(new TextEncoder().encode(JSON.stringify({
+      version: 1, exportedAt: at, attempts: [],
+      entries: [{ text: 'cat', words: analyzeText('cat'), createdAt: at, updatedAt: at }],
+    })));
+    upload.close();
+    expect((await importing).status).toBe(409);
+    expect(getEntry(um.current().db, 'cat')).toBeNull();
+  } finally {
+    um.current().db.close();
+  }
+});
+
+it('rejects stale delete, recording and backup requests before reaching the new user', async () => {
+  const { deps, um } = realDeps();
+  try {
+    const app = createApp(deps);
+    const session = (await app.request('/api/user')).headers.get('x-user-session')!;
+    expect(session).toBeTruthy();
+    um.create('乙');
+    um.switchTo('乙');
+    upsertEntry(um.current().db, 'cat', analyzeText('cat'), '2026-01-01');
+    for (const [path, method] of [
+      ['/api/entries/cat', 'DELETE'],
+      ['/api/pronounce?target=cat', 'POST'],
+      ['/api/backup', 'POST'],
+    ]) {
+      const response = await app.request(path, { method, headers: { 'x-user-session': session } });
+      expect(response.status).toBe(409);
+    }
+    expect(getEntry(um.current().db, 'cat')).not.toBeNull();
+  } finally {
+    um.current().db.close();
+  }
 });

@@ -24,6 +24,22 @@ function offline(cause: unknown): OfflineError {
   return e;
 }
 
+// 页面第一次读到的会话一直用到刷新，避免旧标签页把操作提交给新用户。
+let pageSession: string | undefined;
+
+function rememberSession(response: Response): void {
+  const session = response.ok ? response.headers.get('x-user-session') : null;
+  if (!session) return;
+  if (pageSession && session !== pageSession) {
+    throw Object.assign(new Error('用户已切换，请刷新页面后重试'), { status: 409 });
+  }
+  pageSession = session;
+}
+
+function sessionHeaders(session = pageSession): Record<string, string> {
+  return session ? { 'x-user-session': session } : {};
+}
+
 async function j<R>(res: Promise<Response>): Promise<R> {
   let r: Response;
   try {
@@ -38,6 +54,7 @@ async function j<R>(res: Promise<Response>): Promise<R> {
     throw error;
   }
   if (!r.ok) throw new Error(`API ${r.status}`);
+  rememberSession(r);
   return r.json();
 }
 
@@ -57,6 +74,7 @@ async function jx<R>(res: Promise<Response>): Promise<R> {
     const msg = body && typeof body === 'object' && 'error' in body ? String((body as { error: unknown }).error) : `API ${r.status}`;
     throw new Error(msg);
   }
+  rememberSession(r);
   return body as R;
 }
 
@@ -74,7 +92,7 @@ export const api = {
 
   addEntry: async (text: string) => {
     const response = await fetch('/api/entries', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...sessionHeaders() }, body: JSON.stringify({ text }),
     }).catch(e => { throw offline(e); });
     if (response.status === 403) {
       remoteReadOnly = true;
@@ -105,6 +123,7 @@ export const api = {
   },
   deleteEntry: (text: string) => j<{ ok: boolean }>(fetch(`/api/entries/${encodeURIComponent(text)}`, {
     method: 'DELETE',
+    headers: sessionHeaders(),
   })),
 
   listNotes: () => j<{ groups: T.NoteGroups }>(fetch('/api/notes')),
@@ -115,12 +134,12 @@ export const api = {
     fetch('/api/review/due'),
   ),
   star: (text: string, on: boolean) => jx<{ starred: boolean }>(
-    fetch(`/api/review/${encodeURIComponent(text)}/star`, { method: on ? 'PUT' : 'DELETE' }),
+    fetch(`/api/review/${encodeURIComponent(text)}/star`, { method: on ? 'PUT' : 'DELETE', headers: sessionHeaders() }),
   ),
   reviewGrade: (text: string, grade: T.Grade, session?: string) => j<T.GradeResult>(fetch(`/api/review/${encodeURIComponent(text)}`, {
     method: 'POST',
     body: JSON.stringify({ grade }),
-    headers: { 'content-type': 'application/json', ...(session ? { 'x-user-session': session } : {}) },
+    headers: { 'content-type': 'application/json', ...sessionHeaders(session) },
   })),
 
   // 这是 vosk 降级那一条路：浏览器自己识别出文本，这里只把 heard 和 target 交给服务端做
@@ -179,7 +198,7 @@ export const api = {
     if (Number.isFinite(snrDb)) q.set('snr', String(snrDb));
     const r = await fetch(`/api/pronounce?${q}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
+      headers: { 'Content-Type': 'application/octet-stream', ...sessionHeaders() },
       body: wav,
     });
     const body: unknown = await r.json().catch(() => null);
@@ -194,7 +213,7 @@ export const api = {
   exportBackup: () => j<{ exportedAt: string } & Record<string, unknown>>(fetch('/api/backup')),
   importBackup: (data: unknown) => jx<{ added: number; skipped: number; cards: number }>(
     fetch('/api/backup', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+      method: 'POST', headers: { 'content-type': 'application/json', ...sessionHeaders() }, body: JSON.stringify(data),
     }),
   ),
 

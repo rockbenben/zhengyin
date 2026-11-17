@@ -277,23 +277,30 @@ async function referenceBaseline(
 export function createApp(deps: AppDeps) {
   const app = new Hono<{ Variables: { requestDb: Database.Database } }>();
   const sessions = new WeakMap<Database.Database, string>();
-  const sessionId = () => {
-    const db = deps.db;
+  const sessionId = (db = deps.db) => {
     if (!sessions.has(db)) sessions.set(db, randomUUID());
     return sessions.get(db)!;
   };
   app.use('*', writeGuard());
-  app.use('/api/pronounce', bodyLimit({ maxSize: 16 * 1024 * 1024, onError: c => c.json({ error: '音频文件超过 16MB' }, 413) }));
   // Bind each request to the database opened at its start. A switch closes that handle.
   app.use('/api/*', async (c, next) => {
     const db = deps.db;
+    const session = c.req.header('x-user-session');
+    if (session && session !== sessionId(db)) {
+      return c.json({ error: '用户已切换，请刷新页面后重试' }, 409);
+    }
     if (c.req.method === 'POST' && c.req.path === '/api/user'
         && deps.agent.status().state === 'running') {
       return c.json({ error: '整理正在运行，请等它结束再切换用户' }, 409);
     }
     c.set('requestDb', db);
+    if (c.req.method === 'GET' && !/^\/api\/(audio|model)\//.test(c.req.path)) {
+      c.header('x-user-session', sessionId(db));
+      c.header('Cache-Control', 'no-store');
+    }
     await next();
   });
+  app.use('/api/pronounce', bodyLimit({ maxSize: 16 * 1024 * 1024, onError: c => c.json({ error: '音频文件超过 16MB' }, 413) }));
   const sessionValid = (c: { get(key: 'requestDb'): Database.Database }) => c.get('requestDb') === deps.db;
 
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
@@ -859,8 +866,6 @@ export function createApp(deps: AppDeps) {
   });
 
   app.post('/api/review/:text', async (c) => {
-    const session = c.req.header('x-user-session');
-    if (session && session !== sessionId()) return c.json({ error: '用户已切换，请刷新复习队列' }, 409);
     let body: { grade?: unknown };
     try {
       body = await c.req.json<{ grade?: unknown }>();
@@ -1171,6 +1176,7 @@ export function createApp(deps: AppDeps) {
         && (e.targetIpa === null || typeof e.targetIpa === 'string')
         && (e.heardIpa === null || typeof e.heardIpa === 'string')));
     if (!validEntries || !validAttempts) return c.json({ error: '备份里的词条或录音格式不完整，本机数据未改动' }, 400);
+    if (!sessionValid(c)) return c.json({ error: '用户已切换，请确认当前用户后重新导入' }, 409);
     const r = store.importBackup(deps.db, b as store.Backup);
     // 备份里的词条带着**对面那台机器**算出来的推导结果（音素、音节、标签）。
     // 两边版本不一样时导进来的就是按对面的规则算的，而本机的重算原先只在启动时跑一次——

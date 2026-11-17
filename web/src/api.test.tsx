@@ -92,3 +92,20 @@ describe('复习权限与会话原因', () => {
     await expect(api.reviewGrade('thin', 'remembered')).rejects.toThrow('API 404');
   });
 });
+
+it('旧页面的写操作始终使用最初打开的用户会话', async () => {
+  const { api: pageApi } = await import('./api');
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response('{}', { headers: { 'x-user-session': 'first' } }))
+    .mockResolvedValueOnce(new Response('{}', { headers: { 'x-user-session': 'second' } }))
+    .mockImplementation(async () => new Response('{}'));
+  vi.stubGlobal('fetch', fetch);
+  await pageApi.user();
+  await expect(pageApi.listEntries()).rejects.toMatchObject({ status: 409 });
+  await pageApi.deleteEntry('cat');
+  await pageApi.importBackup({});
+  await pageApi.pronounce('cat', new Blob());
+  for (const [, init] of fetch.mock.calls.slice(2)) {
+    expect(new Headers(init.headers).get('x-user-session')).toBe('first');
+  }
+});
