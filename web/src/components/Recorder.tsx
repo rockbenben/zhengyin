@@ -136,6 +136,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   // 结束后若直接 setListened，就会把上一段录音的判定盖到新录音上——显示的音素结论
   // 跟你刚念的那一遍对不上，而且看不出哪里不对。每次录音/评测都 +1，只认最新一代。
   const listenSeq = useRef(0);
+  const mounted = useRef(false);
   // 说完自动停的检测器。必须能取消并释放——它自己开了一个 AudioContext，
   // 不关会一直占着音频资源（组件卸载、手动停止、连点重录都要清）。
   const endpointer = useRef<Endpointer | null>(null);
@@ -257,12 +258,18 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
     }
   }
 
-  useEffect(() => () => {
-    endpointer.current?.stop();
-    endpointer.current = null;
-    stopAb();
-    if (refWav.current) URL.revokeObjectURL(refWav.current.url);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      listenSeq.current++;
+      rec.current = null;
+      endpointer.current?.stop();
+      endpointer.current = null;
+      stopAb();
+      if (refWav.current) URL.revokeObjectURL(refWav.current.url);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
   // 参考音也要剪掉前后静音，否则 A/B 里"我的录音 → 参考音"之间会被它自带的空白撑开
@@ -320,6 +327,10 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
           noiseSuppression: getPreference(NS_KEY) !== 'off',
         },
       });
+      if (!mounted.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       setMicError(null);
       streamRef.current = stream;
       chunks.current = [];

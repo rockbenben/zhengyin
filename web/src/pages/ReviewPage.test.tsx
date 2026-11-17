@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { STATS_CHANGED } from '../lib/events';
 import type { AlignOp, PronounceResult } from '../types';
@@ -27,6 +27,9 @@ const stub = vi.hoisted(() => ({
   graded: [] as Array<{ text: string; grade: string }>,
   result: null as PronounceResult | null,
   starred: false,
+  secondCard: false,
+  delayResult: false,
+  deliver: undefined as (() => void) | undefined,
   dueError: null as (Error & { status: number }) | null,
   detailError: null as (Error & { status: number }) | null,
   gradeError: null as (Error & { status: number }) | null,
@@ -40,7 +43,10 @@ vi.mock('../api', () => ({
   isOffline: () => false,
   api: {
     reviewDue: () => stub.dueError ? Promise.reject(stub.dueError) : Promise.resolve({
-      cards: stub.empty ? [] : [{ text: 'thin', rung: 0, due: '2026-08-01', starred: stub.starred }],
+      cards: stub.empty ? [] : [
+        { text: 'thin', rung: 0, due: '2026-08-01', starred: stub.starred },
+        ...(stub.secondCard ? [{ text: 'cat', rung: 0, due: '2026-08-01', starred: false }] : []),
+      ],
       upcoming: stub.upcoming,
     }),
     getEntry: (t: string) => stub.detailError ? Promise.reject(stub.detailError) : Promise.resolve({
@@ -58,7 +64,11 @@ vi.mock('../api', () => ({
 // 真 Recorder 要麦克风和识别服务。换成一个按钮，点一下就把预设的判定结果交上去。
 vi.mock('../components/Recorder', () => ({
   default: ({ onResult }: { onResult: (r: PronounceResult) => void }) => (
-    <button type="button" onClick={() => onResult(stub.result!)}>录音替身</button>
+    <button type="button" onClick={() => {
+      const result = stub.result!;
+      if (stub.delayResult) stub.deliver = () => onResult(result);
+      else onResult(result);
+    }}>录音替身</button>
   ),
 }));
 // 不渲染成 null：下面要断言「标准音在录音前就摆着」，得看得见它
@@ -90,8 +100,28 @@ const UNSURE: PronounceResult = {
 
 beforeEach(() => {
   stub.graded = []; stub.result = null; stub.starred = false;
+  stub.secondCard = false; stub.delayResult = false; stub.deliver = undefined;
   stub.dueError = null; stub.gradeError = null; stub.detailError = null;
   stub.empty = false; stub.upcoming = { count: 0, next: null };
+});
+
+it('跳过卡片后忽略该卡迟到的评测，新卡仍可正常评分', async () => {
+  stub.secondCard = true;
+  stub.delayResult = true;
+  stub.result = WRONG;
+  const view = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+  fireEvent.click(await view.findByText('录音替身'));
+  fireEvent.click(view.getByText('跳过这张'));
+  await view.findByText('cat');
+  const recorder = await view.findByText('录音替身');
+  act(() => stub.deliver?.());
+  expect(view.queryByText('下一个')).toBeNull();
+  expect(stub.graded).toEqual([]);
+  stub.delayResult = false;
+  stub.result = ALL_OK;
+  fireEvent.click(recorder);
+  fireEvent.click(await view.findByText('下一个'));
+  await waitFor(() => expect(stub.graded).toEqual([{ text: 'cat', grade: 'remembered' }]));
 });
 
 async function drawAndRecord(result: PronounceResult) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
 import { Link } from 'react-router';
 import { Button, Space, Spin, message } from 'antd';
@@ -94,12 +94,18 @@ export default function ReviewPage() {
   }, []);
 
   const card = queue?.[0];
+  const activeCard = useRef(card);
+  useLayoutEffect(() => {
+    activeCard.current = card;
+    return () => { activeCard.current = undefined; };
+  }, [card]);
 
   // 队列必须永远能往前推：卡片对应的词条如果已经被删了，取详情和评分都会一直 404，
   // 重试没有意义——只能丢掉这张、往后走，不能让人卡在一张连内容都取不到的卡上。
   const isNotFound = (e: unknown) => e instanceof Error && e.message === 'API 404';
 
   const advance = useCallback(() => {
+    activeCard.current = undefined;
     setQueue((q) => (q ? q.slice(1) : q));
     setDetail(null);
     setJudged(null);
@@ -330,11 +336,16 @@ export default function ReviewPage() {
             style={{ borderTop: '1px solid var(--rule)', paddingTop: 22 }}
           >
             <Recorder
+              key={detail.text}
               target={detail.text}
               entry={detail.text}
               hint="brief"     /* 复习一次要过七八张卡，操作说明只留一句 */
               referenceUrl={detail.phraseAudio?.url ?? detail.audio[0]?.url ?? null}
-              onResult={(r) => { setJudged(r); setTried(true); }}
+              onResult={(r) => {
+                if (activeCard.current !== card || detail.text !== card.text) return;
+                setJudged(r);
+                setTried(true);
+              }}
             />
             {/* 服务状态贴着录音区，不劈开「先听再录」的动线 */}
             <AsrStatus />
