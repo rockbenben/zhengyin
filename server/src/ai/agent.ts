@@ -95,7 +95,7 @@ const relTo = (root: string, p: string): string => posix(relative(root, p));
 const joinRel = (a: string, b: string): string => (a ? `${a.replace(/\/+$/, '')}/${b}` : b);
 const sha1 = (buf: Buffer): string => createHash('sha1').update(buf).digest('hex');
 
-const EXCLUDED_TOP = new Set(['audio', 'models', 'asr', 'ai-runs', 'ai-workspace']);
+const EXCLUDED_TOP = new Set(['audio', 'models', 'asr', 'ai-runs', 'ai-workspace', 'stop-control']);
 const MAX_LOGS = 500;
 
 function walkFiles(root: string, rel = ''): string[] {

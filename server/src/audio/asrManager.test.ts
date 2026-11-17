@@ -3,12 +3,21 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { AsrManager } from './asrManager.js';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 function fakeChild() {
-  const c = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: () => void };
+  const c = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter; stderr: EventEmitter; pid: number; exitCode: number | null; signalCode: NodeJS.Signals | null;
+  };
   c.stdout = new EventEmitter();
   c.stderr = new EventEmitter();
   c.pid = 4242;
-  c.kill = vi.fn();
+  c.exitCode = null;
+  c.signalCode = null;
   return c;
 }
 
@@ -28,6 +37,37 @@ const base = () => ({
 });
 
 describe('AsrManager', () => {
+  it('shares a single restart while the port is being selected', async () => {
+    const port = deferred<number>();
+    const o = { ...base(), pickPort: vi.fn(() => port.promise) };
+    const m = new AsrManager(o);
+    const first = m.restart();
+    const second = m.restart();
+    expect(o.pickPort).toHaveBeenCalledOnce();
+    port.resolve(30123);
+    await Promise.all([first, second]);
+    expect(o.spawn).toHaveBeenCalledOnce();
+    m.stop();
+    expect(o.killTree).toHaveBeenCalledExactlyOnceWith(4242);
+  });
+
+  it('discards port and health results from a stopped generation', async () => {
+    const port = deferred<number>();
+    const health = deferred<Response>();
+    const o = { ...base(), pickPort: vi.fn(() => port.promise), fetch: vi.fn(() => health.promise) };
+    const m = new AsrManager(o);
+    const starting = m.start();
+    m.stop();
+    port.resolve(30123);
+    await starting;
+    expect(o.spawn).not.toHaveBeenCalled();
+    await m.restart();
+    expect(o.spawn).toHaveBeenCalledOnce();
+    m.stop();
+    health.resolve(Response.json({ ok: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(m.status().state).toBe('off');
+  });
   it('autostart 关掉 → off，不 spawn', async () => {
     const o = { ...base(), autostart: false };
     const m = new AsrManager(o);

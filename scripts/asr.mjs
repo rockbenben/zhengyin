@@ -12,6 +12,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { registerStopControl } from '../server/src/stopControl.ts';
+import { stopChildTree } from '../server/src/processTree.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -106,7 +108,7 @@ function main() {
   const child = spawn(
     'uv run --project asr-service uvicorn main:app'
     + ` --app-dir asr-service --host 127.0.0.1 --port ${port}`,
-    { cwd: root, env, stdio: ['ignore', 'inherit', 'pipe'], shell: true },
+    { cwd: root, env, stdio: ['ignore', 'inherit', 'pipe'], shell: true, detached: process.platform !== 'win32' },
   );
 
   // 原始报错照样往下透，不吞——补的那段只是加在后面
@@ -119,6 +121,17 @@ function main() {
     process.stderr.write(downloadHelp(env.HF_ENDPOINT));
   });
 
+  const stop = () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) stopChildTree(child.pid);
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  process.once('SIGHUP', stop);
+  try {
+    process.on('exit', registerStopControl(stop));
+  } catch (error) {
+    console.warn(`[stop] 无法登记识别服务，请用启动窗口停止：${error.message}`);
+  }
   child.on('exit', (code) => process.exit(code ?? 0));
   child.on('error', (e) => {
     process.stderr.write(`起不了 uv：${e.message}\n`);

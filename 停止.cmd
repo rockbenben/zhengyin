@@ -2,36 +2,21 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-REM --------------------------------------------------------------------
-REM  Stop the server. Same two rules as the start launcher next to this
-REM  file: CRLF only, ASCII only -- including comments. The Chinese
-REM  lives in scripts\msg\*.txt and is printed with `type`, which never
-REM  goes through the batch parser.
-REM
-REM  Find the processes BY PORT, not by name: killing every node.exe
-REM  would take the user's editor and other dev servers with it.
-REM --------------------------------------------------------------------
-
+REM Keep this file ASCII and CRLF. Messages live in scripts\msg.
 type scripts\msg\stop-banner.txt
 
-set FOUND=0
-for %%P in (30031 30032) do (
-  for /f "tokens=5" %%I in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
-    echo   port %%P  ^-^-^>  killing PID %%I
-    REM /T also kills the children (server -> asr -> uv -> python).
-REM Desktop build: close its window. The ports below belong to browser mode;
-REM the desktop app picks its own ports and stops everything when it exits.
-    taskkill /F /T /PID %%I >nul 2>nul
-    set FOUND=1
-  )
+where node >nul 2>nul
+if errorlevel 1 (
+  type scripts\msg\no-node.txt
+  pause >nul
+  exit /b 1
 )
 
-echo.
-if "%FOUND%"=="0" (
-  type scripts\msg\stop-none.txt
-) else (
-  type scripts\msg\stop-done.txt
-)
-
+node scripts\stop.mjs
+set "STOP_STATUS=%ERRORLEVEL%"
+if "%STOP_STATUS%"=="0" type scripts\msg\stop-done.txt
+if "%STOP_STATUS%"=="2" type scripts\msg\stop-none.txt
 type scripts\msg\stop-bye.txt
 pause >nul
+if "%STOP_STATUS%"=="2" exit /b 0
+exit /b %STOP_STATUS%

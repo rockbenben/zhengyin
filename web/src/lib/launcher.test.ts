@@ -36,6 +36,10 @@ const MSG_DIR = join(root, 'scripts', 'msg');
 
 const raw = (p: string) => readFileSync(join(root, p));
 
+it.each(['停止.cmd', '停止.command', '停止.sh'])('%s 委托同一份停止逻辑', (f) => {
+  expect(raw(f).toString('utf8')).toMatch(/node scripts[\\/]stop\.mjs/);
+});
+
 describe('Windows 启动器的两条硬规则', () => {
   it.each(CMD)('%s 只能是 ASCII——多字节字符会被 cmd.exe 按块劈开', (f) => {
     const bad = [...raw(f)].filter((b) => b > 127);

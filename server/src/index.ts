@@ -21,6 +21,7 @@ import { syncProfile } from './profile.js';
 import { reanalyzeEntries } from './reanalyze.js';
 import { reconcileAttempts } from './reconcile.js';
 import { acquireDataLock, DataLockBusyError } from './lock.js';
+import { registerStopControl } from './stopControl.js';
 import { missingFromTable, missingHowTo } from './analysis/articulation.js';
 import { CSP } from './csp.js';
 import { AgentRunner } from './ai/agent.js';
@@ -156,9 +157,11 @@ const asr = new AsrManager({
   probeUv: () => probeUv(runtime.uvPath),
 });
 
+const stop = () => process.exit(0);
 process.on('exit', () => { asr.stop(); lock.release(); });
-process.on('SIGINT', () => { asr.stop(); lock.release(); process.exit(0); });
-process.on('SIGTERM', () => { asr.stop(); lock.release(); process.exit(0); });
+process.on('SIGINT', stop);
+process.on('SIGTERM', stop);
+process.on('SIGHUP', stop);
 
 /**
  * 把评测统计同步进发音档案。
@@ -286,6 +289,13 @@ async function alreadyOurs(): Promise<boolean> {
 // 包 try/catch 抓不到它，进程会以未捕获异常收场（这段会话里就这么崩过一次）。
 // 必须挂在返回的 server 上。
 const server = serve({ fetch: app.fetch, port, hostname: runtime.host }, () => {
+  if (!runtime.desktop) {
+    try {
+      process.on('exit', registerStopControl(stop));
+    } catch (error) {
+      console.warn(`[stop] 无法登记服务，请用启动窗口停止：${(error as Error).message}`);
+    }
+  }
   console.log(`正音 ${url}`);
   // 服务真在听之后再起边车：端口被别的程序占着时不该白起一个 Python。
   if (runtime.asrAutostart) void asr.start();

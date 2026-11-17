@@ -169,7 +169,7 @@ export default function SettingsPage() {
                 <Typography.Text className="measure">
                   <strong>关闭</strong>：把启动时弹出的那个黑窗口<strong>关掉</strong>就全停了。
                   {'窗口找不着了的话，双击正音文件夹里的 停止.cmd（macOS 是 .command，Linux 是 .sh）——'}
-                  {'它按端口找进程，不会误杀别的程序。'}
+                  {'它根据当前文件夹的运行记录停止正音，自定义端口也能用。'}
                 </Typography.Text>
                 {/* 这里引的是**另一个界面上的原话**，而那种引用会烂：上一版引的是
                     「TO STOP: just close this window」——那句英文早在启动器改说中文、

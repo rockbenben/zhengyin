@@ -1,4 +1,5 @@
-import { spawn as spawnChild, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { stopChildTree } from '../processTree.js';
 import { buildAsrCommand, uvVersionProblem } from './asrCommand.js';
 import { isPortListening, pickFreePort } from '../net.js';
 
@@ -44,6 +45,7 @@ export class AsrManager {
   private child: ChildProcess | null = null;
   private runId = 0;
   private stopping = false;
+  private restartInFlight: Promise<void> | null = null;
 
   constructor(private o: AsrManagerOptions) {}
 
@@ -70,6 +72,7 @@ export class AsrManager {
   }
 
   async start(): Promise<void> {
+    const id = ++this.runId;
     this.stopping = false;
     this.error = null;
     if (!this.o.autostart) { this.state = 'off'; return; }
@@ -91,18 +94,22 @@ export class AsrManager {
 
     // 显式端口：有人在听 → 先问一句是不是我们的边车。
     // 判据不能只看 /health 的 ok：模型加载期间端口可能在听、而 ok 还是 false。
-    if (explicit !== null && await listening(explicit, '127.0.0.1')) {
+    const occupied = explicit !== null && await listening(explicit, '127.0.0.1');
+    if (id !== this.runId) return;
+    if (occupied) {
       try {
         const r = await fetchFn(`http://127.0.0.1:${explicit}/health`, { signal: AbortSignal.timeout(1500) });
         const body = await r.json() as { ok?: unknown };
+        if (id !== this.runId) return;
         if (typeof body.ok === 'boolean') {
           this.portNo = explicit;
           this.state = 'starting';
           this.startedAt = (this.o.now ?? Date.now)();
-          void this.waitReady(explicit, ++this.runId);
+          void this.waitReady(explicit, id);
           return;
         }
       } catch { /* 不是我们的服务，落到下面报错 */ }
+      if (id !== this.runId) return;
       this.state = 'error';
       this.error = `端口 ${explicit} 被别的程序占着。关掉它，或在 .env 里换一个 ASR_PORT。`;
       this.push(this.error);
@@ -110,6 +117,7 @@ export class AsrManager {
     }
 
     const port = explicit ?? await (this.o.pickPort ?? pickFreePort)();
+    if (id !== this.runId) return;
     this.portNo = port;
     this.startedAt = (this.o.now ?? Date.now)();
     const cmd = buildAsrCommand({
@@ -126,6 +134,7 @@ export class AsrManager {
         env: cmd.env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        detached: process.platform !== 'win32',
       });
     } catch (e) {
       this.state = 'error';
@@ -136,7 +145,6 @@ export class AsrManager {
 
     this.child = child;
     this.state = 'starting';
-    const id = ++this.runId;
     child.stdout?.on('data', (b: Buffer) => this.push(b.toString()));
     child.stderr?.on('data', (b: Buffer) => this.push(b.toString()));
     child.on('error', (e: NodeJS.ErrnoException) => {
@@ -163,6 +171,7 @@ export class AsrManager {
       try {
         const r = await fetchFn(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
         const body = await r.json() as { ok?: unknown };
+        if (id !== this.runId) return;
         if (body.ok === true) { this.state = 'ready'; return; }
       } catch { /* 还没起来，继续等 */ }
       await sleep(1000);
@@ -170,28 +179,25 @@ export class AsrManager {
   }
 
   stop(): void {
+    this.restartInFlight = null;
     if (this.stopping && this.child === null) { this.state = 'off'; return; }
     this.stopping = true;
     this.runId += 1;
-    const pid = this.child?.pid;
-    try { this.child?.kill(); } catch { /* 已经退了 */ }
-    if (pid) (this.o.killTree ?? defaultKillTree)(pid);
+    const child = this.child;
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      (this.o.killTree ?? stopChildTree)(child.pid);
+    }
     this.child = null;
     this.state = 'off';
   }
 
-  async restart(): Promise<void> {
+  restart(): Promise<void> {
+    if (this.restartInFlight) return this.restartInFlight;
     this.stop();
-    this.state = 'off';
-    await this.start();
+    const pending = this.start().finally(() => {
+      if (this.restartInFlight === pending) this.restartInFlight = null;
+    });
+    this.restartInFlight = pending;
+    return pending;
   }
-}
-
-export function defaultKillTree(pid: number): void {
-  if (process.platform === 'win32') {
-    // 同步执行，退出流程里没时间等 Promise
-    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-    return;
-  }
-  try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* 已退 */ } }
 }
