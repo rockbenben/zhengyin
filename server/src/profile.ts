@@ -160,7 +160,7 @@ export function worthANote(s: PhonemeStat): boolean {
   // 只留前一条的话会误伤真信号：/ɑ/→/æ/ 17 次全在 detox 一个词上，
   // 但 15 次整条只错这一个音，是明明白白的真短板，却被"跨几个词"筛掉了。
   // 而 /d/→/t/ 那批同样只在一个词上，转写却是 ħ、t o x æ m i n——两者只有这一条分得开。
-  return s.words.length >= 2 || s.soloCount >= MIN_COUNT;
+  return s.targetCount >= 2 || s.soloCount >= MIN_COUNT;
 }
 
 export function renderBlock(db: Database.Database, notes: NoteStore, now: string): string {
@@ -221,7 +221,7 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
     lines.push('', '### 次数够、但暂时没推荐', '',
       '**次数大的不该无声消失**，所以连原因一起写在这里。判据要是错了，从这份名单最看得出来：', '');
     for (const s of loudButRejected) {
-      lines.push(`- ${describe(s)}（${s.count} 次）——只在 ${s.words.join('、')} 上出现过，`
+      lines.push(`- ${describe(s)}（${s.count} 次）——实际练习目标只有一个（词条：${s.words.join('、')}），`
         + '而且那几次的转写里还有别的错，更像是那次录音的问题');
     }
   }

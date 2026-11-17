@@ -1,5 +1,36 @@
 import { describe, it, expect } from 'vitest';
 import { heardByPosition, latestAttemptFor, logAttempt, openDb, upsertEntry, getEntry, listEntries, deleteEntry, addAudio, getAudio } from './db.js';
+import { noteEvidence, phonemeStats, putAttribution } from './db.js';
+import { severityOf, worthANote } from './profile.js';
+
+it('counts spoken targets across entry points and preserves entry links', () => {
+  const db = openDb(':memory:');
+  const record = (entryText: string, target: string) => {
+    const id = logAttempt(db, {
+      entryText, target, at: '2026-01-01', targetIpa: ['n', 't'], heardIpa: ['l', 'd'],
+      ops: [{ kind: 'sub', targetIpa: 'n', heardIpa: 'l' }, { kind: 'sub', targetIpa: 't', heardIpa: 'd' }],
+      clean: false,
+    });
+    putAttribution(db, id, ['note']);
+  };
+  const note = { triggers: ['phoneme:n'], words: [] };
+  const stat = () => phonemeStats(db).find(row => row.targetIpa === 'n')!;
+  try {
+    record('night', 'night');
+    record('night light', 'night');
+    record('night light', 'night');
+    expect(stat().words).toEqual(['night', 'night light']);
+    expect(stat().targetCount).toBe(1);
+    expect(worthANote(stat())).toBe(false);
+    expect(severityOf(noteEvidence(db).get('note'), note)).toBe('watch');
+    record('night light', 'light');
+    expect(stat().targetCount).toBe(2);
+    expect(worthANote(stat())).toBe(true);
+    expect(severityOf(noteEvidence(db).get('note'), note)).toBe('confirmed');
+  } finally {
+    db.close();
+  }
+});
 
 const words = [{
   word: 'click', found: true, arpabet: ['K', 'L', 'IH1', 'K'], ipa: 'ˈklɪk', tags: ['phoneme:l'],

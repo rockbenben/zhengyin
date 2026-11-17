@@ -292,7 +292,7 @@ export function putAttribution(db: Database.Database, attemptId: number, noteIds
  */
 export function noteEvidence(db: Database.Database): Map<string, { count: number; words: number }> {
   const rows = db.prepare(`
-    SELECT n.note_id AS id, COUNT(*) AS count, COUNT(DISTINCT a.entry_text) AS words
+    SELECT n.note_id AS id, COUNT(*) AS count, COUNT(DISTINCT a.target) AS words
     FROM attempt_note n JOIN attempt a ON a.id = n.attempt_id
     GROUP BY n.note_id
   `).all() as Array<{ id: string; count: number; words: number }>;
@@ -313,6 +313,8 @@ export interface PhonemeStat {
    * 这是「真短板」和「转写崩了」之间最硬的界线，比"跨了几个词"硬得多：
    * 模型不可能连续十几次在一条其余全对的转写里恰好错同一个位置。
    *   /ɑ/→/æ/ 17 次全在一个词上，但 15 次整条只错这一个音 → 真的
+  /** 实际念的目标数。words 保留词条入口，用于导航。 */
+  targetCount: number;
    *   /d/→/t/  6 次全在一个词上，而那几条转写整个是乱的   → 假的
    * 只看"跨几个词"的话，这两个长得一模一样。
    */
@@ -337,6 +339,7 @@ export function phonemeStats(db: Database.Database, limit = PHONEME_STATS_LIMIT)
     FROM attempt_error e JOIN attempt a ON a.id = e.attempt_id
     GROUP BY e.kind, e.target_ipa, e.heard_ipa
     ORDER BY count DESC, lastAt DESC
+           COUNT(DISTINCT a.target) AS targetCount,
     LIMIT ?
   `).all(limit) as Array<Omit<PhonemeStat, 'words'> & { words: string | null }>;
   return rows.map((r) => ({ ...r, words: (r.words ?? '').split(',').filter(Boolean).slice(0, 6) }));
@@ -364,6 +367,7 @@ export function errorsOnWord(db: Database.Database, entryText: string): PhonemeS
     WHERE a.entry_text = ?
     GROUP BY e.kind, e.target_ipa, e.heard_ipa
     ORDER BY count DESC, lastAt DESC
+           COUNT(DISTINCT a.target) AS targetCount,
   `).all(entryText) as Array<Omit<PhonemeStat, 'words'>>;
   return rows.map((r) => ({ ...r, words: [entryText] }));
 }
