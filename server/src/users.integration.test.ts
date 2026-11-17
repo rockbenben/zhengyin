@@ -78,3 +78,14 @@ describe('多用户集成', () => {
     um.current().db.close();
   });
 });
+
+it('rejects an old review session after switching away and back', async () => {
+  const {deps, um} = realDeps();
+  const app = createApp(deps);
+  const queue = await (await app.request('/api/review/due')).json();
+  const original = um.current().name;
+  um.create('乙'); um.switchTo('乙'); um.switchTo(original);
+  const response = await app.request('/api/review/cat', {method:'POST',headers:{'content-type':'application/json','x-user-session':queue.session},body:JSON.stringify({grade:'remembered'})});
+  expect(response.status).toBe(409);
+  um.current().db.close();
+});

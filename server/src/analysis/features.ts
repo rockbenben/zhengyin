@@ -1,3 +1,5 @@
+import { tokenize, lookupWord } from './lookup.js';
+import { syllabify } from './syllables.js';
 import type { Phone } from './phones.js';
 import type { Syllable } from './syllables.js';
 import { isVoicedObstruent } from './articulation.js';
@@ -74,4 +76,12 @@ export function extractTags(phones: Phone[], syllables: Syllable[]): string[] {
     for (const t of p.tags) tags.add(t);
   }
   return [...tags];
+}
+
+/** Preserve word boundaries while constructing target-position labels for phrases. */
+export function phrasePhoneTags(target: string) {
+  return tokenize(target).flatMap(word => {
+    const phones = lookupWord(word);
+    return phones ? attributeTags(phones, syllabify(phones)) : [];
+  });
 }

@@ -113,7 +113,7 @@ export default function DrillPhoneme({ ipa, words }: { ipa: string; words: Examp
           {entry && (
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                念「{picked}」，念完看这个词的音素条里 {ipa} 那一格对没对。
+                念「{picked}」，念完看评测结果里 {ipa} 那一处对没对。
               </Typography.Text>
               {/* 短语按第一个词录（Recorder 本来就是逐词的）；entry 传整条，
                   这样流水和复习卡记在真实词条上，不会落到裸词上打不开 */}

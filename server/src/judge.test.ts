@@ -5,7 +5,7 @@ import type { Note } from './notes.js';
 
 /**
  * 判定这一段原来整个长在 `/api/pronounce` 那个 274 行的路由处理器里，
- * 只能靠 HTTP 测：app.test.ts 里 63 处 `/api/pronounce`，每条都要打桩边车、
+ * 只能靠 HTTP 测：app.test.ts 里 69 处 `/api/pronounce`，每条都要打桩边车、
  * 造 wav 字节、起一个 app。抽出来之后这里直接喂输入看输出。
  *
  * 抽出来才发现的账：`renameHeard` 和 `bestExplainers` 在此之前
@@ -136,7 +136,7 @@ describe('judge：听到那一侧要换回模型的实际输出', () => {
 /**
  * ── bestExplainers：替换错要两边都覆盖到 ──
  *
- * 只沾上一个就算的话，`n→ŋ` 会被只讲 /n/ 的 l-vs-n 冒领——而那篇一个字没提后鼻音，
+ * 只沾上一个就算的话，`n→ŋ` 会被 l-vs-n 冒领——而那篇一个字没提后鼻音，
  * 于是真问题从「该补的笔记」里消失了（实测出现 9 次）。
  */
 describe('judge：这处错谁教得了', () => {

@@ -311,9 +311,10 @@ describe('ReviewStore', () => {
   //
   // **时钟必须冻住。** 备份名是 `.corrupt-<Date.now()>`，两次损坏落进同一毫秒就会同名，
   // 而 copyFileSync 覆盖写——第二份把第一份盖掉，这条断言就该红。原来不冻时钟，
-  // 两次调用之间隔多久全看机器：本机慢，一直是绿的；CI 上只有 ubuntu × node 24
-  // 那一格够快，撞进同一毫秒才红了一次。**一条只在最快的机器上才生效的断言，
-  // 等于把这个 bug 放跑了。** 冻住之后碰撞必然发生，哪台机器都拦得住。
+  // 两次调用之间隔多久全看机器：本机慢，一直是绿的；当年 CI 上只有最快的
+  // ubuntu × node 24 那一格撞进过同一毫秒（矩阵现在是 Node 26 的两格，快慢看 runner）。
+  // **一条只在最快的机器上才生效的断言，等于把这个 bug 放跑了。**
+  // 冻住之后碰撞必然发生，哪台机器都拦得住。
   it('backs up again when the file is corrupted a second time in the same process', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rv-'));
     const file = join(dir, 'review-state.json');
@@ -411,7 +412,7 @@ describe('ReviewStore', () => {
     try {
       expect(storeWith([1, 2, 3]).due('2026-12-31')).toEqual([]);
       // 这条告警是"整份复习进度被丢弃"的唯一信号，必须钉住——只 mock 掉不断言的话，
-      // 把 sanitize 里的顶层 warn 删掉测试照样绿。
+      // 把构造函数里的那两句 warn 删掉测试照样绿。
       const msgs = warn.mock.calls.map((c) => String(c[0]));
       expect(msgs.some((m) => m.includes('不是合法 JSON 对象'))).toBe(true);
       expect(msgs.some((m) => m.includes('已备份到'))).toBe(true);

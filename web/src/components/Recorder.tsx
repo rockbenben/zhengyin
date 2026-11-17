@@ -19,7 +19,7 @@ import Verdicts from './Verdicts';
 import { checkModelAvailability, contrastAll, type ModelAvailability, type ContrastVerdict } from '../lib/asr';
 
 interface Props {
-  /** 这次录音要比对的目标词（单词，不是整句短语） */
+  /** 这次录音要比对的目标文本：单词页是那个词，复习页是整张卡（可能是短语） */
   target: string;
   /**
    * 这个词所属的词条。短语页逐词录音时 target 是其中一个词，而那个词本身可能不是词条——
@@ -58,9 +58,10 @@ const insecureOrigin = typeof window !== 'undefined' && window.isSecureContext =
 /** 边车没就绪时每隔多久再问一次 */
 const POLL_MS = 2000;
 /**
- * 问多久之后放弃、改口说"没启动"。
+ * 问多久之后放弃轮询。
  * 模型冷启动实测十几秒；首次要下 1.2GB，那种情况下更久，但那一次终端里有下载进度可看。
- * 90 秒够覆盖正常的冷启动，又不至于让真的没装 uv 的人一直等一个不会来的东西。
+ * 90 秒够覆盖正常的冷启动。**「没起来」这句话不归这里说**——AsrStatus 按服务端状态
+ * 报进度，还带着日志和重启按钮，比这里再喊一句「没启动」有用。
  */
 const GIVE_UP_MS = 90_000;
 
@@ -68,7 +69,7 @@ const GIVE_UP_MS = 90_000;
 export const NS_KEY = 'pron:noise-suppression';
 
 // 信噪比低于这个数就提示。20dB 是个宽松的界：安静房间里对着麦克风说话通常在 30dB 以上，
-// 20dB 以下basically 是"背景里一直有东西在响"。
+// 20dB 以下基本上就是「背景里一直有东西在响」。
 const LOW_SNR_DB = 20;
 
 /**
@@ -114,9 +115,10 @@ type Listened =
   | { engine: 'phoneme'; result: PronounceResult }
   | { engine: 'vosk'; verdicts: ContrastVerdict[]; diff: AsrResult | null; why: string };
 
-// 录音 + A/B 对比 + 本地评测。三件事互不依赖：录音/A对比全程只用浏览器原生能力，
-// 跟 ASR 模型装没装无关，模型缺失时依然可用；只有「评测」这一个按钮受模型可用性控制。
-// 用户的录音只留在浏览器内存/Blob URL 里，从不上传——上传给服务端的只有识别出的文本。
+// 录音 + A/B 对比 + 本地评测。录音和 A/B 对比只用浏览器原生能力，跟 ASR 模型装没装无关，
+// 模型缺失时依然可用；评测的主路径是本机边车，只有**降级到 vosk** 那条路才需要浏览器模型。
+// 录音只在**本机**走（浏览器 → 30031 → 识别边车），不落盘、不出这台机器；
+// 降级到 vosk 的那一路上传给服务端的只有文本。
 export default function Recorder({ target, entry, referenceUrl, onResult, hint = 'full' }: Props) {
   const rec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -158,12 +160,13 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   const [listened, setListened] = useState<Listened | null>(null);
   const [asrError, setAsrError] = useState<string | null>(null);
   /**
-     * 边车状态。**四档而不是三档：多出来的 'starting' 是必须的。**
+     * 边车状态。**五档（checking / starting / up / down / no-uv）而不是「起来没起来」两档：
+     * 多出来的 'starting' 是必须的。**
      *
      * 服务一绑上端口浏览器就自动打开了，而边车还要十几秒加载 1.2GB 模型。
      * 只在挂载时问一次的话，那一次必然落在没就绪的窗口里，然后「没启动」这条提示
      * 永远挂着直到手动刷新——而且它跟事实相反（它正在启动）。
-     * 所以没就绪就接着问，熬过 GIVE_UP_MS 才算真没起来。
+     * 所以没就绪就接着问，熬过 GIVE_UP_MS 再停止轮询。
      */
   const [sidecar, setSidecar] = useState<'checking' | 'starting' | 'up' | 'down' | 'no-uv'>('checking');
   /**
@@ -616,14 +619,14 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
             {'其它 http 地址一律不给麦克风——'}<strong>这不是浏览器不支持，是地址的限制</strong>。
             <br />
             在<strong>这台机器上</strong>用 <Typography.Text code copyable>{localAppUrl()}</Typography.Text>{' '}
-            打开就能录。查词、音素、笔记在当前这个地址下都正常，只有录音和评测用不了。
+            打开就能录。查词、音素、笔记在当前这个地址下都正常，录音和评测用不了。
           </Notice>
         ) : (
           <Alert type="warning" showIcon message="当前浏览器不支持录音，只能听参考音频" />
         )
       )}
 
-      {/* 边车状态的四条提示（正在启动 / 没装 uv / 等了一分半 / 备用模型检测失败）
+      {/* 边车状态的提示（正在启动 / 没装 uv / 没托管 / 出错 / 备用模型检测失败）
              搬去了 AsrStatus——那是这台机器的状态，不是每个音节的状态。
              词条页逐音节各摆一个 Recorder，原来同一份三行字会整份重复多遍。
              sidecar 这个 state 留着，只因为它还管着下面那行操作说明的出现时机。 */}
@@ -653,10 +656,6 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   );
 }
 
-// 音素级判定结果。每一行是一个音素位置上的二选一：把你的录音跟"只差这一个音"的词
-// 放进同一个语法逼识别器选，赢了说明这个音你拉开了，输了说明你把它发成了对面那个音。
-//
-// 「输了」才是这次改造真正想要的信号。旧版逐词单独判别时两边都通过，永远给不出这个结论。
 // 音素级结果。这是主路径的展示：逐个音素列出目标音 vs 实际听到的音，
 // 并且能区分「发成了别的音」「漏了这个音」「多发了一个音」三种错法。
 // 有没有把握由服务端在 op.sure 上给出（espeak.ts 的 CONFIDENT 是唯一门槛）。
@@ -731,11 +730,10 @@ export function PhonemeResult({ result, mwKey }: { result: PronounceResult; mwKe
              背景太吵时服务端照样给结果（你需要反馈），但不写进发音档案和复习队列。
              **必须说出来**：静悄悄地不计入比计入更糟——你会以为练过的都算数，
              而档案里根本没有这一次。判断在服务端，这里只负责显示它的结论。 */}
+      {result.persistenceWarning && <Notice tone="warn" label="部分更新失败" title={result.persistenceWarning} />}
       {!result.recorded && result.notRecordedReason && (
         <Notice tone="warn" label="这次没计入" title={result.notRecordedReason}>
-          结果照样给你看，但不会记进发音档案，也不会生成复习卡——
-          {'录音条件坏掉时模型的输出很不稳，那批数据记下来会变成"你的习惯性短板"，'}
-          {'而它记的其实是当时房间里的噪声。环境安静下来再录一次，这次就算数了。'}
+          先查看上面的原因。背景太吵时换到安静的地方重录；写入失败时检查数据文件夹权限或剩余空间。
         </Notice>
       )}
 

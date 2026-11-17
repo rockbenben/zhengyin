@@ -152,7 +152,7 @@ export default function PhonemePage() {
             {notes.length === 0 ? (
               <Typography.Text type="secondary" className="measure">
                 还没有。上面「怎么发」是这个音客观的发音方式，对所有人都一样；
-                {'笔记是'}<strong>你自己</strong>在这个音上的问题，带自检法和对比训练——
+                {'笔记记的是具体某个人在这个音上的问题，带自检法和对比训练（随附那几篇是上一个使用者练出来的）——'}
                 {'等你念到明显不对的时候，问一下 AI，它会写一篇。'}
               </Typography.Text>
             ) : (

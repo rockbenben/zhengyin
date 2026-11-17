@@ -1,6 +1,5 @@
 import type { Phone } from './analysis/phones.js';
-import { syllabify } from './analysis/syllables.js';
-import { attributeTags } from './analysis/features.js';
+import { phrasePhoneTags } from './analysis/features.js';
 import { alignPhonemes, renameTargets, renameHeard, type AlignOp } from './analysis/diff.js';
 import { collapseStress, CONFIDENT } from './analysis/espeak.js';
 import { bestExplainers } from './profile.js';
@@ -12,7 +11,7 @@ import type { Note } from './notes.js';
  * ── 为什么抽成一个纯函数 ──
  *
  * 这段逻辑原来整个长在 `/api/pronounce` 那个路由处理器里，那一个 handler 274 行。
- * 后果是它**只能靠 HTTP 测**：app.test.ts 里 63 处 `/api/pronounce`，每条都要
+ * 后果是它**只能靠 HTTP 测**：app.test.ts 里 69 处 `/api/pronounce`，每条都要
  * 打桩 recognizePhonemes、造 wav 字节、起一个 app。而中间这段本身是纯计算，
  * 给定输入就有确定输出。
  *
@@ -165,7 +164,7 @@ export function judge(args: {
   // 而解释它的那篇笔记不出现。词条页一直是对的，漏的只有"该怎么改"这一块。
   //
   // AlignOp 不带位置索引，按顺序推：match/sub/del 各消耗一个目标音，ins 不消耗。
-  const perPhone = attributeTags(phones, syllabify(phones));
+  const perPhone = phrasePhoneTags(target);
 
   // ── 逐处错单独匹配，**不能把所有错的标签拍平成一个池子** ──
   //

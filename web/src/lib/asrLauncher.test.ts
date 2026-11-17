@@ -9,15 +9,18 @@ import { parseEnv, LOOKS_LIKE_NETWORK_FAILURE, downloadHelp } from '../../../scr
  *
  * ── 为什么会有这个包装 ──
  *
- * `.env` 是这个应用的配置通道，可**边车读不到它**：`dotenv/config` 只在 server
- * 那个进程里 import，而边车是 concurrently 拉起的**兄弟进程**。实测过跑着的那个
- * python 进程的启动命令，里头没有任何东西注入 .env。
+ * `.env` 是这个应用的配置通道，可**单独跑起来的边车读不到它**：`dotenv/config` 只在
+ * server 那个进程里 import，而开发模式下边车是 concurrently 拉起的**兄弟进程**。
+ * 实测过跑着的那个 python 进程的启动命令，里头没有任何东西注入 .env。
  *
- * 后果：模型 1.2GB，从 HuggingFace 下；想换源（HF_ENDPOINT）只能开终端设环境变量，
- * 而「双击启动」这套方式存在的全部意义就是让人不必开终端。
+ * 服务托管边车时**不走这层包装**：server 自己读 appRoot 下的 `.env`，再把 MODEL_SOURCE /
+ * HF_ENDPOINT 放进子进程环境（server/src/index.ts、audio/asrCommand.ts）。包装管的是
+ * 开发模式（ASR_AUTOSTART=0 时的 `npm run asr`）和手工单跑——模型 1.2GB，默认从
+ * ModelScope 下，想换源只能改 `.env` 或设环境变量，不开终端就没法换。
  *
- * 默认**没有**换成镜像：按 Range 实测三轮，官方 2.11/0.74/2.58 MB/s、
- * 镜像 0.25/2.34/0.19 MB/s，波动远大于差距。所以给的是开关，不是新默认。
+ * 默认**没有**把 HF_ENDPOINT 换成镜像：按 Range 实测三轮，官方 2.11/0.74/2.58 MB/s、
+ * 镜像 0.25/2.34/0.19 MB/s，波动远大于差距。所以给的是开关，不是新默认——它只在
+ * 回落到 HuggingFace 那条路上用得上。
  */
 const root = join(import.meta.dirname, '..', '..', '..');
 

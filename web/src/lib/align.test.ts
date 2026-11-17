@@ -29,7 +29,7 @@ describe('杂音与真加塞元音要分开', () => {
   });
 
   it('对上的音不算杂音', () => {
-    // 只造服务端真能吐出来的状态：match 恒为 sure（见 app.ts 算 sure 那一段），
+    // 只造服务端真能吐出来的状态：match 恒为 sure（见 judge.ts 算 sure 那一段），
     // 所以不写 {match, sure:false} —— 那会教给读者一个服务端明确拒绝的不变量。
     expect(isNoise({ kind: 'match', targetIpa: 'k', heardIpa: 'k', conf: 0.3, sure: true })).toBe(false);
   });
@@ -108,4 +108,8 @@ describe('gradeOf', () => {
     expect(gradeOf(result([], [])).grade).toBeNull();   // heardIpa 为空
     expect(gradeOf(null).grade).toBeNull();             // 压根没测出来
   });
+});
+
+it('does not grade a recording excluded by the server', () => {
+  expect(gradeOf({ recorded:false, notRecordedReason:'太吵' } as Parameters<typeof gradeOf>[0]).grade).toBeNull();
 });

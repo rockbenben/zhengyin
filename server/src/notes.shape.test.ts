@@ -8,7 +8,7 @@ import { NoteStore, validateShape, type Note } from './notes.js';
  * ── 为什么值得一条校验 ──
  *
  * 笔记模板原来把六段并列，还写着「`notes/` 里现有两篇就是范例」。而那两篇
- * （kl-cluster、l-vs-n，都是 7-28 加进来的）恰恰是**唯一不照模板写的两篇**——
+ * （kl-cluster、l-vs-n，都是 7-28 加进来的）当时恰恰是**唯一不照模板写的两篇**——
  * kl-cluster 缺「自检法」和「对比训练」，后者更是一个 minimal pair 都没有。
  * **照着「看范例」做的人，产出的就是不合模板的笔记**，而没有任何东西会红。
  *

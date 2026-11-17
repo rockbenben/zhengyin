@@ -176,7 +176,10 @@ function refreshProfile(reason: string): void {
     console.warn(`[profile] 同步发音档案失败（${reason}）：${(e as Error).message}`);
   }
 }
-noteStore.watch(() => refreshProfile('笔记有变动'));
+noteStore.watch(() => {
+  reconcileAttempts(um.current().db, noteStore.all());
+  refreshProfile('笔记有变动');
+});
 
 const app = createApp({
   // 这三样跟着当前用户走。getter 而不是快照——切换用户后 app.ts 里
@@ -199,9 +202,7 @@ const app = createApp({
   noteStore,
   localNotes: runtime.localNotes,
   dataDir: runtime.dataDir,
-  appRoot: runtime.appRoot,
   workflowsDir: runtime.workflowsDir,
-  shippedNotes: runtime.shippedNotes,
   agent,
   audioDir: join(dataDir, 'audio'),
   // dotenv 只会读 cwd 的 .env；桌面版的 .env 在 appRoot 下，所以这里按解析出的
@@ -258,7 +259,8 @@ if (existsSync(webDist)) {
  *
  * 选 30031 是因为 3000 上下太热闹（Node 默认 3000、Vite 5173、脚手架 3001/8080）。
  * 挑端口的约束：别落进 Windows 临时端口范围（49152 起）、别落进浏览器的
- * ERR_UNSAFE_PORT 黑名单、30000–49151 这段基本没人用。边车是 30032。
+ * ERR_UNSAFE_PORT 黑名单、30000–49151 这段基本没人用。边车不写死：服务启动时挑空闲
+ * 端口（`ASR_PORT` 可固定；`npm run asr` 单跑默认 30032）。
  *
  * 换端口在 `.env` 里写 `PORT=30041`。**不要教人写 `PORT=30041 npm start`**——
  * 那是 POSIX shell 语法，Windows 的 cmd 和 PowerShell 都跑不通，

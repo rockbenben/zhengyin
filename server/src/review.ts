@@ -52,7 +52,7 @@ export interface CardState {
 }
 
 // 专门的错误类型，好让调用方（app.ts 的 POST /api/review/:text）能区分"这张卡片压根不
-// 存在"（该回 404）和其它失败（比如 save() 写盘出错，该回 500）——两者以前共用同一个
+// 存在"（该回 404）和其它失败（比如 persist() 写盘出错，该回 500）——两者以前共用同一个
 // catch 分支，全被当成 404 "无此卡片" 报出去，把磁盘故障也悄悄吞成了"卡片不存在"。
 export class CardNotFoundError extends Error {
   constructor(text: string) {
@@ -174,22 +174,24 @@ function readRaw(file: string): RawRead {
 // 只打一行 warn 就照写不误，等于在没有任何副本的情况下覆盖掉用户唯一不可再生的数据。
 // 构造函数则相反——它根本不写盘，备份只是尽力留个副本，失败了绝不能让 new ReviewStore()
 // 抛出去：那会直接导致服务起不来。
-function backupCorrupt(file: string, required: boolean): void {
-  if (!existsSync(file)) return;
+function backupCorrupt(file: string, required: boolean): boolean {
+  if (!existsSync(file)) return false;
   // **撞名要加序号。** 同一毫秒里连着坏两次时 `Date.now()` 会给出同一个名字，
   // 而 copyFileSync 是覆盖写——第二份把第一份盖掉，备份就白做了。
   // 时间戳保留：文件名是给人看的，他要靠它认出这是哪一次的副本。
-  // （CI 上只有 ubuntu × node 24 这一格红过，因为它是矩阵里最快的，
-  //   两次调用落进了同一毫秒；慢一点的机器纯靠运气躲开。）
+  // （当年矩阵里最快的 ubuntu × node 24 那一格红过，两次调用落进了同一毫秒；
+  //   现在矩阵只剩 Node 26 的两格，快慢全看 runner——道理不变：靠运气躲开不算数。）
   const stamp = Date.now();
   let bak = `${file}.corrupt-${stamp}`;
   for (let i = 2; existsSync(bak); i++) bak = `${file}.corrupt-${stamp}-${i}`;
   try {
     copyFileSync(file, bak);
     console.warn(`[review] 原文件已备份到 ${bak}，可从中手工找回进度`);
+    return true;
   } catch (e) {
     if (required) throw e;
     console.warn(`[review] 备份原文件失败（${(e as Error).message}），本次不改动它`);
+    return false;
   }
 }
 
@@ -224,9 +226,10 @@ export class ReviewStore {
         // 只是不往内存里放，**不从磁盘上删**。校验不过的记录仍然原样留在文件里（见 persist），
         // 用户可以照着这条告警自己去修。以前是丢进内存就等于丢了：下一次写入会把整个
         // state 覆盖回文件，那条记录连同它的 rung/lastReviewed 一起蒸发。
-        // 措辞必须准确：这条记录会原样留在文件里等你修，但如果你**重新讲一次这个词**
-        // （POST /api/entries），addCard 会用一张全新的 rung 0 卡片把它覆盖掉。
-        console.warn(`[review] 忽略 review-state.json 里格式不对的记录 "${text}"：${JSON.stringify(value)}（暂时原样留在文件里可手工修正；但重新讲一次这个词会用新卡覆盖它）`);
+        // 措辞必须准确：这条记录会原样留在文件里等你修，但**再录一次这个错的词**
+        // （/api/pronounce）或者**给它标星**（PUT /api/review/:text/star）时，
+        // addCard 会用一张全新的 rung 0 卡片把它覆盖掉。
+        console.warn(`[review] 忽略 review-state.json 里格式不对的记录 "${text}"：${JSON.stringify(value)}（暂时原样留在文件里可手工修正；但再录一次这个错的词或给它标星，会用新卡覆盖它）`);
       }
     }
   }
@@ -262,8 +265,7 @@ export class ReviewStore {
 
   private backupOnce(required: boolean): void {
     if (this.backedUp) return;
-    this.backedUp = true;
-    backupCorrupt(this.file, required);
+    this.backedUp = backupCorrupt(this.file, required);
   }
 
   /** 磁盘上这个词是否已经有一张合法卡片（运行期间被外部加进来/改过的） */
@@ -334,7 +336,6 @@ export class ReviewStore {
     return Object.keys(this.state);
   }
 
-  /** 这个词在不在队列里、是不是收藏的 */
   /** 整份进度，用于导出备份。返回拷贝，调用方改它不会影响内部状态 */
   snapshot(): Record<string, CardState> {
     return JSON.parse(JSON.stringify(this.state)) as Record<string, CardState>;
@@ -379,6 +380,7 @@ export class ReviewStore {
     return n;
   }
 
+  /** 这个词在不在队列里、是不是收藏的 */
   cardOf(text: string): CardState | undefined {
     return this.state[text];
   }

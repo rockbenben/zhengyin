@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { writeFileAtomic } from './atomic.js';
 
-// .env 的最小读写。只认 `KEY=value` 这一种最朴素的形式——这个文件目前只放一个
-// MW_API_KEY，不值得为它引入一个 dotenv 写入库（dotenv 自己也只负责读、不负责写）。
+// .env 的最小读写。只认 `KEY=value` 这一种最朴素的形式——设置页往里写的只有
+// MW_API_KEY / VOSK_MODEL 两个键，不值得为它引入一个 dotenv 写入库
+// （dotenv 自己也只负责读、不负责写）。
 //
 // 写入必须保留文件里其它行（包括注释和空行）：用户完全可能自己在里面加了别的东西，
 // 从设置页改一个 key 不该把它们一并抹掉。

@@ -53,7 +53,7 @@ export function explainTag(tag: string): string {
   if (tag.startsWith('word:')) return `「${tag.slice(5)}」这个词`;
   // 这张表要盖住服务端 STATIC_TRIGGERS 里的每一个——漏一个就会
   // 把原始标签直接印给用户，而这个函数存在的理由正是不许那样。
-  // notation.test.ts 直接读 server/src/notes.ts 比对。
+  // notation.explain.test.ts 直接读 server/src/notes.ts 比对。
   return {
     'clear-l': '元音前的清 L', 'dark-l': '元音后的暗 L', 'flap-t': '闪音 T',
     'final-voiced': '词尾的浊辅音',

@@ -122,3 +122,11 @@ describe('saveAiNote', () => {
     expect(readFileSync(deps.profileFile, 'utf8')).toContain('AUTO:发音统计');
   });
 });
+
+it('keeps a frontmatter-looking body as literal text when saving a draft', () => {
+  const deps = fixture();
+  const body = '---javascript\n({id:"literal"})\n---\n' + BODY;
+  const saved = saveAiNote(deps, draft({body}));
+  expect(deps.noteStore.get(saved.id)?.markdown).toBe(body);
+  deps.db.close();
+});

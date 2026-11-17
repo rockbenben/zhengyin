@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
 
 const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -25,6 +26,17 @@ export function contentTypeAllowed(ct: string | undefined): boolean {
 
 export function writeGuard(): MiddlewareHandler {
   return async (c, next) => {
+    const bindings = c.env?.server ?? c.env;
+    if (bindings?.incoming) {
+      const peer = getConnInfo(c).remote.address;
+      const local = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+      const path = c.req.path;
+      const readable = /^\/api\/(lookup|entries(?:\/.*)?|notes(?:\/.*)?|stats|phonemes(?:\/.*)?|articulation|audio\/.*|review\/due|health)$/.test(path);
+      if (!local && path.startsWith('/api/') &&
+          (!['GET', 'HEAD'].includes(c.req.method) || !readable)) {
+        return c.json({ error: '局域网访问只允许浏览学习内容，请在本机操作' }, 403);
+      }
+    }
     if (WRITE.has(c.req.method)) {
       if (!originAllowed(c.req.header('origin'), c.req.header('host'))) {
         return c.json({ error: '跨站请求被拒绝' }, 403);

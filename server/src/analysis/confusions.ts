@@ -4,8 +4,10 @@ import { lookupWord } from './lookup.js';
 import type { Note } from '../notes.js';
 
 // IPA → ARPAbet base 的反向表，从 phones.ts 的 IPA 表推出来，不重复维护一份。
-// notes.ts 的 VALID_PHONEMES 已经保证任何真正被笔记引用的 phoneme:<ipa> trigger
-// 都在 Object.values(IPA) 里，所以这张反向表覆盖得到任何合法笔记声明的音素。
+// **它只覆盖 IPA 表值域里的音。** parsePhones 按重音改写出来的 ə / ɚ 不在其中
+// （notes.ts 的 VALID_PHONEMES 才有它们），所以笔记把这两个音当搭档时，下面会
+// 静默跳过那个候选。现有的 ə/ɚ 配对都是重音变体、换成同一个 ARPAbet base 还是
+// 原词，暂时没有实际影响；要真支持这一类，得先把这两项补进反向表。
 const BASE_OF_IPA: Record<string, string> = Object.fromEntries(
   Object.entries(IPA).map(([base, ipa]) => [ipa, base]),
 );
@@ -76,7 +78,7 @@ export interface Contrast {
  * partnerIpa"。早先的版本把这个下标丢了、只返回词表，于是评测只能给出整词层面的
  * 结论，说不出错在哪个音。
  *
- * 每个位置最多留一个搭档词：同一位置有多个同音异形词（如 L IY1 D 同时映射 lead/leed）
+ * 每个位置、每个搭档音素最多留一个词：同音异形词（如 L IY1 D 同时映射 lead/leed）
  * 时，二选一测试里放哪个都一样，多放只是让下游多跑几次识别。
  */
 export function confusionContrasts(target: string, notes: Note[], max = 8): Contrast[] {

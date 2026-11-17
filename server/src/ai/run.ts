@@ -2,12 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { activeAi, type AiSettings } from './settings.js';
 import { AiError, callAi, type AiMessage } from './protocols.js';
-import { resolveCliInvocation, runCliText, type CliOverrides } from './cli.js';
+import { agentBoundaryError, resolveCliInvocation, runCliText, type CliOverrides } from './cli.js';
 
 export interface AiRunResult { text: string; provider: string }
 
 export interface AiTextOptions {
   timeoutMs?: number;
+  signal?: AbortSignal;
+  maxTokens?: number;
   cwd?: string;
   fetchFn?: typeof fetch;
   /**
@@ -50,7 +52,7 @@ export async function runAiText(
   const rec = activeAi(settings);
   if (!rec) throw new AiError(409, '还没选 AI 接口。去设置里选一家、填地址和模型。');
   if (!rec.model.trim()) throw new AiError(409, '设置里的 AI 模型名还没填。');
-  const text = await callAi(rec, messages, { timeoutMs: opts.timeoutMs, fetchFn: opts.fetchFn });
+  const text = await callAi(rec, messages, { timeoutMs: opts.timeoutMs, fetchFn: opts.fetchFn, signal: opts.signal, maxTokens: opts.maxTokens });
   return { text, provider: `接口·${rec.model}` };
 }
 
@@ -60,12 +62,14 @@ export function aiStatus(settings: AiSettings, commandExists: (c: string) => boo
   consent: boolean;
   provider: string | null;
   reason: string | null;
+  agentReason?: string | null;
 } {
   if (settings.mode === 'cli') {
     const inv = resolveCliInvocation(settings, '', 'text');
     const ok = commandExists(inv.command);
     return {
       configured: ok, mode: 'cli', consent: settings.consent,
+      ...(agentBoundaryError(settings.cli.kind) ? { agentReason: agentBoundaryError(settings.cli.kind) } : {}),
       provider: inv.displayName,
       reason: ok ? null : `没找到 ${inv.displayName}`,
     };

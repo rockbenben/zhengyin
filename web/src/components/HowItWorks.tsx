@@ -72,13 +72,15 @@ export default function HowItWorks({ attempts }: { attempts: number }) {
           刻意**不叫「命令行」**：那说的是它碰巧跑在哪个窗口里，不是它是什么，
           而且用 Cursor、用编辑器插件的人根本没有命令行。这个应用整套启动方式
           （双击 启动.cmd）就是为了让人不必见到终端，文案里再把终端搬回来是自相矛盾。
-          也不写死「Claude Code」——它只是其中一个，约定正本是仓库里的 AGENTS.md，其余几个文件名都指回它。
+          也不写死「Claude Code」——它只是其中一个，约定正本是仓库里的 AGENTS.md，
+          另一个工具认的文件名（CLAUDE.md）只留一句指回它。
 
           **具体留在这里一处**：别处一律只说「AI」，一句解释都不重复；这一段
           把名字列出来，让"到底要装什么"有个落地的答案，而不是一个抽象类别。
 
-          「能读写文件」这条**必须说**：浏览器里的聊天框写不进这个文件夹，
-          笔记就不会自己出现。只说「问 AI」等于给一半人许一个会静默落空的诺。 */}
+          两条路都要说清：**接口模式由应用把方案和笔记写进这个文件夹**，
+          不需要 AI 自己碰文件；**装在本机的 AI 则必须能读写文件**，否则笔记
+          不会自己出现。只说「问 AI」等于给一半人许一个会静默落空的诺。 */}
       <Typography.Paragraph type="secondary" className="measure" style={{ margin: '14px 0 0', fontSize: 13 }}>
         <strong>上面四步全在本机跑，不用 AI</strong>
         {'——查词、真人发音、逐音素评测、复习，装完就能用。AI 多加一层：'}
@@ -86,7 +88,7 @@ export default function HowItWorks({ attempts }: { attempts: number }) {
         <Link to="/notes">发音笔记</Link>
         {'，之后这个页面会把讲解摆在对应的音旁边，反复错的那些也会排进复习。'}
         <br />
-        {'要装在你电脑上、能读写文件的那种——'}
+        {'选一家接口，或者用装在你电脑上、能读写文件的那种——'}
         <strong>Claude Code、Codex、Cursor</strong>
         {' 都行。只能在浏览器里聊天也不耽误：把它写的那篇自己存成文件就是了。'}
       </Typography.Paragraph>

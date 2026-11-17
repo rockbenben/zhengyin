@@ -63,7 +63,7 @@ describe('连不上 vs 服务说没有', () => {
  * switchUser/createUser 走 jx，不走 j——服务端 404/400 时写的是能直接展示的中文
  * （`没有叫「X」的用户`、`已经有「X」了`），j() 会把它换成 `API 404` 这种占位文案。
  * 这两个用例直接打 fetch、不 mock `../api` 模块，测的是真实的 jx/j 选择：
- * 把 switchUser 改回 j 会让第一条变红（已经临时改回去实测过一遍，见 task-7-report.md）。
+ * 把 switchUser 改回 j 会让第一条变红（临时改回去试过一遍）。
  */
 describe('切人 / 建人失败时，弹出来的是服务端中文', () => {
   it('switchUser 404 → Error.message 是服务端的中文，不是 API 404', async () => {
@@ -80,5 +80,15 @@ describe('切人 / 建人失败时，弹出来的是服务端中文', () => {
     ));
     const e = await api.createUser('张三').catch((x: unknown) => x);
     expect((e as Error).message).toBe('已经有「张三」了');
+  });
+});
+describe('复习权限与会话原因', () => {
+  it.each([403, 409])('队列及评分保留 %s 原因和状态，404 仍可识别', async (status) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ error: '具体原因' }), { status })));
+    for (const request of [() => api.reviewDue(), () => api.reviewGrade('thin', 'remembered', 's')]) {
+      await expect(request()).rejects.toMatchObject({ message: '具体原因', status });
+    }
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 404 })));
+    await expect(api.reviewGrade('thin', 'remembered')).rejects.toThrow('API 404');
   });
 });

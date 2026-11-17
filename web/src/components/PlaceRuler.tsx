@@ -11,7 +11,8 @@ import { phonemic, phonetic } from '../lib/notation';
  * /n/ 和 /l/ 舌尖位置完全相同，只差软腭——所以正确的话是"舌尖没错，错在软腭"，
  * 而不是"舌头位置不对"。后者会把人往错的方向练。
  *
- * 这个判断由服务端的发音部位表（analysis/articulation.ts）算出来，这里只画：
+ * 判断用的属性（部位、方式、鼻音、舌位高低前后）全来自服务端的发音部位表
+ * （analysis/articulation.ts），这里只比较、只画：
  * 辅音画一维部位尺（唇→声门），元音画 IPA 元音四边形。
  * 黑标记 = 目标，蓝空心标记 = 你发的，跟套印带同一套油墨逻辑。
  *
@@ -87,8 +88,8 @@ export default function PlaceRuler({ targetIpa, heardIpa }: { targetIpa: string;
           ))}
           <span className="ruler-tick" style={{ left: '100%' }} />
 
-          {/* 位置相同时两个标记会完全重叠，那本身就是结论——所以把蓝的挪开一点点，
-              让"重合"仍然看得出是两个标记而不是一个 */}
+          {/* 位置相同时两个标记会完全重叠，那本身就是结论——所以干脆不画蓝钉，
+              改在同一个位置标一行「{你发的音} 也在这儿」 */}
           <span className="ruler-pin" data-plate="black" style={{ left: `${at(t.place)}%` }} />
           <span className="ruler-label" data-plate="black" style={{ left: `${at(t.place)}%` }}>
             {data.places.find((p) => p.id === t.place)?.label} {phonemic(t.ipa)}

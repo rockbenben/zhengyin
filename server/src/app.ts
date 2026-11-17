@@ -1,13 +1,15 @@
+import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { unlinkSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { analyzeText } from './service.js';
 import { matchNotes } from './analysis/match.js';
 import { lookupWord, tokenize } from './analysis/lookup.js';
-import { attributeTags } from './analysis/features.js';
-import { syllabify } from './analysis/syllables.js';
 import { phonemeSubs, alignPhonemes, renameTargets, renameHeard, type PhonemeSub, type AlignOp } from './analysis/diff.js';
 import { collapseStress, normalizeEspeakIpa, normalizeEspeakPhones, CONFIDENT } from './analysis/espeak.js';
 import { guidanceSections } from './analysis/guidance.js';
@@ -35,7 +37,7 @@ import { maskAiSettings, mergeAiSettings, readAiSettings, writeAiSettings } from
 import { AiError, type AiMessage } from './ai/protocols.js';
 import { aiStatus, readCoach, runAiText } from './ai/run.js';
 import { buildChatContext, buildWordContext } from './ai/context.js';
-import { commandExists } from './ai/cli.js';
+import { commandExists, agentBoundaryError } from './ai/cli.js';
 import { cliWorkspace } from './ai/workspace.js';
 import { appendChat, clearChat, readChat } from './ai/chat.js';
 import type { AgentController, AgentTask } from './ai/agent.js';
@@ -87,12 +89,8 @@ export interface AppDeps {
   localNotes: string;
   /** 本机设置与 AI 配置的目录 */
   dataDir: string;
-  /** 可写数据根。AI 整理代理在这里工作 */
-  appRoot: string;
   /** 提示词正本目录（workflows/） */
   workflowsDir: string;
-  /** 随附笔记目录（只读）。整理代理的参考副本从这里来 */
-  shippedNotes: string;
   /** 测试注入：不给就按 dataDir 里的设置走真实接口/命令行 */
   aiRun?: AiRun;
   /** 文件整理代理。index.ts 构造真的，测试注入假的 */
@@ -197,6 +195,7 @@ async function referenceBaseline(
   deps: AppDeps, owner: string, target: string, dictIpa: string[], dictNames: string[],
 ): Promise<{ ipa: string[]; file: string; drift: number[]; repaired: BaselineRepair[] } | null> {
   const dictLength = dictIpa.length;
+  const db = deps.db;
   // 只认整段 target 对应的那一条真人录音。短语的整句音频服务端只有 TTS，所以短语走词典。
   const row = store.getAudio(deps.db, owner).find((a) => a.source === 'mw' && a.word === target);
   if (!row) return null;
@@ -211,6 +210,7 @@ async function referenceBaseline(
     }
     const res = await deps.recognizePhonemes(bytes, fetch, 60_000, deps.asr.status().port ?? 30032);
     if (res.ipa === null) return null;   // 边车这会儿不行：退回词典
+    if (deps.db !== db) return null;
     raw = res.ipa;
     try {
       store.putReferenceIpa(deps.db, row.file, raw, deps.now());
@@ -275,15 +275,33 @@ async function referenceBaseline(
 }
 
 export function createApp(deps: AppDeps) {
-  const app = new Hono();
+  const app = new Hono<{ Variables: { requestDb: Database.Database } }>();
+  const sessions = new WeakMap<Database.Database, string>();
+  const sessionId = () => {
+    const db = deps.db;
+    if (!sessions.has(db)) sessions.set(db, randomUUID());
+    return sessions.get(db)!;
+  };
   app.use('*', writeGuard());
+  app.use('/api/pronounce', bodyLimit({ maxSize: 16 * 1024 * 1024, onError: c => c.json({ error: '音频文件超过 16MB' }, 413) }));
+  // Bind each request to the database opened at its start. A switch closes that handle.
+  app.use('/api/*', async (c, next) => {
+    const db = deps.db;
+    if (c.req.method === 'POST' && c.req.path === '/api/user'
+        && deps.agent.status().state === 'running') {
+      return c.json({ error: '整理正在运行，请等它结束再切换用户' }, 409);
+    }
+    c.set('requestDb', db);
+    await next();
+  });
+  const sessionValid = (c: { get(key: 'requestDb'): Database.Database }) => c.get('requestDb') === deps.db;
 
   app.get('/api/health', (c) => c.json({ ok: true, mwConfigured: Boolean(deps.mwKey) }));
 
   app.get('/api/runtime', (c) => c.json(deps.runtime));
 
   // ── AI ─────────────────────────────────────────────────
-  // 设置是**整机**的（api-settings.json 在 dataDir 下），不跟当前用户走：
+  // 设置是**整机**的（ai-settings.json 在 dataDir 下），不跟当前用户走：
   // 换个人用同一台机器，不该让他重新填一遍密钥。
   const aiSettings = () => readAiSettings(deps.dataDir);
   // 命令行调用在**一个空的专用目录**里跑：不继承服务进程所在的目录，
@@ -434,19 +452,21 @@ export function createApp(deps: AppDeps) {
     }
   });
 
-  // ── AI 整理：只有命令行代理能读写文件 ──
+  // ── AI 整理：接口方案由应用保存；命令行使用受限工作副本 ──
   app.post('/api/ai/agent/run', async (c) => {
     try {
       requireConsent();
-      if (aiSettings().mode !== 'cli') {
-        return c.json({ error: '整理需要命令行代理：接口模式只能讲解，不能读写文件。' }, 409);
-      }
+      const settings = aiSettings();
+      const boundaryError = settings.mode === 'cli' ? agentBoundaryError(settings.cli.kind)
+        : aiStatus(settings, commandExists).reason;
+      if (boundaryError) return c.json({ error: boundaryError }, 409);
       const body = await c.req.json().catch(() => null) as { task?: string; note?: string } | null;
       const task = body?.task;
       if (task !== 'organize' && task !== 'profile' && task !== 'custom') {
         return c.json({ error: 'task 只能是 organize / profile / custom' }, 400);
       }
       const note = (body?.note ?? '').trim();
+      if (note.length > 2000) return c.json({ error: '整理说明超过 2000 字' }, 400);
       if (task === 'custom' && !note) {
         return c.json({ error: '自定义整理要写清让 AI 做什么。' }, 400);
       }
@@ -591,6 +611,15 @@ export function createApp(deps: AppDeps) {
     return c.json({ configured: false, masked: null });
   });
 
+  app.get('/api/lookup', (c) => {
+    const text = (c.req.query('text') ?? '').trim().toLowerCase();
+    if (!text || text.length > 500) return c.json({ error: '请输入英文单词或短语' }, 400);
+    const existing = entryDetail(deps, text);
+    if (existing) return c.json(existing);
+    const words = analyzeText(text);
+    return c.json({ text, words, createdAt: deps.now(), audio: [], phraseAudio: null, notes: [], review: null });
+  });
+
   app.post('/api/entries', async (c) => {
     let body: { text?: string; ipaOverride?: string };
     try {
@@ -624,6 +653,7 @@ export function createApp(deps: AppDeps) {
       return c.json(entryDetail(deps, key));
     }
 
+    if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新查词' }, 409);
     store.upsertEntry(deps.db, key, words, deps.now());
 
     // 音频：逐词 MW（有 key 时）→ 失败 TTS；短语额外整句 TTS。
@@ -642,13 +672,20 @@ export function createApp(deps: AppDeps) {
         have.set(a.word ?? '', { id: a.id, source: a.source, file: a.file });
       }
       for (const w of words) {
-        const cur = have.get(w.word);
+        let cur = have.get(w.word);
+        if (cur?.id === -1) continue;
+        if (cur && !existsSync(join(deps.audioDir, cur.file))) {
+          store.removeAudioRow(deps.db, cur.id);
+          have.delete(w.word);
+          cur = undefined;
+        }
         // 已经是真人录音：不动它，也不白跑一趟 MW
-        if (cur?.source === 'mw') continue;
+        if (cur?.source === 'mw' && existsSync(join(deps.audioDir, cur.file))) continue;
 
         let file: string | null = null;
         let source: 'mw' | 'tts' = 'mw';
         if (deps.mwKey) file = await deps.fetchMw(w.word, deps.mwKey, deps.audioDir);
+        if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新查词' }, 409);
 
         if (cur) {
           // 升级路径。MW 这次也没拿到就保持现状——绝不能删了旧的却没有新的，
@@ -659,16 +696,13 @@ export function createApp(deps: AppDeps) {
           if (!file) continue;
           store.removeAudioRow(deps.db, cur.id);
           store.addAudio(deps.db, { entryText: key, word: w.word, source: 'mw', file });
-          // 旧文件只在没人再引用时才删（"black cat" 和 "black" 会共用 black-tts.mp3）
-          if (cur.file !== file && !store.audioFileInUse(deps.db, cur.file)) {
-            const f = join(deps.audioDir, cur.file);
-            if (existsSync(f)) unlinkSync(f);
-          }
+          // 音频缓存由所有用户共享，更新索引时保留旧文件。
           have.set(w.word, { id: -1, source: 'mw', file });
           continue;
         }
 
         if (!file) { file = await deps.synthTts(w.word, deps.audioDir); source = 'tts'; }
+        if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新查词' }, 409);
         if (file) store.addAudio(deps.db, { entryText: key, word: w.word, source, file });
         // 短语里同一个词可能出现多次（"so so"）：have 是循环开始前算好的快照，循环
         // 内部必须自己再标记一次，否则同一个词会在这一次 POST 里被重复 fetchMw/synthTts、
@@ -678,6 +712,7 @@ export function createApp(deps: AppDeps) {
       const existing = new Set(have.keys());
       if (words.length > 1 && !existing.has('')) {
         const file = await deps.synthTts(key, deps.audioDir);
+        if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新查词' }, 409);
         if (file) store.addAudio(deps.db, { entryText: key, word: null, source: 'tts', file });
       }
     } catch (e) {
@@ -701,7 +736,7 @@ export function createApp(deps: AppDeps) {
         // 全部命中会随笔记总数一起涨（实测 85 篇时长词命中 26 篇），于是这一列
         // 慢慢变成「这个词有多长」——international 24 篇、light 10 篇，
         // 排序出来跟音素个数一个样，对「该点哪个词」不再有分辨力。
-        // 更要紧的是它现在就跟词条页对不上：comfortable 这里写 5 篇，点进去 0 篇。
+        // 更要紧的是它当时就跟词条页对不上：comfortable 这里写 5 篇，点进去 0 篇。
         noteCount: relevantNotes(deps, e.text, matchNotes(tags, deps.noteStore.all(), e.text)).size,
         audioSource: audio.some((a) => a.source === 'mw') ? 'mw' : audio.length > 0 ? 'tts' : null,
       };
@@ -723,22 +758,8 @@ export function createApp(deps: AppDeps) {
 
   app.delete('/api/entries/:text', (c) => {
     const key = c.req.param('text').toLowerCase();
-    const removed = store.deleteEntry(deps.db, key);
-    for (const a of removed) {
-      // 文件名来自 slugify(word)，"black cat" 和 "black" 都可能落到同一个 black-tts.mp3。
-      // deleteEntry 已经把这个 entry 自己的 audio 行删掉了，这里再查一遍剩下的 audio 表：
-      // 如果还有别的 entry 引用同一个文件名，就不能 unlink，否则那个 entry 的音频会永久
-      // 404（重新 POST 它也不会修复，因为 POST 的"已有音频"判断只看 DB 行在不在）。
-      if (store.audioFileInUse(deps.db, a.file)) continue;
-      const f = join(deps.audioDir, a.file);
-      // 库里的行已经删了；文件删不掉（Windows 上被占用是常事）不该让整次删除
-      // 变成 500——那会让界面说「没能删除」，而词条其实已经没了。
-      try {
-        if (existsSync(f)) unlinkSync(f);
-      } catch (e) {
-        console.warn('[entries] 删除音频文件失败', f, e);
-      }
-    }
+    store.deleteEntry(deps.db, key);
+    // 个人数据库无法判断其他用户的引用，保留共享缓存。
     try {
       deps.review.removeCard(key);
     } catch (e) {
@@ -810,7 +831,7 @@ export function createApp(deps: AppDeps) {
   // 只能对着刚加了四个词的人说「去首页录一次音」。
   app.get('/api/review/due', (c) => {
     const today = deps.today();
-    return c.json({ cards: deps.review.due(today), upcoming: deps.review.upcoming(today) });
+    return c.json({ session: sessionId(), cards: deps.review.due(today), upcoming: deps.review.upcoming(today) });
   });
 
   // 手动收藏：模型没测出来、但你自己知道虚的词，标个星强制进队列。
@@ -829,8 +850,7 @@ export function createApp(deps: AppDeps) {
     if (!card) return c.json({ starred: false, card: null });
     // 取消收藏之后，如果这个词从来没被判错过，它留在队列里就没有任何理由了——直接出列。
     // 反过来，错过的词取消收藏只是回到"证据驱动"，仍然留在队列里按阶梯走。
-    const stat = store.wordStat(deps.db, text);
-    const everWrong = stat.attempts > stat.clean;
+    const everWrong = store.errorsOnWord(deps.db, text).length > 0;
     if (!everWrong) {
       deps.review.removeCard(text);
       return c.json({ starred: false, card: null });
@@ -839,12 +859,15 @@ export function createApp(deps: AppDeps) {
   });
 
   app.post('/api/review/:text', async (c) => {
+    const session = c.req.header('x-user-session');
+    if (session && session !== sessionId()) return c.json({ error: '用户已切换，请刷新复习队列' }, 409);
     let body: { grade?: unknown };
     try {
       body = await c.req.json<{ grade?: unknown }>();
     } catch {
       return c.json({ error: '请求体不是合法 JSON' }, 400);
     }
+    if (!sessionValid(c)) return c.json({ error: '用户已切换，请刷新复习队列' }, 409);
     const { grade } = body;
     // grade 直接驱动复习进度重置/推进（见 review.ts 的 nextState）——除 notes/ 外唯一
     // 不可再生的数据，绝不能信任客户端传来的任意字符串。必须严格是这三个字面量之一。
@@ -857,7 +880,7 @@ export function createApp(deps: AppDeps) {
       // 而不是当成一次普通的推进。
       return c.json({ card: next, graduated: next === null });
     } catch (e) {
-      // 区分"这张卡片压根不存在"（404，正常业务情况）和其它失败（比如 save() 写盘
+      // 区分"这张卡片压根不存在"（404，正常业务情况）和其它失败（比如 persist() 写盘
       // 出错，得回 500）——以前不管哪种失败都被这个 catch 一律吞成 404 "无此卡片"。
       if (e instanceof CardNotFoundError) return c.json({ error: '无此卡片' }, 404);
       console.warn('[review] 评分失败', e);
@@ -912,7 +935,7 @@ export function createApp(deps: AppDeps) {
   // 音素对齐。跟 /api/asr 的根本区别是**它说得出你实际发了什么音**——vosk 那条路只能
   // 在给定的几个词里挑一个。
   //
-  // 录音只在本机两个进程之间走（浏览器 → 30031 → 127.0.0.1:30032），不落盘、不出这台机器。
+  // 录音只在本机两个进程之间走（浏览器 → 本机服务 → 127.0.0.1 上的边车），不落盘、不出这台机器。
   // 页面据此决定提示什么：边车在的话，vosk 模型装没装根本不重要，不该弹"模型未安装"。
   // uv 装没装是边车状态里的事实（deps.asr.status().uvFound），跟边车这一刻起没起来是两件事：
   //   ok=false, uv=true  → 真的在加载模型，等着就好
@@ -962,6 +985,7 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: '这台机器没有可用的 uv，逐音素评测起不来。装一个 uv 再重启服务。' }, 503);
     }
     const asr = await deps.recognizePhonemes(audio, fetch, 60_000, asrState.port ?? 30032);
+    if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新录音' }, 409);
     if (asr.ipa === null) {
       return c.json({ error: asr.reason ?? '音素识别失败', reachable: asr.reachable }, 503);
     }
@@ -999,6 +1023,7 @@ export function createApp(deps: AppDeps) {
     //
     // 让参考录音也过同一个模型，偏置两边抵消。附带好处：词典错条自动失效。
     const baseline = await referenceBaseline(deps, owner, target, dictIpa, dictNames);
+    if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新录音' }, 409);
 
     const { align, wrong, tags, noteIds } = judge({
       phones,
@@ -1035,35 +1060,40 @@ export function createApp(deps: AppDeps) {
       ? `背景噪音偏大（信噪比 ${Math.round(snrDb)}dB），这次不计入统计和复习队列`
       : null;
 
+    let recorded = false;
+    let persistenceWarning: string | null = null;
     if (!tooNoisy) {
       try {
         // 真发错了才进复习队列。这是「有证据」的那条入口：
         // 你念错过这个词，所以它值得再练；只是查过一眼的词不进来。
         // 只给**真实存在的词条**建卡——建在裸词上的卡片永远打不开，只会堵在队列里。
+        deps.db.transaction(() => {
+          const attemptId = store.logAttempt(deps.db, {
+            entryText: owner,
+            // **不是 owner**：短语词条可以只录其中一个词，而按词声明范围的笔记按它匹配。
+            // 少了它，这次的归属日后就重算不出来，只能猜整条。
+            target,
+            at: deps.now(),
+            targetIpa: dictNames, heardIpa: heard,
+            // 进统计的只有确凿的错：低置信度的误报一旦沉淀进发音档案，会变成"该补的笔记"里
+            // 一堆根本不存在的问题，比不统计更糟。
+            ops: align,
+            // 低置信替换保留在对齐里以计位置，但不当作确凿错误写入。
+            // 拿不准的**多余音**不算数——那几乎只能是杂音（气流、碰麦克风），
+            // 跟"这个音是什么"的不确定不是一回事。
+            clean: align.every((op) => op.kind === 'match' || (op.kind === 'ins' && !op.sure)),
+          });
+          // 归属单独写。它是**派生**的（错误行 + target + notes/ 就能重算，见 reconcile.ts），
+          // 所以不跟流水混在一条 INSERT 里——流水是事实，归属是当前理解。
+          store.putAttribution(deps.db, attemptId, noteIds);
+        })();
+        recorded = true;
         if (wrong.length > 0 && store.getEntry(deps.db, owner)) {
           deps.review.addCard(owner, deps.today());
         }
-        const attemptId = store.logAttempt(deps.db, {
-          entryText: owner,
-          // **不是 owner**：短语词条可以只录其中一个词，而按词声明范围的笔记按它匹配。
-          // 少了它，这次的归属日后就重算不出来，只能猜整条。
-          target,
-          at: deps.now(),
-          targetIpa: dictNames, heardIpa: heard,
-          // 进统计的只有确凿的错：低置信度的误报一旦沉淀进发音档案，会变成"该补的笔记"里
-          // 一堆根本不存在的问题，比不统计更糟。
-          ops: align.filter((op) => op.kind === 'match' || wrong.includes(op)),
-          // **clean 单独算，不能从 ops 反推**：ops 里没有低置信度的错，
-          // 反推出来"模型听到了别的音但没把握"也算全对。见 logAttempt 上的注释。
-          // 拿不准的**多余音**不算数——那几乎只能是杂音（气流、碰麦克风），
-          // 跟"这个音是什么"的不确定不是一回事。
-          clean: align.every((op) => op.kind === 'match' || (op.kind === 'ins' && !op.sure)),
-        });
-        // 归属单独写。它是**派生**的（错误行 + target + notes/ 就能重算，见 reconcile.ts），
-        // 所以不跟流水混在一条 INSERT 里——流水是事实，归属是当前理解。
-        store.putAttribution(deps.db, attemptId, noteIds);
         syncProfile(deps.profileFile, deps.db, deps.noteStore, deps.now());
       } catch (e) {
+        persistenceWarning = recorded ? '录音记录已保存，但复习卡或发音档案更新失败，请检查数据文件夹权限' : null;
         console.warn('[pronounce] 评测记录写入失败', e);
       }
     }
@@ -1088,17 +1118,17 @@ export function createApp(deps: AppDeps) {
       baselineRepaired: baseline?.repaired ?? [],
       // 这次有没有沉淀进发音档案。**界面必须说出来**——静悄悄地不计入，
       // 比计入更糟：你会以为练过的都算数，而档案里根本没有这一次。
-      recorded: !tooNoisy,
-      notRecordedReason,
+      recorded,
+      persistenceWarning,
+      notRecordedReason: notRecordedReason ?? (recorded ? null : '评测记录写入失败，请检查数据文件夹权限后重试'),
       notes,
     });
   });
 
-  // 发音统计。前端的统计页读它；AI 也能直接 curl 它来看你最近在错什么。
   // ── 搬家：导出 / 导入 ──
   //
   // 只带**不可再生**的：查过哪些词、每次录音的判定、复习排到第几档。
-  // 音频和参考转写重查一次词典就有，塞进来会让文件从几十 KB 变成几十 MB；
+  // 音频和参考转写都能重新生成，塞进来会让文件从几十 KB 变成几十 MB；
   // notes/ 跟着 git 走。复习进度单独放在 review-state.json，也一并带上。
   app.get('/api/backup', (c) => {
     const data = store.exportBackup(deps.db, deps.now());
@@ -1126,10 +1156,25 @@ export function createApp(deps: AppDeps) {
       && Array.isArray(a.errors) && a.errors.every((e) => Number.isInteger(e?.atIndex)))) {
       return c.json({ error: '备份文件里的录音记录不完整（缺少这次念的词或错误位置），没法导入' }, 400);
     }
+    const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string');
+    const validEntries = b.entries.every(e => e && typeof e.text === 'string' && e.text.trim() !== ''
+      && typeof e.createdAt === 'string' && typeof e.updatedAt === 'string'
+      && Array.isArray(e.words) && e.words.every(w => w && typeof w.word === 'string'
+        && typeof w.found === 'boolean' && typeof w.ipa === 'string'
+        && strings(w.arpabet) && strings(w.tags) && strings(w.phoneIpa)
+        && Array.isArray(w.phoneTags) && w.phoneTags.every(strings)
+        && Array.isArray(w.syllables) && w.syllables.every(s => Array.isArray(s) && s.every(Number.isInteger))
+        && Array.isArray(w.syllableStress) && w.syllableStress.every(x => [0, 1, 2].includes(x))));
+    const validAttempts = b.attempts.every(a => typeof a.entryText === 'string' && typeof a.at === 'string'
+      && typeof a.targetIpa === 'string' && typeof a.heardIpa === 'string' && [0, 1].includes(a.clean)
+      && a.errors.every(e => ['sub', 'del', 'ins'].includes(e.kind) && e.atIndex >= 0
+        && (e.targetIpa === null || typeof e.targetIpa === 'string')
+        && (e.heardIpa === null || typeof e.heardIpa === 'string')));
+    if (!validEntries || !validAttempts) return c.json({ error: '备份里的词条或录音格式不完整，本机数据未改动' }, 400);
     const r = store.importBackup(deps.db, b as store.Backup);
     // 备份里的词条带着**对面那台机器**算出来的推导结果（音素、音节、标签）。
-    // 两边版本不一样时导进来的就是按对面的规则算的，而本机的重算只在启动时跑一次——
-    // 导入发生在那之后，于是这些词条会一直带着外来的旧标签直到下次重启。
+    // 两边版本不一样时导进来的就是按对面的规则算的，而本机的重算原先只在启动时跑一次——
+    // 导入发生在那之后，这些词条会一直带着外来的旧标签直到下次重启。所以导完当场重算一遍，
     // 判据跟启动时同一个（reanalyze.ts）：只碰"每个词都在词典里"的，手工音标不动。
     reanalyzeEntries(deps.db);
     // 笔记归属备份里根本没带（它是派生的），导进来的录音这会儿一条归属都没有。
@@ -1141,6 +1186,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ ...r, cards });
   });
 
+  // 发音统计。前端的统计页读它；AI 也能直接 curl 它来看你最近在错什么。
   app.get('/api/stats', (c) => c.json({
     overall: store.overallStats(deps.db),
     // 笔记告警。写笔记的 AI 够不到服务端控制台，这是它唯一能自查的通道（NoteStore.warnings）
@@ -1235,7 +1281,8 @@ export function createApp(deps: AppDeps) {
     if (!/^[a-z0-9.-]+\.tar\.gz$/.test(file)) return c.json({ error: 'bad file' }, 400);
     const path = join(deps.modelsDir, file);
     if (!existsSync(path)) return c.json({ error: 'not found' }, 404);
-    return c.body(readFileSync(path), 200, { 'Content-Type': 'application/gzip' });
+    if (c.req.method === 'HEAD') return c.body(null, 200, { 'Content-Type': 'application/gzip' });
+    return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, { headers: { 'Content-Type': 'application/gzip' } });
   });
 
   return app;

@@ -9,7 +9,7 @@ export const UNSURE = '不确定';
  * 门槛本身在服务端（结论已经放进 op.sure）。这里只固定这个复合判断，**前端只此一份**——
  * 它一度在 Recorder 和 ReviewPage 各写一遍，改其中一处会让复习页判「每个音都对」
  * 而同一段录音的摘要报有错误，且编译不报错。
- * 服务端另有一份（app.ts），跨包合不了，由 app.test.ts 盯着。
+ * 服务端另有一份（judge.ts），跨包合不了，由 app.test.ts 盯着。
  */
 export function isWrong(op: AlignOp): boolean {
   return op.kind !== 'match' && op.sure;
@@ -63,11 +63,15 @@ export interface Verdict { grade: Grade | null; text: string; tone: 'ok' | 'bad'
  * 第 2 类里"有拿不准的错"是后补的：之前「没有确凿的错」直接当成了「对」，
  * 于是 thin [θ ɪ n] → [f ɛ n] 判成 remembered、把卡片推远一档。
  *
+ * 服务端判定这次不计入（背景太吵、落盘失败）也到这里：文案直接用服务端给的原因，
+ * 录了但数据不该进档案的，一样不该有分数。
+ *
  * **没有"自己点不会"这一档了**：那是复习页还在藏答案时的逃生口。现在标准音、
  * 音标、音素条一进卡就摆着，"不会"无从谈起——不想练这张就跳过，而跳过是
  * 没录音，没录音就不该有分数（跟"测不出来不打分"是同一条）。
  */
 export function gradeOf(judged: PronounceResult | null): Verdict {
+  if (judged?.recorded === false) return { grade: null, text: judged.notRecordedReason ?? '这次不计入进度，请重录', tone: 'unknown' };
   if (!judged) return { grade: null, text: '这次测不出来，不计入进度', tone: 'unknown' };
   if (judged.heardIpa.length === 0) return { grade: null, text: '没听出音，不计入进度。再录一次', tone: 'unknown' };
 
@@ -79,5 +83,5 @@ export function gradeOf(judged: PronounceResult | null): Verdict {
   if (unsure.length > 0) {
     return { grade: null, text: `有 ${unsure.length} 处模型没把握，这次不计入进度。再念一遍`, tone: 'unknown' };
   }
-  return { grade: 'remembered', text: '每个音都对，下次复习推远一档', tone: 'ok' };
+  return { grade: 'remembered', text: '每个音都对，这次计入进度', tone: 'ok' };
 }

@@ -24,9 +24,9 @@ export interface InkContext {
 /**
  * 外壳。侧栏是印刷车间的版口：套准标记、刊头、页脚的印次记录。
  *
- * 主题跟随系统深色/浅色，实时响应切换（不是只在启动时读一次）。两套调色板都在
- * theme.ts 里，applyPalette 把它写进 CSS variables，antd 的 token 从同一个对象生成——
- * 两边同源，改配色只改一处，不会漂移。
+ * 主题可选跟随系统 / 浅色 / 深色；跟随系统时实时响应切换（不是只在启动时读一次）。
+ * 两套底色调色板在 theme.ts，第二版油墨由 ink.ts 按色相算；applyPalette 把结果写进
+ * CSS variables，antd 的 token 从同一个对象生成——两边同源，改配色只改一处，不会漂移。
  */
 export default function AppLayout() {
   // 系统当前是什么，跟**用哪套纸**是两件事：前者是外界事实，后者是他的选择。
@@ -147,7 +147,7 @@ export default function AppLayout() {
   return (
     <ConfigProvider locale={zhCN} theme={makeTheme(palette)}>
       <Layout style={{ minHeight: '100vh' }}>
-        {/* 键盘用户每翻一页都要先穿过侧栏那一串导航（六个链接）才够得着正文。
+        {/* 键盘用户每翻一页都要先穿过侧栏那一串导航（八个链接）才够得着正文。
             这条链接平时不占位，Tab 一下才现身——它是全页第一个可聚焦的东西。 */}
         <a className="skip-link" href="#main">跳到正文</a>
         {/* 窄到 lg 以下侧栏收成零宽，antd 会甩出一个重开按钮。它默认摆在 top:68px、

@@ -74,9 +74,6 @@ export function openDb(file: string): Database.Database {
       -- 是按位置算的，少了这一列就只能从音素瞎猜。
       at_index INTEGER NOT NULL
     );
-    -- 参考录音的模型转写，按音频文件缓存。
-    -- 存的是【边车的原始输出】而不是归一化后的结果：归一化表（analysis/espeak.ts）
-    -- 以后还会改，存原始的话改完立刻生效，不用把缓存全作废重跑。
     -- 这次评测该挂哪几篇笔记。
     --
     -- 它回答一个**只有你的数据能回答**的问题：这篇笔记讲的毛病，是不是你身上真有的？
@@ -84,7 +81,7 @@ export function openDb(file: string): Database.Database {
     -- 每个人用的。全新装上的人不该看到一堆写着「已确认的短板」的东西。
     --
     -- ⚠️ **这是一张缓存，不是流水。** 内容完全由 (attempt_error + target + notes/)
-    -- 派生（judge.ts 的 explainersFor），每次启动和每次导入都会重算一遍
+    -- 派生（judge.ts 的 explainersFor），每次启动、笔记一变和每次导入都会重算一遍
     -- （reconcile.ts）。所以改匹配规则不需要写迁移，历史归属自己跟上。
     --
     -- 它曾经是流水——"评测时算好存下来，之后再没人碰"。代价是判据一改，
@@ -97,6 +94,9 @@ export function openDb(file: string): Database.Database {
       PRIMARY KEY (attempt_id, note_id)
     );
 
+    -- 参考录音的模型转写，按音频文件缓存。
+    -- 存的是【边车的原始输出】而不是归一化后的结果：归一化表（analysis/espeak.ts）
+    -- 以后还会改，存原始的话改完立刻生效，不用把缓存全作废重跑。
     CREATE TABLE IF NOT EXISTS reference_ipa (
       file TEXT PRIMARY KEY,
       raw_ipa TEXT NOT NULL,
@@ -143,7 +143,7 @@ export function listEntries(db: Database.Database): EntryRow[] {
  *   · 首页「卡住的地方」和统计页「卡住的词」还挂着它，点进去是 404；
  *   · 「N 次评测 · N 个词」把已经不在库里的词也算进去；
  *   · 重新建同一个词，旧记录会突然复活。
- * 词条是练习的锚点，锚点没了，流水就是孤儿。验证行不能删——那是删词条的代价。
+ * 词条是练习的锚点，锚点没了，流水就是孤儿。流水行不能留——那是删词条的代价。
  *
  * attempt_error / attempt_note 的 ON DELETE CASCADE **不能依赖**：`foreign_keys`
  * 的默认值随 SQLite 的编译选项变化（本机装的这一版恰好是开的，别的构建可能是关的），
@@ -215,14 +215,6 @@ export function removeAudioRow(db: Database.Database, id: number): void {
   db.prepare('DELETE FROM audio WHERE id = ?').run(id);
 }
 
-// 音频文件名来自 slugify(word)，不同 entry（比如 "black cat" 和 "black"）完全可能共用
-// 同一个文件（都落到 black-tts.mp3）。删词条时不能看到一条 audio 行就直接 unlink 对应
-// 文件——必须先确认没有其它还在库里的 entry 仍然引用这个文件名，否则会把还在用的音频
-// 删掉，且那另一个 entry 之后重新 POST 也不会自动修复（POST 里的"已有音频"判断只看
-// DB 行在不在，不检查磁盘上的文件在不在）。
-export function audioFileInUse(db: Database.Database, file: string): boolean {
-  return Boolean(db.prepare('SELECT 1 FROM audio WHERE file = ? LIMIT 1').get(file));
-}
 
 // ---- 评测流水 ----
 
@@ -236,13 +228,13 @@ export function logAttempt(db: Database.Database, a: {
   entryText: string;
   /** 这次实际念的是哪个词（短语词条可以只录其中一个）。按词声明范围的笔记按它匹配 */
   target: string;
-  at: string; targetIpa: string[]; heardIpa: string[]; ops: AttemptOp[];
+  at: string; targetIpa: string[]; heardIpa: string[]; ops: Array<AttemptOp & { sure?: boolean }>;
   /**
    * 这次是不是**真的每个音都对上了**。
    *
-   * **不能从 ops 反推。** ops 里只有确凿的错（低置信度的被上游丢掉了），于是
-   * "模型听到别的音但没把握"那种情况 ops 全是 match，反推出来就是全对。
-   * 实测 47 次里 6 次判全对，5 次是这么来的——thin [θ ɪ n] → [f ɛ n] 也算成了全对。
+   * **不能从 ops 反推。** ops 里带着低置信度的对齐（`sure: false`），写库时在这里滤掉——
+   * 所以 attempt_error 里没有"模型拿不准"这回事，"这次到底对没对"必须单独存。
+   * 实测 47 次里 6 次判全对，5 次其实是拿不准的替换：thin [θ ɪ n] → [f ɛ n] 也算成了全对。
    *
    * 所以由调用方按完整对齐结果算好传进来：ops 回答"哪些错该进统计"，
    * clean 回答"这次到底对没对"，两个问题不是一个。
@@ -254,7 +246,7 @@ export function logAttempt(db: Database.Database, a: {
   const errors: Array<AttemptOp & { atIndex: number }> = [];
   let ti = 0;
   for (const o of a.ops) {
-    if (o.kind !== 'match') errors.push({ ...o, atIndex: ti });
+    if (o.kind !== 'match' && o.sure !== false) errors.push({ ...o, atIndex: ti });
     if (o.kind !== 'ins') ti += 1;
   }
   // 一次评测的流水和它的每处错必须一起成立：只写进流水而错没写进去，排行会少算；
@@ -295,7 +287,8 @@ export function putAttribution(db: Database.Database, attemptId: number, noteIds
 
 /**
  * 每篇笔记在**你**身上命中过几次、跨几个词。
- * 判据跟「该补的笔记」同一条（profile.ts 的 worthANote）：次数够、而且不止一个词。
+ * 给 profile.ts 的 severityOf 当证据——**不是**「该补的笔记」那条（worthANote 还多一条
+ * soloCount 的 OR 分支，两者问的不是同一件事，理由见 profile.ts 那段）。
  */
 export function noteEvidence(db: Database.Database): Map<string, { count: number; words: number }> {
   const rows = db.prepare(`
@@ -326,13 +319,13 @@ export interface PhonemeStat {
   soloCount: number;
 }
 
-/** 按"错法 + 涉及的音"聚合排行，最常犯的排前面 */
 /**
  * 统计表最多列几条。**导出它**是因为调用方必须知道自己有没有被截断——
  * 一张看着"就这些"的表底下还藏着行，是最容易让人误判的一种呈现。
  */
 export const PHONEME_STATS_LIMIT = 20;
 
+/** 按"错法 + 涉及的音"聚合排行，最常犯的排前面 */
 export function phonemeStats(db: Database.Database, limit = PHONEME_STATS_LIMIT): PhonemeStat[] {
   const rows = db.prepare(`
     SELECT e.kind, e.target_ipa AS targetIpa, e.heard_ipa AS heardIpa,
@@ -504,7 +497,7 @@ export function putReferenceIpa(db: Database.Database, file: string, rawIpa: str
 /**
  * 一份可以带走的备份。
  *
- * **只带不可再生的东西。** 音频（54 个 mp3）和参考转写重新查一次词典就有，
+ * **只带不可再生的东西。** 音频（54 个 mp3）和参考转写都能重新生成，
  * 塞进来只会让文件从几十 KB 变成几十 MB；`notes/` 跟着 git 走，不需要备份。
  * 真正丢了就没有的是这三样：查过哪些词、每一次录音的判定、复习排到第几档。
  */

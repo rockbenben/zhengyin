@@ -41,6 +41,9 @@ const STARTERS: Array<{ word: string; why: string }> = [
 // 按「查这个词」现建（音标、音频、评测自动配好）。1–3 个字符会先走音素分支——
 // 打 θ 的人要的是那个音怎么发，不是一个叫 θ 的词条。讲解仍然不在这里生成，
 // 词条建好后的「为什么会错」才需要 AI。
+//
+// 局域网访问时那条 POST 会被写守卫拒掉（403），api.addEntry 于是退成 /api/lookup
+// 只查不存——这一页的文案按「本机保存 / 远程只查不存」分叉，别再许无条件的诺。
 export default function HomePage() {
   useTitle('查词');
   const [entries, setEntries] = useState<EntryListItem[] | null>(null);
@@ -57,7 +60,7 @@ export default function HomePage() {
   const [kw, setKw] = useState('');
   /**
    * 上一次查词因为**词典里没有**而失败。toast 一闪而过，而输入框下面那块
-   * 还写着「按「查这个词」就能建」——同屏两句相反的话，用户不知道该信哪句。
+   * 还写着「本机访问时按「查这个词」会新建…」——同屏两句相反的话，用户不知道该信哪句。
    * 所以把失败留在它发生的位置：改输入之前一直看得见。
    */
   const [lookupError, setLookupError] = useState<{ text: string; msg: string } | null>(null);
@@ -73,7 +76,8 @@ export default function HomePage() {
   }, []);
 
   /**
-   * 直接建词条。词典查不到的词服务端会返回 400，如实说出来，不假装成功。
+   * 直接建词条。词典里一个词都查不到时服务端照样建（200 + found:false），由下面
+   * 判断后删掉并如实说明，不假装成功；400 只留给「一个英文字母都没有」这类坏输入。
    * @param raw 不传就用输入框里的内容；起步词按钮传它自己那个词。
    */
   const lookUp = useCallback(async (raw?: string) => {
@@ -297,7 +301,7 @@ export default function HomePage() {
 
              当时留它的理由是"窗口一窄侧栏整个缩没"。那条理由是错的：Sider 的
              collapsedWidth={0} 会让 antd 在越过断点时画出重新展开的浮动触发器
-             （antd/lib/layout/Sider.js:192 `collapsible || below && zeroWidthTrigger`），
+             （antd/lib/layout/Sider.js 的 `collapsible || below && zeroWidthTrigger`），
              导航一次都没丢过。 */}
       {entries.length === 0 ? (
         <PageHead slug={APP_NAME} title="先查一个词" />
@@ -308,14 +312,14 @@ export default function HomePage() {
           // 于是别处说的「单词页」指哪个就说不清了——而那句话在三个地方出现。
           slug="查词"
           title={`已经查过 ${entries.length} 个词`}
-          meta="库里有的直接筛；没有的按「查这个词」现建"
+          meta="库里有的直接筛；没有的按「查这个词」查询。本机访问会保存词条，远程只查不存。"
         />
       )}
 
       {/* ── 查词框紧跟标题 ──
           这一页的活就是查词，那它就该是标题底下第一件够得着的东西。标题那句
-          「库里有的直接筛；没有的按「查这个词」现建」说的正是这个框，中间隔着
-          别的东西，说明和被说明的对象就对不上了。
+          「库里有的直接筛；没有的按「查这个词」查询。本机访问会保存词条，远程只查不存」
+          说的正是这个框，中间隔着别的东西，说明和被说明的对象就对不上了。
 
           一个框兼两件事：库里有就筛，没有就直接查。原来只能筛——完全不懂的人
           输进一个新词，只会得到"去问 AI"，然后就走不动了。而 /api/entries 本来
@@ -358,7 +362,7 @@ export default function HomePage() {
                 : shortQuery
                   /* 这几个字可能是音标；按钮会先去问音素页。中性说法，别许空诺。 */
                   ? <>库里有 {filtered.length} 个匹配，点词名打开；按「查这个词」查「{kw.trim()}」</>
-                  : <>库里有 {filtered.length} 个匹配，点词名打开；按「查这个词」会新建「{kw.trim()}」</>}
+                  : <>库里有 {filtered.length} 个匹配，点词名打开；本机访问时按「查这个词」会新建「{kw.trim()}」；远程只查不存</>}
           </Typography.Text>
         )}
       </div>
@@ -423,8 +427,8 @@ export default function HomePage() {
           /* 失败时上面已经有那条常驻的「查不到」；这里再摆一份就是同一句话说两遍。 */
           <Notice tone="quiet" title={`库里还没有「${kw.trim()}」`}>
             {shortQuery
-              ? <>按「查这个词」查一下「{kw.trim()}」：是音标就打开那个音的页面，不是就现建词条。</>
-              : <>按「查这个词」就能建：音标、真人录音、音素条、评测都会自动配好。</>}
+              ? <>按「查这个词」查一下「{kw.trim()}」：是音标就打开那个音的页面；否则本机访问会保存词条，远程只查不存。</>
+              : <>按「查这个词」查询音标和发音。本机访问会保存词条并提供评测；远程只查不存。</>}
             <br />
             「为什么会错」那种讲解要去问 AI，它写完会自动出现在这个词的页面上。
           </Notice>

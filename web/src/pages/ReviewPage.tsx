@@ -39,7 +39,7 @@ import Recorder from '../components/Recorder';
  *   ③ 看判定 → 下一个
  *
  * 评分怎么来：
- *   每个音都对         → 记得（下次推远一档；已在最远一档就毕业出列）
+ *   每个音都对         → 记得（连对两次才升一档；已在最远一档、又连对两次就毕业出列）
  *   有确凿的错         → 忘了（打回最短间隔）
  *   没听出音 / 测不了   → **不打分**，让你重录。测不出来就不该猜一个分数
  *   没录就跳过         → **不打分**。没录音就没有证据，跟上一条同理
@@ -60,12 +60,14 @@ export default function ReviewPage() {
   }
 
   const [queue, setQueue] = useState<ReviewCard[] | null>(null);
+  const [session, setSession] = useState<string>();
   const [total, setTotal] = useState(0);
   /** 队列里还没到期的：几张、最早哪天。空队列跟「今天轮不到」得说不同的话 */
   const [upcoming, setUpcoming] = useState<{ count: number; next: string | null }>({ count: 0, next: null });
   const [loadError, setLoadError] = useState<null | 'offline' | 'failed'>(null);
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [blocked, setBlocked] = useState<{ status: number; reason: string } | null>(null);
   /** 最近一次评测结果。tried 为真而这里是 null = 测过但测不出来（边车没起、没听出音） */
   const [judged, setJudged] = useState<PronounceResult | null>(null);
   const [tried, setTried] = useState(false);
@@ -80,11 +82,15 @@ export default function ReviewPage() {
       // upcoming 是后加的字段：旧响应/旧桩里可能没有，按「没有待办」降级，
       // 别让空队列那一屏整个崩掉（跟统计页的 `stuck = []` 同一条）。
       .then((d) => {
+        setSession(d.session);
         setQueue(d.cards);
         setTotal(d.cards.length);
         setUpcoming(d.upcoming ?? { count: 0, next: null });
       })
-      .catch((e) => setLoadError(isOffline(e) ? 'offline' : 'failed'));
+      .catch((e) => {
+        if (e.status === 403 || e.status === 409) setBlocked({ status: e.status, reason: e.message });
+        else setLoadError(isOffline(e) ? 'offline' : 'failed');
+      });
   }, []);
 
   const card = queue?.[0];
@@ -109,7 +115,9 @@ export default function ReviewPage() {
       .then((d) => { if (alive) setDetail(d); })
       .catch((e) => {
         if (!alive) return;
-        if (isNotFound(e)) {
+        if (e.status === 403 || e.status === 409) {
+          setBlocked({ status: e.status, reason: e.message });
+        } else if (isNotFound(e)) {
           message.warning(`「${card.text}」已被删除，跳过这张卡片`);
           advance();
         } else {
@@ -120,12 +128,12 @@ export default function ReviewPage() {
   }, [card, advance]);
 
   const submit = useCallback(async (g: Grade | null) => {
-    if (!card || busy) return;
+    if (!card || busy || blocked) return;
     setBusy(true);
     try {
       // g 为 null = 这次测不出来，不打分直接跳过。测不出来就不该猜一个分数
       if (g) {
-        const r = await api.reviewGrade(card.text, g);
+        const r = await api.reviewGrade(card.text, g, session);
         if (r.graduated) message.success(`「${card.text}」你会了，已从复习队列移出`);
         // 到期数变了；侧栏的「复习 N」和「已评测」不必等下一次换页。
         window.dispatchEvent(new Event(STATS_CHANGED));
@@ -134,7 +142,10 @@ export default function ReviewPage() {
       }
       advance();
     } catch (e) {
-      if (isNotFound(e)) {
+      const error = e as Error & { status?: number };
+      if (error.status === 403 || error.status === 409) {
+        setBlocked({ status: error.status, reason: error.message });
+      } else if (isNotFound(e)) {
         message.warning('这张复习卡片已不存在，跳过');
         advance();
       } else {
@@ -143,12 +154,12 @@ export default function ReviewPage() {
     } finally {
       setBusy(false);
     }
-  }, [card, busy, advance]);
+  }, [card, busy, blocked, advance, session]);
 
   // 打分规则的家在 lib/align.ts 的 gradeOf——纯函数，那边有测试盯着
   const verdict = gradeOf(judged);
 
-  // 键盘：空格 = 下一个（只在录完、且真判出结果之后）。录音不给快捷键——空格误触会开始录音，
+  // 键盘：空格 / 回车 = 下一个（只在录完、且真判出结果之后）。录音不给快捷键——空格误触会开始录音，
   // 那比误触评分更烦。焦点在按钮上时让按钮自己处理，别双触发。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -166,6 +177,14 @@ export default function ReviewPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [tried, submit, verdict.grade]);
+
+  if (blocked) return (
+    <PageResult slug="复习暂停" title="暂时不能继续复习" extra={blocked.status === 409
+      ? <Button type="primary" onClick={() => window.location.reload()}>刷新复习队列</Button>
+      : <Link to="/">回首页查词</Link>}>
+      {blocked.reason}。{blocked.status === 403 ? '请在运行服务的电脑上打开正音进行复习。' : '请刷新复习队列，不要重交这次结果。'}
+    </PageResult>
+  );
 
   // 同上：连不上要的是「怎么把它起起来」，不是「稍后重试」。
   if (loadError === 'offline') return <Offline />;
@@ -204,7 +223,7 @@ export default function ReviewPage() {
           {/* 中文裹进 {'...'}：跨行的 JSXText 会把换行折成一个半角空格，
               渲染出来是「到期—— 刚加进来的」，中间多一个豁口 */}
           {'队列里还有 '}<strong>{upcoming.count}</strong>
-          {` 个词，最早${whenLabel(upcoming.next)}到期——刚加进来的词都从第二天算起，当天已经练过了。`}
+          {` 个词，最早${whenLabel(upcoming.next)}到期——刚加进来的词都从第二天算起，今天不会再排一遍。`}
           <br />
           {'等不及就去'}<Link to="/">首页</Link>{'直接查那个词，随时能录。'}
         </PageResult>

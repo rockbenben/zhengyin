@@ -31,6 +31,12 @@ async function j<R>(res: Promise<Response>): Promise<R> {
   } catch (e) {
     throw offline(e);          // 服务没起 / 被关掉 / 端口变了
   }
+  if (r.status === 403 || r.status === 409) {
+    const body = await r.json().catch(() => null);
+    const error = new Error(typeof body?.error === 'string' ? body.error : 'API ' + r.status) as Error & { status: number };
+    error.status = r.status;
+    throw error;
+  }
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json();
 }
@@ -54,15 +60,28 @@ async function jx<R>(res: Promise<Response>): Promise<R> {
   return body as R;
 }
 
+// 局域网只读模式：写守卫对非本机来源只放行 GET/HEAD，POST /api/entries 会吃 403。
+// 撞到之后打开缺失的词条也改走 /api/lookup——那边只返回分析结果、不落库。否则远程
+// 用户会看到「库里还没有这个词」，并被告知去建一个建不出来的词条。
+// 不持久化：刷新页面后由下一次 403 重新判定（判据是服务端的行为，不是前端记的）。
+let remoteReadOnly = false;
+
 export const api = {
   health: () => j<{ ok: boolean; mwConfigured: boolean }>(fetch('/api/health')),
   runtime: () => j<T.RuntimeInfo>(fetch('/api/runtime')),
   asrStatus: () => j<T.AsrStatusInfo>(fetch('/api/asr/status')),
   asrRestart: () => j<T.AsrStatusInfo>(fetch('/api/asr/restart', { method: 'POST' })),
 
-  addEntry: (text: string) => jx<T.EntryDetail>(fetch('/api/entries', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
-  })),
+  addEntry: async (text: string) => {
+    const response = await fetch('/api/entries', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    }).catch(e => { throw offline(e); });
+    if (response.status === 403) {
+      remoteReadOnly = true;
+      return jx<T.EntryDetail>(fetch(`/api/lookup?text=${encodeURIComponent(text)}`));
+    }
+    return jx<T.EntryDetail>(Promise.resolve(response));
+  },
 
   listEntries: () => j<{ entries: T.EntryListItem[] }>(fetch('/api/entries')),
   // 404 单独剥出来：空状态要按「在不在词典」分叉承诺（服务端在 404 体里给
@@ -75,14 +94,14 @@ export const api = {
     } catch (e) {
       throw offline(e);
     }
+    if (r.status === 404 && remoteReadOnly) return jx<T.EntryDetail>(fetch(`/api/lookup?text=${encodeURIComponent(text)}`));
     if (r.status === 404) {
       const body = await r.json().catch(() => ({})) as { inDictionary?: boolean };
       const err = new Error('API 404') as Error & { notFound?: { inDictionary?: boolean } };
       err.notFound = { inDictionary: body.inDictionary };
       throw err;
     }
-    if (!r.ok) throw new Error(`API ${r.status}`);
-    return r.json();
+    return j<T.EntryDetail>(Promise.resolve(r));
   },
   deleteEntry: (text: string) => j<{ ok: boolean }>(fetch(`/api/entries/${encodeURIComponent(text)}`, {
     method: 'DELETE',
@@ -92,29 +111,28 @@ export const api = {
   getNote: (id: string) => j<T.NoteDetail>(fetch(`/api/notes/${encodeURIComponent(id)}`)),
 
   // upcoming = 队列里还没到期的：几张、最早哪天。空队列和「今天轮不到」要说不同的话
-  reviewDue: () => j<{ cards: T.ReviewCard[]; upcoming: { count: number; next: string | null } }>(
+  reviewDue: () => j<{ session?: string; cards: T.ReviewCard[]; upcoming: { count: number; next: string | null } }>(
     fetch('/api/review/due'),
   ),
   star: (text: string, on: boolean) => jx<{ starred: boolean }>(
     fetch(`/api/review/${encodeURIComponent(text)}/star`, { method: on ? 'PUT' : 'DELETE' }),
   ),
-  reviewGrade: (text: string, grade: T.Grade) => j<T.GradeResult>(fetch(`/api/review/${encodeURIComponent(text)}`, {
+  reviewGrade: (text: string, grade: T.Grade, session?: string) => j<T.GradeResult>(fetch(`/api/review/${encodeURIComponent(text)}`, {
     method: 'POST',
     body: JSON.stringify({ grade }),
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(session ? { 'x-user-session': session } : {}) },
   })),
 
-  // 服务端已不再接收音频：语音识别在浏览器本地完成（Task 17），这里只把识别到的文本 heard
-  // 和目标文本 target 一起交给服务端做音素 diff + 笔记命中。
+  // 这是 vosk 降级那一条路：浏览器自己识别出文本，这里只把 heard 和 target 交给服务端做
+  // 音素 diff + 笔记命中。主路径不经过它——录音直接发给 /api/pronounce，服务端转给边车。
   asr: (target: string, heard: string) => j<T.AsrResult>(fetch('/api/asr', {
     method: 'POST',
     body: JSON.stringify({ target, heard }),
     headers: { 'content-type': 'application/json' },
   })),
 
-  // 给 ASR 识别语法用的"容易混淆的真实词"，音素层面的推导（笔记 phoneme:<ipa>
-  // trigger 共现 + CMUdict 反查）只在服务端做——客户端没有词典，也不该有一份自己
-  // 的音系规则副本（Task 15 定下的原则，web/src/lib/asr.ts 不再自己猜拼写）。
+  // 词典 key 配了没有。Recorder 只用它决定「跟词典比」那条提示要不要建议去设置页配 key，
+  // 不问它「能不能评测」。
   getMwKey: () => j<T.MwKeyState>(fetch('/api/settings/mw-key')),
   setMwKey: (key: string, verify = true) => jx<T.MwKeyState>(fetch('/api/settings/mw-key', {
     method: 'PUT',
@@ -130,8 +148,7 @@ export const api = {
     body: JSON.stringify({ id }),
   })),
 
-  // 录音只在本机两个进程之间走（浏览器 → 30031 → 127.0.0.1:30032 的边车），不落盘、
-  // 不出这台机器。服务端 503 表示边车没起，调用方据此降级回 vosk 二选一。
+  // 发音部位表。整站由 web/src/lib/articulation.ts 缓存一份。
   articulation: () => j<T.ArticulationTable>(fetch('/api/articulation')),
 
   stats: () => j<T.StatsResult>(fetch('/api/stats')),
@@ -144,6 +161,9 @@ export const api = {
 
   // 不走 jx：调用方必须能区分"边车没起"（503 → 降级回 vosk）和"这个词查不到"
   // （400 → 直接告诉用户），而 jx 把状态码丢了只留一条错误消息。
+  //
+  // 录音只在本机两个进程之间走（浏览器 → 本机服务 → 127.0.0.1 上的边车），不落盘、
+  // 不出这台机器。端口不写死：主服务可能是 PORT、边车由服务挑（见 server 的 runtime）。
   /**
    * @param entry 这次录音所属的词条。短语页是逐词录的（"dark night" 里单独录 dark），
    *   而 dark 本身不是词条——不传的话流水和复习卡会记在裸词上，统计里的例词链接打不开、
@@ -178,6 +198,9 @@ export const api = {
     }),
   ),
 
+  // 给 ASR 识别语法用的「容易混淆的真实词」，音素层面的推导（笔记 phoneme:<ipa>
+  // trigger 共现 + CMUdict 反查）只在服务端做——客户端没有词典，也不该有一份自己的
+  // 音系规则副本（web/src/lib/asr.ts 不再自己猜拼写）。
   confusions: (word: string) => j<{ contrasts: T.Contrast[] }>(fetch(`/api/confusions/${encodeURIComponent(word)}`)),
 
   // 整机唯一的「当前用户」，服务端持有。切换是全站范围的事——网页切了，AI 那头

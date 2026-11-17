@@ -1,3 +1,4 @@
+import { phrasePhoneTags } from './features.js';
 import { describe, it, expect } from 'vitest';
 import { parsePhones } from './phones.js';
 import { syllabify } from './syllables.js';
@@ -179,4 +180,8 @@ describe('final-voiced：词尾的浊阻塞音', () => {
     expect(per[0].tags, '词首的 /b/ 被标上了').not.toContain('final-voiced');
     expect(per[2].tags, '词尾的 /d/ 没被标').toContain('final-voiced');
   });
+});
+
+it('does not construct onset clusters across a word boundary', () => {
+  expect(phrasePhoneTags('pick lock').flatMap(p => p.tags)).not.toContain('cluster-onset:kl');
 });

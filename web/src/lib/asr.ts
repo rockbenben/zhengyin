@@ -104,7 +104,8 @@ function loadModel(): Promise<Vosk.Model> {
       }, 120_000);
 
       // 动态 import：vosk-browser 打包后单文件 ~5.8MB（spike 实测 gzip 后 2.4MB），
-      // 不能进主 bundle——只有用户真的点了「评测」才该拉这段代码，不能拖慢首屏。
+      // 不能进主 bundle——只有真要走这条降级路时才该拉它（边车没起、自动那次或手动
+      // 点「重新评测」），不能拖慢首屏。
       // 模型文件名要先问服务端（用户可能刚换过大小模型），跟动态 import 并发跑；
       // 上面那个 120s 超时把这一步也罩住了。
       Promise.all([import('vosk-browser'), modelUrl()])

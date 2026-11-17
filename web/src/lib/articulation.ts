@@ -2,7 +2,7 @@ import { api } from '../api';
 import type { ArticulationTable, Articulation } from '../types';
 
 /**
- * 发音部位表的取用与缓存。整站一次请求，音素条和部位尺共用。
+ * 发音部位表的取用与缓存。lib 内只有一处请求，音素条和部位尺共用；统计页另取自己那份。
  *
  * 表本身由服务端出（server/src/analysis/articulation.ts）——音系知识只在那一处，
  * 前端只负责画和查。

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import chokidar from 'chokidar';
-import { NoteStore, validateTriggers, type Note } from './notes.js';
+import { NoteStore, parseNoteMatter, validateTriggers, type Note } from './notes.js';
 
 const NOTE = `---
 id: test-note
@@ -469,4 +469,10 @@ a
     expect(s.get('a')?.source).toBe('shipped');
     expect(s.dirs).toEqual([shippedDir, join(shippedDir, 'missing'), localDir]);
   });
+});
+
+it('rejects executable frontmatter while accepting YAML and JSON', () => {
+  expect(() => parseNoteMatter('---javascript\n({id:"x"})\n---\nbody')).toThrow();
+  expect(parseNoteMatter('---\r\nid: x\r\n---\r\nbody').data.id).toBe('x');
+  expect(parseNoteMatter('---json\n{"id":"x"}\n---\nbody').data.id).toBe('x');
 });

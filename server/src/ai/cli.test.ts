@@ -6,6 +6,15 @@ const s = (kind: AiCliKind, path = '', customArgs = '', effort = '', model = '')
   ({ cli: { kind, path, customArgs, effort, model } });
 
 describe('CLI 参数', () => {
+  it('Codex 的多行上下文通过 stdin 传递，不经过 Windows 批处理参数', () => {
+    const prompt = '第一行\n任务与资料\n"引号" & 符号';
+    for (const mode of ['text', 'agent'] as const) {
+      const inv = resolveCliInvocation(s('codex'), prompt, mode);
+      expect(inv.args.at(-1)).toBe('-');
+      expect(inv.args).not.toContain(prompt);
+      expect(inv).toHaveProperty('input', prompt);
+    }
+  });
   it('claude 文本模式禁掉全部工具', () => {
     const inv = resolveCliInvocation(s('claude'), 'P', 'text');
     expect(inv.args).toContain('--tools');
@@ -51,11 +60,8 @@ describe('CLI 参数', () => {
     expect(inv.args).not.toContain('--model');
   });
 
-  it('代理模式也带档位和模型（整理是一次长活）', () => {
-    const inv = resolveCliInvocation(s('agy', '', '', 'medium', 'm'), 'P', 'agent');
-    expect(inv.args).toContain('--mode');
-    expect(inv.args[inv.args.indexOf('--effort') + 1]).toBe('medium');
-    expect(inv.args[inv.args.indexOf('--model') + 1]).toBe('m');
+  it('agy 自动整理在启动前明确拒绝未经隔离的文件写入', () => {
+    expect(() => resolveCliInvocation(s('agy', '', '', 'medium', 'm'), 'P', 'agent')).toThrow(/无法限制文件工具/);
   });
 
   it('自定义路径优先生效', () => {
@@ -74,4 +80,13 @@ describe('CLI 参数', () => {
 it('commandExists 认 PATH / 绝对路径，不认识假命令', () => {
   expect(commandExists(process.execPath)).toBe(true);
   expect(commandExists('definitely-not-a-cli-xyz')).toBe(false);
+});
+
+it('requires native confinement and excludes temporary writable roots', () => {
+  const claude = resolveCliInvocation(s('claude'), 'P', 'agent');
+  expect(claude.args).toContain('--restricted');
+  expect(claude.args).toContain('--strict-mcp-config');
+  expect(resolveCliInvocation(s('gemini'), 'P', 'agent').args).toContain('--sandbox');
+  expect(resolveCliInvocation(s('codex'), 'P', 'agent').args).toContain('sandbox_workspace_write.writable_roots=[]');
+  expect(() => resolveCliInvocation(s('custom'), 'P', 'agent')).toThrow(/权限边界/);
 });

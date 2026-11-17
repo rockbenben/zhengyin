@@ -15,7 +15,7 @@ import { isNoise, UNSURE } from '../lib/align';
  * "套没套准"是工艺判断，"对/错"是评判（见 theme.ts 顶部）。
  *
  * **报出来的错**若模型自己拿不准，降成灰色虚线框：显示出来，但绝不冒充成确凿的错。
- * 范围只到错——match 恒为 sure（理由写在 app.ts 算 sure 那一段），所以对上的音不会
+ * 范围只到错——match 恒为 sure（理由写在 judge.ts 算 sure 那一段），所以对上的音不会
  * 出现"拿不准"这一档。虚线框也只挂在报错的格子上，跟这个范围是一致的
  * （styles.css 的 `.op-seg[data-unsure="1"]::before`）。
  *
@@ -32,7 +32,7 @@ import { isNoise, UNSURE } from '../lib/align';
  * 视觉隐喻要能不解释也成立，靠的是那道重影本身，不是给它起个名字。
  */
 function tick(op: AlignOp, sure: boolean): string {
-  // !sure 排在前面。服务端保证 match 恒为 sure（见 app.ts 算 sure 那一段），
+  // !sure 排在前面。服务端保证 match 恒为 sure（见 judge.ts 算 sure 那一段），
   // 所以这一支对 match 到不了；这么排只是不想让"对"抢在"拿不准"前面——
   // 万一哪天 match 又能拿不准，默认行为该是如实说，而不是悄悄说"对"。
   if (!sure) return UNSURE;

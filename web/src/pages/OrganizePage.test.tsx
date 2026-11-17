@@ -23,14 +23,14 @@ const draw = () => render(
 beforeEach(() => vi.restoreAllMocks());
 
 describe('AI 整理', () => {
-  it('接口模式只说明为什么不能整理，不出现开始按钮', async () => {
+  it('接口模式可以整理，并在确认框说明资料发送与保存方式', async () => {
     vi.spyOn(api, 'aiStatus').mockResolvedValue({ ...ready, mode: 'api', provider: '接口·m' });
     vi.spyOn(api, 'aiAgentStatus').mockResolvedValue(idleStatus());
     draw();
 
-    expect(await screen.findByText(/整理需要命令行代理/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '开始整理' })).toBeNull();
-    expect(screen.getByRole('link', { name: /去设置里接上命令行代理/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: '开始整理' }));
+    expect(await screen.findByText(/将发送当前用户完整发音档案/)).toBeTruthy();
+    expect(screen.getByText(/应用校验返回的修改方案后保存/)).toBeTruthy();
   });
 
   it('三种任务都摆出来；自定义没写说明时不能开始', async () => {
@@ -78,19 +78,22 @@ describe('AI 整理', () => {
     });
     vi.spyOn(api, 'aiStatus').mockResolvedValue(ready);
     vi.spyOn(api, 'aiAgentStatus').mockResolvedValue(done);
-    const undo = vi.spyOn(api, 'aiAgentUndo').mockResolvedValue(idleStatus({ state: 'undone', runId: 'r1' }));
+    const undo = vi.spyOn(api, 'aiAgentUndo').mockResolvedValue(idleStatus({ state: 'undone', runId: 'r1', noteWarnings: ['保留后续编辑：x.md'] }));
     draw();
 
     fireEvent.click(await screen.findByRole('button', { name: '撤销这次整理' }));
     await waitFor(() => expect(undo).toHaveBeenCalledOnce());
     expect((await screen.findAllByText('已撤销')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '撤销这次整理' })).toBeNull();
+    expect(screen.getByText('撤销提示')).toBeTruthy();
+    expect(screen.getByText('保留后续编辑：x.md')).toBeTruthy();
+    expect(screen.queryByText('这些笔记没通过检查')).toBeNull();
   });
 
   it('跑的时候显示日志和取消按钮', async () => {
     let st = idleStatus({
       state: 'running', startedAt: Date.now() - 3000, runId: 'r1',
-      logs: ['正在铺参考副本', '正在启动 AI 整理'],
+      logs: ['正在准备整理工作副本', '正在启动 AI 整理'],
     });
     vi.spyOn(api, 'aiStatus').mockResolvedValue(ready);
     vi.spyOn(api, 'aiAgentStatus').mockImplementation(async () => st);
@@ -100,7 +103,7 @@ describe('AI 整理', () => {
     });
     draw();
 
-    expect(await screen.findByText(/正在铺参考副本/)).toBeTruthy();
+    expect(await screen.findByText(/正在准备整理工作副本/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '取消整理' }));
 
     await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
@@ -116,9 +119,23 @@ describe('AI 整理', () => {
     }));
     draw();
 
-    expect(await screen.findByText(/代理动了不该动的文件/)).toBeTruthy();
+    expect(await screen.findByText(/检测到整理范围外的文件变动/)).toBeTruthy();
     expect(screen.getByText(/data\/当前用户\.txt（修改）/)).toBeTruthy();
     expect(screen.getByText(/AUTO 统计标记被改坏了/)).toBeTruthy();
     expect(screen.getByText(/claude 退出码 1/)).toBeTruthy();
   });
+});
+
+it('接口模式范围外变动不归咎代理，正常校验告警仍保留', async () => {
+  vi.spyOn(api, 'aiStatus').mockResolvedValue({ ...ready, mode: 'api' });
+  vi.spyOn(api, 'aiAgentStatus').mockResolvedValue(idleStatus({
+    state: 'error', runId: 'r1', noteWarnings: ['缺少自检法'],
+    outOfScope: [{ path: 'data/当前用户.txt', kind: 'modified' }],
+  }));
+  draw();
+  expect(await screen.findByText('检测到整理范围外的文件变动')).toBeTruthy();
+  expect(screen.queryByText(/代理动了/)).toBeNull();
+  expect(screen.getByText('这些笔记没通过检查')).toBeTruthy();
+  expect(screen.getByText('缺少自检法')).toBeTruthy();
+  expect(screen.getByText(/这些不在撤销范围内/)).toBeTruthy();
 });

@@ -37,7 +37,7 @@ const { default: SettingsPage } = await import('./SettingsPage');
  * 设置页有一句「服务起来时会在窗口里打一行「…」」。上一版引的是
  * **「TO STOP: just close this window」**——那句英文在两次改动之后就没了：
  * 启动器改说中文（字搬进 scripts/msg/*.txt），停止提示挪进服务的启动输出
- * （改成中文的「要停下来：关掉这个窗口，或者按 Ctrl+C」）。
+ * （也改成了中文，具体那句以 STOP_HINT 为准）。
  * 全仓库一个字都不剩，而设置页还在原样引着它，**照着做的人会去窗口里找一句
  * 根本不会出现的话**。
  *

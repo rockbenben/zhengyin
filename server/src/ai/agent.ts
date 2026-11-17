@@ -7,10 +7,14 @@ import type Database from 'better-sqlite3';
 import type { NoteStore } from '../notes.js';
 import { BEGIN, END, syncProfile } from '../profile.js';
 import { reconcileAttempts } from '../reconcile.js';
+import { openDb } from '../db.js';
 import { writeFileAtomic } from '../atomic.js';
 import { readAiSettings } from './settings.js';
-import { killTree, resolveCliInvocation, runCliAgent } from './cli.js';
+import { agentBoundaryError, killTree, resolveCliInvocation, runCliAgent } from './cli.js';
+import { prepareAgentWorkspace, commitAgentWorkspace } from './staging.js';
 import { buildAgentPrompt } from './context.js';
+import { aiStatus, runAiText } from './run.js';
+import { buildPlanMessages, stagePlan } from './plan.js';
 
 /** 代理能用的两件事：读当前用户的档案与笔记，写本机笔记和档案手写两节。 */
 export interface AgentDeps {
@@ -43,7 +47,7 @@ export interface Snapshot {
   profile: string | null;
   /** 本机笔记：目录内相对路径（POSIX 分隔）→ 内容 */
   notes: Record<string, string>;
-  /** data/ 的基线（除 audio/models/ai-runs）：相对路径 → 内容 hash。只用于越界检测 */
+  /** data/ 的基线（除 audio/models/asr/ai-runs/ai-workspace）：相对路径 → 内容 hash。只用于越界检测 */
   data: Record<string, string>;
 }
 
@@ -67,6 +71,7 @@ export interface AgentStatus {
 
 export type AgentTask = 'organize' | 'profile' | 'custom';
 
+/** `cwd` 与 `prompt` 只给注入的假实现用；默认实现按模式自己准备工作副本和提示词，不看这两个字段。 */
 export interface AgentRunArgs {
   cwd: string;
   prompt: string;
@@ -75,7 +80,7 @@ export interface AgentRunArgs {
 }
 export type AgentRunResult = { code: number | null; output: string; displayName?: string };
 export type AgentRunFn = (args: AgentRunArgs) => Promise<AgentRunResult>;
-export interface AgentRunnerOptions { runAgent?: AgentRunFn }
+export interface AgentRunnerOptions { runAgent?: AgentRunFn; runText?: typeof runAiText }
 
 /** app.ts 只依赖这四个动作；测试注入的假实现不用碰进程和文件。 */
 export interface AgentController {
@@ -90,7 +95,7 @@ const relTo = (root: string, p: string): string => posix(relative(root, p));
 const joinRel = (a: string, b: string): string => (a ? `${a.replace(/\/+$/, '')}/${b}` : b);
 const sha1 = (buf: Buffer): string => createHash('sha1').update(buf).digest('hex');
 
-const EXCLUDED_TOP = new Set(['audio', 'models', 'ai-runs']);
+const EXCLUDED_TOP = new Set(['audio', 'models', 'asr', 'ai-runs', 'ai-workspace']);
 const MAX_LOGS = 500;
 
 function walkFiles(root: string, rel = ''): string[] {
@@ -188,7 +193,7 @@ export function diffSnapshots(before: Snapshot, after: Snapshot): SnapshotDiff {
   return { added: sort(added), modified: sort(modified), removed: sort(removed) };
 }
 
-/** 把随附笔记与提示词复制到 appRoot 下的只读参考副本。每次整理前全量刷新。 */
+/** 把随附笔记与提示词复制到 appRoot 下的只读参考副本（先删后拷）。只在测试注入 runAgent 时铺；生产由 staging 在命令行整理的工作副本里铺，接口整理不铺。 */
 export function prepareReference(appRoot: string, shippedNotes: string, workflowsDir: string): void {
   const target = join(appRoot, '.ai-reference');
   mkdirSync(target, { recursive: true });
@@ -208,35 +213,49 @@ const safeRel = (rel: string): boolean =>
 /**
  * 用快照恢复档案和本机笔记。
  *
- * **不读 `data/ai-runs` 下的 snapshot.json**：代理的 cwd 就是 appRoot，它够得着那个文件。
+ * `snapshot` 是运行前的状态，`after` 是这次整理提交后的状态：只有两者不同的文件才算
+ * 整理动过，也才可能回滚。运行结束之后又被改过的文件不覆盖——保留后来的编辑，
+ * 并在返回的冲突告警里点名。
+ *
+ * **不读 `data/ai-runs` 下的 snapshot.json**：命令行代理的 cwd 就在 `data/ai-runs/<runId>/workspace`，上一层的那个文件它够得着。
  * 拿磁盘上的 JSON 决定「删哪些笔记、还原哪份档案」，等于把撤销交给被撤销的对象。
- * 撤销只用进程里这份（`AgentRunner.lastSnapshot`）——重启后本来也没有撤销入口。
+ * 撤销只用进程里这两份快照（`AgentRunner.lastSnapshot` / `lastAfter`）——重启后本来也没有撤销入口。
  *
  * 档案路径仍然要校验在 appRoot 内、笔记相对路径不许带 `..`；写回**快照里那个用户**
  * 的位置，不是「现在切到的用户」——切了人再撤销，也不该把旧内容盖到新用户的档案上。
  */
-function restoreFromSnapshot(snapshot: Snapshot, deps: AgentSnapshotDeps): void {
+function restoreFromSnapshot(snapshot: Snapshot, after: Snapshot, deps: AgentSnapshotDeps): string[] {
+  const conflicts: string[] = [];
   const profilePath = resolve(deps.appRoot, snapshot.profileRel);
   const rel = relative(deps.appRoot, profilePath);
   if (rel.startsWith('..') || resolve(deps.appRoot, rel) !== profilePath) {
     throw new Error('快照里的档案路径不在应用目录里，拒绝撤销');
   }
 
-  rmSync(deps.localNotes, { recursive: true, force: true });
-  mkdirSync(deps.localNotes, { recursive: true });
-  for (const [noteRel, text] of Object.entries(snapshot.notes)) {
+  const current = snapshotAllowed(deps);
+  const changed = new Set([...Object.keys(snapshot.notes), ...Object.keys(after.notes)]);
+  for (const noteRel of changed) {
     if (!safeRel(noteRel)) throw new Error(`快照里的笔记路径不安全：${noteRel}`);
+    if (snapshot.notes[noteRel] === after.notes[noteRel]) continue;
+    if (current.notes[noteRel] !== after.notes[noteRel]) { conflicts.push(`保留后续编辑：${noteRel}`); continue; }
     const p = join(deps.localNotes, ...noteRel.split('/'));
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileAtomic(p, text);
+    if (snapshot.notes[noteRel] === undefined) {
+      if (existsSync(p)) unlinkSync(p);
+    } else {
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileAtomic(p, snapshot.notes[noteRel]);
+    }
   }
-
-  if (snapshot.profile === null) {
-    if (existsSync(profilePath)) unlinkSync(profilePath);
-  } else {
-    mkdirSync(dirname(profilePath), { recursive: true });
-    writeFileAtomic(profilePath, snapshot.profile);
+  if (current.profile !== after.profile) conflicts.push('保留档案的后续编辑');
+  if (current.profile === after.profile && snapshot.profile !== after.profile) {
+    if (snapshot.profile === null) {
+      if (existsSync(profilePath)) unlinkSync(profilePath);
+    } else {
+      mkdirSync(dirname(profilePath), { recursive: true });
+      writeFileAtomic(profilePath, snapshot.profile);
+    }
   }
+  return conflicts;
 }
 
 function countOf(text: string, needle: string): number {
@@ -267,7 +286,7 @@ const TASK_TEXT: Record<Exclude<AgentTask, 'custom'>, string> = {
 };
 
 /**
- * 一次 AI 整理。同一时间只允许一个；跑完留下快照，可以整批撤销。
+ * 一次 AI 整理。同一时间只允许一个；跑完留下快照，可以撤销这次提交的改动（之后又被改过的文件保留后来的编辑）。
  *
  * 快照只覆盖**允许写的东西**（本机笔记 + 当前用户档案）。data/ 下其余文件在运行结束后
  * 会做一次差异检查，动了就列进 outOfScope——那些不撤销，只提醒人自己看。
@@ -291,7 +310,9 @@ export class AgentRunner implements AgentController {
   private childPid: number | undefined;
   private counter = 0;
   private lastSnapshot: Snapshot | null = null;
+  private lastAfter: Snapshot | null = null;
   private lastDb: Database.Database | null = null;
+  private apiAbort: AbortController | null = null;
 
   constructor(private deps: AgentDeps, private opts: AgentRunnerOptions = {}) {}
 
@@ -340,14 +361,16 @@ export class AgentRunner implements AgentController {
     const db = this.deps.db;
     this.lastDb = db;
     let before: Snapshot | null = null;
+    const submittedNotes = new Set<string>();
+    let submittedProfile = false;
 
     try {
-      // 默认运行器只会走命令行。接口模式在这里就停住：快照、参考副本、同步档案
-      // 一个都别做——一次注定不开始的整理不该在用户档案上留下任何改动。
-      if (!this.opts.runAgent && readAiSettings(this.deps.dataDir).mode !== 'cli') {
-        this.state.state = 'error';
-        this.state.error = '整理需要命令行代理：接口模式只能讲解，不能读写文件。';
-        return;
+      const settings = readAiSettings(this.deps.dataDir);
+      if (!this.opts.runAgent) {
+        if (!settings.consent) throw new Error('请先在设置中同意使用 AI 整理资料。');
+        const reason = settings.mode === 'cli' ? agentBoundaryError(settings.cli.kind)
+          : aiStatus(settings, () => false).reason;
+        if (reason) throw new Error(reason);
       }
 
       const taskText = task === 'custom' ? (note ?? '').trim() : TASK_TEXT[task];
@@ -360,27 +383,47 @@ export class AgentRunner implements AgentController {
       mkdirSync(runDir, { recursive: true });
       writeFileAtomic(join(runDir, 'snapshot.json'), `${JSON.stringify(before, null, 2)}\n`);
       this.lastSnapshot = before;
+      this.lastAfter = null;
       this.state.runId = runId;
 
-      this.log('正在铺参考副本');
-      prepareReference(deps.appRoot, this.deps.shippedNotes, this.deps.workflowsDir);
+      this.log('正在准备整理工作副本');
+      if (this.opts.runAgent) prepareReference(deps.appRoot, this.deps.shippedNotes, this.deps.workflowsDir);
 
       const prompt = buildAgentPrompt({
         ...deps,
         db,
         noteStore: this.deps.noteStore,
-        workflowsDir: this.deps.workflowsDir,
         userName,
       }, taskText, task === 'custom' ? undefined : note);
 
       const runAgent: AgentRunFn = this.opts.runAgent ?? (async ({ cwd, prompt: p, onLog, onChild }) => {
-        const settings = readAiSettings(this.deps.dataDir);
-        if (settings.mode !== 'cli') {
-          throw new Error('整理需要命令行代理：接口模式只能讲解，不能读写文件。');
+        // 只有命令行整理需要文件形态的参考副本；接口整理的资料直接拼进消息，不铺 .ai-reference。
+        const staged = prepareAgentWorkspace(join(runDir, 'workspace'), deps, this.deps.shippedNotes, this.deps.workflowsDir, settings.mode === 'cli');
+        let r: AgentRunResult;
+        if (settings.mode === 'api') {
+          const messages = buildPlanMessages(before!, this.deps.noteStore, this.deps.workflowsDir, taskText, userName);
+          const reservedIds = new Set(this.deps.noteStore.all().map(n => n.id));
+          this.apiAbort = new AbortController();
+          if (this.cancelRequested) this.apiAbort.abort();
+          onLog('正在请求整理方案；返回后由应用检查并保存');
+          const response = await (this.opts.runText ?? runAiText)(settings, messages, { signal: this.apiAbort.signal, maxTokens: 8192 });
+          if (this.cancelRequested) return { code: null, output: '' };
+          const summary = stagePlan(response.text, staged, before!, reservedIds);
+          if (summary) onLog(summary);
+          r = { code: 0, output: summary, displayName: response.provider };
+        } else {
+          const stagedPrompt = buildAgentPrompt({ ...staged, db, noteStore: this.deps.noteStore, userName }, taskText, task === 'custom' ? undefined : note);
+          const inv = resolveCliInvocation(settings, stagedPrompt, 'agent');
+          r = { ...await runCliAgent(inv, { cwd: staged.appRoot, onLog, onChild }), displayName: inv.displayName };
         }
-        const inv = resolveCliInvocation(settings, p, 'agent');
-        const r = await runCliAgent(inv, { cwd, onLog, onChild });
-        return { ...r, displayName: inv.displayName };
+        if (r.code === 0 && !this.cancelRequested) {
+          if (this.deps.db !== db || this.deps.profileFile !== deps.profileFile) throw new Error('整理期间用户已切换，本次改动未保存。');
+          commitAgentWorkspace(staged, deps, before!, name => {
+            if (name === null) submittedProfile = true;
+            else submittedNotes.add(name);
+          });
+        }
+        return r;
       });
 
       this.log('正在启动 AI 整理');
@@ -396,15 +439,25 @@ export class AgentRunner implements AgentController {
           },
         });
       } catch (e) {
-        this.state.error = (e as Error).message;
+        if (!this.cancelRequested) this.state.error = (e as Error).message;
         result = { code: null, output: '' };
       }
 
       // 越界检查必须在下面这些「我们自己写 DB/档案」的动作之前：
       // reconcile 会改 index.db、syncProfile 会改档案，晚一步就会把它们当成代理改的。
       this.state.outOfScope = this.detectOutOfScope(deps, before);
-      const postWarnings = this.postProcess(deps, db);
+      const postWarnings = this.opts.runAgent || (result.code === 0 && !this.cancelRequested)
+        || submittedNotes.size > 0 || submittedProfile ? this.postProcess(deps, db) : [];
       const after = snapshotAllowed(deps);
+      this.lastAfter = this.opts.runAgent ? after : {
+        ...before,
+        notes: { ...before.notes },
+        profile: submittedProfile ? after.profile : before.profile,
+      };
+      if (!this.opts.runAgent) for (const name of submittedNotes) {
+        if (after.notes[name] === undefined) delete this.lastAfter.notes[name];
+        else this.lastAfter.notes[name] = after.notes[name];
+      }
       this.state.changed = diffSnapshots(before, after);
       this.state.noteWarnings = [
         ...postWarnings,
@@ -429,6 +482,12 @@ export class AgentRunner implements AgentController {
       this.state.error = (e as Error).message;
       if (before) {
         try {
+          const after = snapshotAllowed(deps);
+          this.lastAfter = this.opts.runAgent ? after : { ...before, notes: { ...before.notes }, profile: submittedProfile ? after.profile : before.profile };
+          if (!this.opts.runAgent) for (const name of submittedNotes) {
+            if (after.notes[name] === undefined) delete this.lastAfter.notes[name];
+            else this.lastAfter.notes[name] = after.notes[name];
+          }
           this.state.changed = diffSnapshots(before, snapshotAllowed(deps));
         } catch { /* 快照都算不出来时，至少把错误报出去 */ }
       }
@@ -437,6 +496,7 @@ export class AgentRunner implements AgentController {
       this.state.cancelling = false;
       this.running = false;
       this.childPid = undefined;
+      this.apiAbort = null;
     }
   }
 
@@ -444,13 +504,14 @@ export class AgentRunner implements AgentController {
     if (!this.running) return;
     this.cancelRequested = true;
     this.state.cancelling = true;
-    this.log('已请求取消，正在停掉代理');
+    this.apiAbort?.abort();
+    this.log('已请求取消，正在停掉这次整理');
     killTree(this.childPid);
   }
 
   undo(): void {
     if (this.running) throw new Error('整理还在跑，等它结束再撤销。');
-    if (!this.lastSnapshot) throw new Error('这一次还没有可撤销的整理。');
+    if (!this.lastSnapshot || !this.lastAfter) throw new Error('这一次还没有可撤销的整理。');
     const snap = this.lastSnapshot;
     const profilePath = resolve(this.deps.appRoot, snap.profileRel);
     // 撤销之后，上一次运行留下的笔记告警已经随着文件一起回滚了；
@@ -458,7 +519,7 @@ export class AgentRunner implements AgentController {
     this.state.noteWarnings = [];
     this.state.error = null;
 
-    restoreFromSnapshot(snap, {
+    this.state.noteWarnings = restoreFromSnapshot(snap, this.lastAfter, {
       appRoot: this.deps.appRoot,
       dataDir: this.deps.dataDir,
       localNotes: this.deps.localNotes,
@@ -470,7 +531,9 @@ export class AgentRunner implements AgentController {
     } catch (e) {
       this.state.noteWarnings = [...this.state.noteWarnings, `撤销后重扫笔记失败：${(e as Error).message}`];
     }
-    const db = this.lastDb ?? this.deps.db;
+    const originalDb = this.lastDb ?? this.deps.db;
+    const reopened = !originalDb.open;
+    const db = reopened ? openDb(originalDb.name) : originalDb;
     try {
       reconcileAttempts(db, this.deps.noteStore.all());
     } catch (e) {
@@ -480,6 +543,8 @@ export class AgentRunner implements AgentController {
       syncProfile(profilePath, db, this.deps.noteStore, this.deps.now());
     } catch (e) {
       this.state.noteWarnings = [...this.state.noteWarnings, `撤销后同步发音档案失败：${(e as Error).message}`];
+    } finally {
+      if (reopened) db.close();
     }
 
     this.state.state = 'undone';

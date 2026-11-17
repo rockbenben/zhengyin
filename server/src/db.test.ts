@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { heardByPosition, latestAttemptFor, logAttempt, openDb, upsertEntry, getEntry, listEntries, deleteEntry, addAudio, getAudio, audioFileInUse } from './db.js';
+import { heardByPosition, latestAttemptFor, logAttempt, openDb, upsertEntry, getEntry, listEntries, deleteEntry, addAudio, getAudio } from './db.js';
 
 const words = [{
   word: 'click', found: true, arpabet: ['K', 'L', 'IH1', 'K'], ipa: 'ˈklɪk', tags: ['phoneme:l'],
@@ -48,19 +48,6 @@ describe('db', () => {
     expect(e.words[0].phoneTags).toEqual(withPhoneTags[0].phoneTags);
   });
 
-  it('audioFileInUse reflects whether any remaining audio row references a filename', () => {
-    const db = openDb(':memory:');
-    upsertEntry(db, 'black cat', words, 't1');
-    upsertEntry(db, 'black', words, 't1');
-    addAudio(db, { entryText: 'black cat', word: 'black', source: 'mw', file: 'black-mw.mp3' });
-    addAudio(db, { entryText: 'black', word: 'black', source: 'mw', file: 'black-mw.mp3' });
-    expect(audioFileInUse(db, 'black-mw.mp3')).toBe(true);
-    deleteEntry(db, 'black cat');
-    // "black" still has a row pointing at the same shared filename.
-    expect(audioFileInUse(db, 'black-mw.mp3')).toBe(true);
-    deleteEntry(db, 'black');
-    expect(audioFileInUse(db, 'black-mw.mp3')).toBe(false);
-  });
 
 });
 

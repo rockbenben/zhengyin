@@ -236,7 +236,7 @@ triggers: [phoneme:l]
     expect(runner.status().cancelling).toBe(false);
   });
 
-  it('接口模式不启动文件代理，也不在档案上留下改动', async () => {
+  it('未配置的接口不发送整理资料，也不在档案上留下改动', async () => {
     const deps = agentDeps();
     writeFileSync(join(deps.dataDir, 'ai-settings.json'), JSON.stringify({
       schemaVersion: 1, consent: true, mode: 'api', endpointId: '', endpoints: {},
@@ -248,7 +248,25 @@ triggers: [phoneme:l]
     await runner.run('organize');
 
     expect(runner.status().state).toBe('error');
-    expect(runner.status().error).toContain('命令行代理');
+    expect(runner.status().error).toContain('还没选接口');
     expect(readFileSync(deps.profileFile, 'utf8')).toBe(before);
   });
+});
+
+it('undo preserves notes created and edited after the run', async () => {
+  const deps = agentDeps();
+  const file = join(deps.localNotes, 'changed.md');
+  writeFileSync(file, noteMd('changed', 'before'));
+  const runner = new AgentRunner(deps, { runAgent: async () => {
+    writeFileSync(file, noteMd('changed', 'agent'));
+    return { code: 0, output: '' };
+  }});
+  await runner.run('profile');
+  writeFileSync(file, noteMd('changed', 'later'));
+  const added = join(deps.localNotes, 'later.md');
+  writeFileSync(added, noteMd('later', 'later'));
+  runner.undo();
+  expect(readFileSync(file, 'utf8')).toContain('title: later');
+  expect(existsSync(added)).toBe(true);
+  deps.db.close();
 });

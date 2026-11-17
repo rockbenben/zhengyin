@@ -59,9 +59,8 @@ const GROUPS: Array<{ key: SettingsGroup; label: string; hint: string }> = [
   { key: 'move', label: '搬家', hint: '练习记录导出与导入：换电脑时用。' },
 ];
 
-// 设置页：Merriam-Webster 词典 API key + 评测模型。
-//
-// 为什么值得做成页面而不是让人去改 .env：配不配这个 key 决定了你听到的是**真人录音**还是
+// 词典 key 这张卡：为什么值得做成页面而不是让人去改 .env ——
+// 配不配这个 key 决定了你听到的是**真人录音**还是
 // 合成音，而这正是发音练习里最要紧的差别。让用户为此去翻文档、找文件、还得重启服务，
 // 门槛高得没必要。保存后立即生效（服务端只改内存里的那个字段，同时写进 .env 以便下次启动）。
 export default function SettingsPage() {

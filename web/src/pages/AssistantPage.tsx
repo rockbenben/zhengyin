@@ -89,7 +89,7 @@ export default function AssistantPage() {
         slug="AI"
         title="AI 助教"
         meta={ready
-          ? `由 ${status.provider} 回答；对话只存在这台机器上`
+          ? `由 ${status.provider} 回答；对话记录只存在这台机器上`
           : '还没接上 AI'}
       />
 

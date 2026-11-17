@@ -72,10 +72,13 @@ describe('模型来源的几条底线', () => {
     expect(py).toMatch(/MODEL_SOURCE == "modelscope"[\s\S]{0,300}?raise RuntimeError/);
   });
 
-  it('MODEL_SOURCE 从环境读——它要能被 .env 管到（靠 scripts/asr.mjs 那层包装）', () => {
+  it('MODEL_SOURCE 从环境读——服务托管和手工单跑都得管到 .env', () => {
     expect(py).toMatch(/MODEL_SOURCE\s*=\s*os\.environ\.get\("MODEL_SOURCE"/);
     const wrapper = readFileSync(join(root, 'scripts', 'asr.mjs'), 'utf8');
-    expect(wrapper, '包装不合并 .env 的话 MODEL_SOURCE 传不进去').toMatch(/parseEnv/);
+    // 服务托管边车时 server 自己读 .env、把 MODEL_SOURCE / HF_ENDPOINT 放进子进程环境
+    // （server/src/index.ts 的 AsrManager）；这层包装管的是开发模式和手工单跑——
+    // 不合并 .env 的话，单独跑边车的人换不了源。
+    expect(wrapper, '包装不合并 .env 的话，手工单跑的边车换不了源').toMatch(/parseEnv/);
   });
 
   it('modelscope 写进了依赖，不然 import 会失败', () => {
@@ -83,8 +86,10 @@ describe('模型来源的几条底线', () => {
     expect(toml).toMatch(/modelscope/);
   });
 
-  it('日志要说得出模型是从哪来的——启动窗口是唯一能看见下载进度的地方', () => {
-    // 光 getLogger 不配 handler 的话，uvicorn 下一行都打不出来（原来就是这样）
+  it('日志要说得出模型是从哪来的——下载进度只在这份日志里', () => {
+    // 光 getLogger 不配 handler 的话，uvicorn 下一行都打不出来（原来就是这样）。
+    // 这些行由 AsrManager 收进 /api/asr/status 的 log，页面 AsrStatus 展开就能看到——
+    // 桌面版没有启动窗口，不能让人回终端里找。
     expect(py, '没配 handler，日志根本不会出现').toMatch(/logging\.basicConfig/);
     expect(py).toMatch(/来源/);
   });

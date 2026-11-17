@@ -115,13 +115,14 @@ describe('buildAgentPrompt', () => {
     const localNotes = join(tmpdir(), 'local-notes');
     const prompt = buildAgentPrompt({
       db, noteStore, profileFile, appRoot, localNotes,
-      workflowsDir: join(appRoot, 'workflows'), userName: '小明',
+      userName: '小明',
     }, '把 l/n 的笔记补好', '别覆盖别人的档案');
 
     expect(prompt).toContain('小明');
     expect(prompt).toContain(localNotes);
     expect(prompt).toContain(profileFile);
-    expect(prompt).toContain(join(appRoot, '.ai-reference', 'workflows', 'agent.md'));
+    expect(prompt.split(join(appRoot, '.ai-reference', 'workflows', 'agent.md'))).toHaveLength(2);
+    expect(prompt).not.toContain(join(appRoot, 'workflows', 'agent.md'));
     expect(prompt).toContain('已确认的习惯问题');
     expect(prompt).toContain('把 l/n 的笔记补好');
     expect(prompt).toContain('别覆盖别人的档案');

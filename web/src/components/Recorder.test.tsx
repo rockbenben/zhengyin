@@ -369,7 +369,7 @@ describe('判定本身要落到屏幕上', () => {
       heardIpa: ['b', 'æ'],
       align: [
         { kind: 'match', targetIpa: 'b', heardIpa: 'b', conf: 0.97, sure: true },
-        // sub + 低置信 = 服务端真能吐出来的"拿不准的错"（match 恒 sure，见 app.ts）
+        // sub + 低置信 = 服务端真能吐出来的"拿不准的错"（match 恒 sure，见 judge.ts）
         { kind: 'sub', targetIpa: 'ʊ', heardIpa: 'æ', conf: 0.2, sure: false },
       ],
     });

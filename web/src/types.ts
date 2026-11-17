@@ -171,7 +171,8 @@ export interface CardState {
   streak?: number;
 }
 
-// POST /api/asr 里 notes 数组每一项（不含 matched/markdown，比 EntryDetailNote 少两个字段）
+// POST /api/asr 里 notes 数组每一项（只有 id/title/severity；EntryDetailNote 还多
+// matched、markdown、relevant、becauseOf 四个字段）
 // server/src/app.ts app.post('/api/asr', ...)
 export interface AsrNoteHit {
   id: string;
@@ -179,8 +180,8 @@ export interface AsrNoteHit {
   severity: Severity;
 }
 
-// POST /api/asr 的响应。注意：该接口不再接收音频，body 是 { target, heard } 两个已识别好的文本，
-// 由服务端做逐词音素 diff + 笔记命中（语音识别本身在浏览器端完成，见 Task 17）。
+// POST /api/asr 的响应（vosk 降级路）。该接口不收音频，body 是 { target, heard } 两个已识别好的
+// 文本，由服务端做逐词音素 diff + 笔记命中。主路径的识别在服务端转给边车，见 /api/pronounce。
 // server/src/app.ts app.post('/api/asr', ...)
 export interface AsrResult {
   match: boolean;
@@ -287,6 +288,7 @@ export interface PronounceResult {
    * **false 时界面必须说出来**：静悄悄地不计入比计入更糟。
    */
   recorded: boolean;
+  persistenceWarning?: string | null;
   /** recorded 为 false 时的原因，直接显示给用户 */
   notRecordedReason: string | null;
   align: AlignOp[];
@@ -314,9 +316,9 @@ export interface StatsResult {
     lastAt: string;
     /**
      * 值不值得为它单写一篇音素笔记。**服务端算好的**（profile.ts 的 worthANote：
-     * ≥3 次、且跨 ≥2 个词），前端只渲染结论——判据留在前端会长出第二份，
-     * 而它一度真的长出来了：同一句「这些音反复出错」在发音档案里是 2 条、
-     * 在统计页上是 14 条。
+     * ≥3 次，且**跨 ≥2 个词或有 ≥3 次整条转写只错这一个音**——两条证据任一成立都够），
+     * 前端只渲染结论——判据留在前端会长出第二份，而它一度真的长出来了：
+     * 同一句「这些音反复出错」在发音档案里是 2 条、在统计页上是 14 条。
      */
     worthANote: boolean;
     words: string[];
@@ -409,6 +411,7 @@ export interface AiStatusInfo {
   consent: boolean;
   provider: string | null;
   reason: string | null;
+  agentReason?: string | null;
 }
 
 /** POST /api/ai/test */

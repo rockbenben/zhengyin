@@ -40,3 +40,12 @@ describe('写请求守卫', () => {
     expect((await app().request('/x', { headers: { origin: 'https://evil.test' } })).status).toBe(200);
   });
 });
+
+it('checks socket peer, ignoring forwarded loopback claims', async () => {
+  const a = app();
+  const env = { incoming: { socket: { remoteAddress: '192.168.1.2' } } };
+  expect((await a.request('/x', { method: 'POST' }, env)).status).toBe(200);
+  const remote = await a.request('/api/backup', { headers: { 'x-forwarded-for': '127.0.0.1' } }, env);
+  expect(remote.status).toBe(403);
+  expect((await a.request('/api/entries', { method: 'POST' }, env)).status).toBe(403);
+});

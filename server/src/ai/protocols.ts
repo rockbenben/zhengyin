@@ -71,12 +71,15 @@ async function parseError(res: Response, url: string): Promise<AiError> {
 export async function callAi(
   config: AiConfig,
   messages: AiMessage[],
-  opts: { fetchFn?: typeof fetch; timeoutMs?: number; maxTokens?: number } = {},
+  opts: { fetchFn?: typeof fetch; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
   const fetchFn = opts.fetchFn ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const maxTokens = opts.maxTokens ?? 4096;
   const ac = new AbortController();
+  const abort = () => ac.abort();
+  opts.signal?.addEventListener('abort', abort, { once: true });
+  if (opts.signal?.aborted) ac.abort();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   try {
@@ -146,10 +149,12 @@ export async function callAi(
   } catch (e) {
     if (e instanceof AiError) throw e;
     if ((e as { name?: string }).name === 'AbortError') {
+      if (opts.signal?.aborted) throw new AiError(499, 'AI 请求已取消。');
       throw new AiError(504, `AI 超过 ${Math.round(timeoutMs / 1000)}s 没有返回。`);
     }
     throw new AiError(502, `连不上 AI 服务：${redactUrl(config.baseUrl)}（${(e as Error).message}）`);
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', abort);
   }
 }

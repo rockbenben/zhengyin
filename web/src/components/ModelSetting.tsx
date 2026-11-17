@@ -55,7 +55,7 @@ export default function ModelSetting() {
           <strong>这是退路，不是主力。</strong>平时评测走的是本机的音素识别服务，
           {'它能说出你实际发的是什么音。'}
           {'只有那个服务没启动时才退到这里的浏览器模型——它只能在几个易混词里挑一个，'}
-          {'说不出你实际发了什么。录音都不上传、不落盘。'}
+          {'说不出你实际发了什么。录音不出这台机器、也不落盘。'}
         </Typography.Paragraph>
 
         <Radio.Group

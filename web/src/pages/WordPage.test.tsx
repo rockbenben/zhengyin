@@ -306,3 +306,10 @@ describe('服务答非所问（500）时不许说「库里还没有」', () => {
     stub.http500 = false;
   });
 });
+it('缺词提示说明远程查询不保存，本机才保存并提供评测', async () => {
+  const c = await draw();
+  const body = c.querySelector('.result-body')!.textContent;
+  expect(body).toContain('远程只查不存');
+  expect(body).toContain('本机访问会保存词条');
+  expect(body).toContain('本机访问时，词典收录的词就能建');
+});

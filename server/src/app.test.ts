@@ -36,7 +36,7 @@ severity: confirmed
   // 原来只写 phoneme:n（为了不让它连带命中 click、带偏 noteCount 断言），
   // 但那让 fixture 变得不真实：评测结果按**错误的那一对**匹配（替换是关于一对音的），
   // 只声明一边的笔记教不了 n→l 这个混淆，于是一堆用例在规则改对之后反而红了——
-  // 红得对，是 fixture 假。click 那处 noteCount 相应改成 2。
+  // 红得对，是 fixture 假。click 那处命中篇数相应改成 2。
   writeFileSync(join(notesDir, 'l-vs-n.md'), `---
 id: l-vs-n
 title: l/n 混淆
@@ -77,9 +77,7 @@ severity: confirmed
     noteStore,
     localNotes,
     dataDir: mkdtempSync(join(tmpdir(), 'data-')),
-    appRoot: process.cwd(),
     workflowsDir: join(process.cwd(), 'workflows'),
-    shippedNotes: join(process.cwd(), 'notes'),
     audioDir: mkdtempSync(join(tmpdir(), 'audio-')),
     mwKey: 'TESTKEY',
     fetchMw: vi.fn().mockResolvedValue('click-mw.mp3'),
@@ -411,7 +409,7 @@ describe('entries api', () => {
     expect(remainingJson.audio.some((a: any) => a.url === '/api/audio/black-mw.mp3')).toBe(true);
   });
 
-  it('DELETE unlinks the audio file once no remaining entry references it', async () => {
+  it('DELETE preserves the shared audio cache for other users', async () => {
     const deps = testDeps();
     (deps.fetchMw as any).mockImplementation(async (word: string, _key: string, dir: string) => {
       const file = `${word}-mw.mp3`;
@@ -426,7 +424,7 @@ describe('entries api', () => {
     const file = join(deps.audioDir, 'click-mw.mp3');
     expect(existsSync(file)).toBe(true);
     await app.request('/api/entries/click', { method: 'DELETE' });
-    expect(existsSync(file)).toBe(false);
+    expect(existsSync(file)).toBe(true);
   });
 
   /**
@@ -440,7 +438,7 @@ describe('entries api', () => {
    * 而且它不只是音质问题：referenceBaseline() 只认 source==='mw'，所以这些词的评测
    * 永久走词典基准——正是模型元音偏置那条退路。click 恰好是练得最多的那个词。
    */
-  it('先落了合成音，之后配上 key 再 POST → 升级成真人录音，旧文件清掉', async () => {
+  it('先落了合成音，之后配上 key 再 POST → 升级成真人录音，旧的合成音文件保留', async () => {
     const deps = testDeps();
     deps.mwKey = undefined;                       // 一开始没有 key
     (deps.synthTts as any).mockImplementation(async (word: string, dir: string) => {
@@ -468,8 +466,8 @@ describe('entries api', () => {
     expect(second.audio).toHaveLength(1);         // 不许留下两行
     expect(second.audio[0].source).toBe('mw');
     expect(existsSync(join(deps.audioDir, 'light-mw.mp3'))).toBe(true);
-    // 旧的合成音没人再引用了，该清掉，不然攒一堆没用的 mp3
-    expect(existsSync(join(deps.audioDir, 'light-tts.mp3'))).toBe(false);
+    // 其他用户可能仍然引用这份整机共享缓存。
+    expect(existsSync(join(deps.audioDir, 'light-tts.mp3'))).toBe(true);
   });
 
   it('已经是真人录音时不再白跑 MW，也不重复插行', async () => {
@@ -480,6 +478,7 @@ describe('entries api', () => {
       headers: { 'content-type': 'application/json' },
     });
     expect(deps.fetchMw).toHaveBeenCalledTimes(1);
+    writeFileSync(join(deps.audioDir, 'click-mw.mp3'), 'fixture');
     const again = await (await app.request('/api/entries', {
       method: 'POST', body: JSON.stringify({ text: 'click' }),
       headers: { 'content-type': 'application/json' },
@@ -687,7 +686,7 @@ describe('review api', () => {
     // 让下面要验的复习行为本身仍然被覆盖到。
     deps.review.addCard('click', '2026-07-28');
     // Card exists in review state at this point. Blow away the directory review-state.json
-    // lives in so the *next* save() fails with a disk-write error — distinct from "no card".
+    // lives in so the *next* write fails with a disk-write error — distinct from "no card".
     rmSync(dirname((deps.review as any).file), { recursive: true, force: true });
     const res = await app.request('/api/review/click', {
       method: 'POST', body: JSON.stringify({ grade: 'remembered' }),
@@ -1034,14 +1033,13 @@ describe('AI api', () => {
       return { controller, set: (p: Partial<AgentStatus>) => { st = { ...st, ...p }; } };
     }
 
-    it('接口模式拒绝整理，不启动代理', async () => {
+    it('已配置的接口模式可以开始受控整理', async () => {
       const deps = testDeps();
       const app = createApp(deps);
       await putSettings(app, aiSettingsBody);
       const r = await postJson(app, '/api/ai/agent/run', { task: 'organize' });
-      expect(r.status).toBe(409);
-      expect((await r.json()).error).toContain('命令行代理');
-      expect(deps.agent.run).not.toHaveBeenCalled();
+      expect(r.status).toBe(202);
+      expect(deps.agent.run).toHaveBeenCalledWith('organize', undefined);
     });
 
     it('没同意也不开始', async () => {
@@ -1211,8 +1209,8 @@ describe('confusions api', () => {
     const res = await app.request('/api/confusions/light');
     expect(res.status).toBe(200);
     const body = await res.json();
-    // testDeps 的 l-vs-n 笔记只声明 phoneme:n（见 testDeps 里的注释），推不出 l→n，
-    // 所以这里只校验形状与字段齐全，具体内容交给 confusions.test.ts。
+    // testDeps 的 l-vs-n 声明了 l 和 n，能推出 l↔n；这里只校验形状与字段齐全，
+    // 具体内容交给 confusions.test.ts（它拿真实笔记当 fixture）。
     expect(Array.isArray(body.contrasts)).toBe(true);
     for (const c of body.contrasts) {
       expect(c).toEqual({
@@ -1425,7 +1423,7 @@ describe('笔记档次按使用者自己的记录推', () => {
 
   it('命中过但不够 → 待观察', async () => {
     const deps = testDeps();
-    // l-vs-n 的 trigger 是 phoneme:n；只在一个词上错两次
+    // l-vs-n 声明了 l 和 n；在同一个词上错两次
     await record(deps, 'night', 'l aɪ t');
     await record(deps, 'night', 'l aɪ t');
     expect(await severityOfNote(deps, 'l-vs-n')).toBe('watch');
@@ -1555,7 +1553,7 @@ describe('GET /api/stats 的 worthANote', () => {
     // /n/→/ŋ/ 在统计页上被 l-vs-n 认领、在档案里却是"该补"——同一个问题两个答案。
     // 这个仓库已经在 sure 的 0.5、worthANote 上各栽过一次了。
     const deps = testDeps();
-    // l-vs-n 只声明 phoneme:n，所以 n→ŋ 这条替换**不该**算它覆盖
+    // l-vs-n 声明的是 l 和 n、没有 ŋ，所以 n→ŋ 这条替换**不该**算它覆盖
     for (const w of ['night', 'name']) await record(deps, w, 'ŋ aɪ t');
     await record(deps, 'nine', 'ŋ aɪ n');
 
@@ -1570,9 +1568,9 @@ describe('GET /api/stats 的 worthANote', () => {
 
   it('已经有笔记的不标——那不是缺口', async () => {
     const deps = testDeps();
-    // **替换错要两边都覆盖到**（profile.ts 的 notesCovering）。testDeps 里的
-    // l-vs-n 只声明了 phoneme:n（那是为了不误伤用 click 的其他用例），
-    // 所以这里另写一篇真的把 l 和 n 都讲到的——真实的 l-vs-n 笔记正是这样。
+    // **替换错要两边都覆盖到**（profile.ts 的 notesCovering）：一篇只讲到其中一个音的
+    // 笔记教不了这个混淆。这里另写一篇把 l 和 n 都讲到的笔记（真实的 l-vs-n 正是这样），
+    // 确认这种替换已经有讲解、不再标成缺口。
     const dir = deps.noteStore.dirs[0];
     writeFileSync(join(dir, 'ln-pair.md'), `---
 id: ln-pair
@@ -1966,7 +1964,7 @@ triggers: [phoneme:n, phoneme:ŋ]
 舌尖还是舌根。
 `, 'utf8');
     deps.noteStore.load();
-    // night 的 /n/ 念成了 /ŋ/。testDeps 的 l-vs-n 只声明 phoneme:n，教不了这个
+    // night 的 /n/ 念成了 /ŋ/。testDeps 的 l-vs-n 声明的是 l 和 n，没有 ŋ，教不了这个
     deps.recognizePhonemes = vi.fn().mockResolvedValue({ reachable: true, ipa: 'ŋ aɪ t', phones: null, reason: null });
     const body = await (await createApp(deps).request(
       '/api/pronounce?target=night&snr=35', { method: 'POST', body: wav })).json();
@@ -2045,7 +2043,7 @@ triggers: [phoneme:l, phoneme:t]
     deps.recognizePhonemes = vi.fn().mockResolvedValue({ reachable: true, ipa: 'l aɪ t', phones: null, reason: null });
     const body = await (await createApp(deps).request('/api/pronounce?target=night', { method: 'POST', body: wav })).json();
     expect(body.align[0]).toEqual({ kind: 'sub', targetIpa: 'n', heardIpa: 'l', sure: true });
-    // testDeps 的 l-vs-n 笔记 trigger 是 phoneme:n，目标音那一侧就该命中它
+    // testDeps 的 l-vs-n 两边都声明了，n→l 这一对才认领得了
     expect(body.notes.map((n: { id: string }) => n.id)).toContain('l-vs-n');
   });
 
@@ -2075,9 +2073,9 @@ triggers: [phoneme:l, phoneme:t]
   });
 
   it('笔记按【听到的音】也要能挂上，不只看目标音', async () => {
-    // 目标 light（l aɪ t，不含 /n/），发成了 night（含 /n/）。testDeps 的 l-vs-n 笔记
-    // trigger 是 phoneme:n——只有从**听到的**那一侧才能命中它。
-    // 只看目标音的话，"你把 l 发成了 n"这种最典型的错误反而挂不上对应的笔记。
+    // 目标 light（l aɪ t），发成了 night（n aɪ t）。这一对是 l→n，目标音和错法两边
+    // 都要在笔记里讲到才算数（profile.ts 的 bestExplainers）；l-vs-n 两边都声明了，
+    // 所以挂得上。只看目标音的话，最典型的 l↔n 错误反而挂不上对应的笔记。
     const deps = testDeps();
     deps.recognizePhonemes = vi.fn().mockResolvedValue({ reachable: true, ipa: 'n aɪ t', phones: null, reason: null });
     const body = await (await createApp(deps).request('/api/pronounce?target=light', { method: 'POST', body: wav })).json();
@@ -2958,8 +2956,8 @@ describe('导出 / 导入备份', () => {
 
   /**
    * 备份里的词条带着**对面那台机器**算出来的推导结果（音素、音节、标签）。
-   * 两边版本不一样时，导进来的就是按对面的规则算的——而本机的重算只在**启动时**跑一次，
-   * 导入发生在那之后，于是这些词条会一直带着外来的旧标签，直到下次重启。
+   * 两边版本不一样时，导进来的就是按对面的规则算的——而本机的重算原先只在**启动时**跑一次，
+   * 导入发生在那之后，这些词条会一直带着外来的旧标签，直到下次重启。所以导完当场重算一遍。
    *
    * 后果跟当初 judge 缺 final-voiced 一模一样：讲那个结构的笔记在这个词上永远不出现。
    */
@@ -3009,7 +3007,7 @@ describe('导出 / 导入备份', () => {
   });
 
   /**
-   * 导入对已有词条是 `upsertEntry` —— 导进来的那一份**直接盖掉本机的**。
+   * 导入对已有词条原先是 `upsertEntry`——导进来的那一份**直接盖掉本机的**。
    *
    * 对普通词无所谓（两边都是词典算的，一模一样），坏在**手工音标**上：
    * 词典查不到的词，音标是人一个字一个字敲进去的，而它没有单独存，
@@ -3195,4 +3193,47 @@ describe('多用户 API', () => {
     });
     expect(dup.status).toBe(400);
   });
+});
+
+it('drops a recording whose user database changed while ASR awaited', async () => {
+  const deps = testDeps();
+  let resume!: (v: any) => void;
+  let started!: () => void;
+  const ready = new Promise<void>(r => { started = r; });
+  deps.recognizePhonemes = async () => { started(); return new Promise(r => { resume = r; }); };
+  const app = createApp(deps);
+  const pending = app.request('/api/pronounce?target=cat&snr=35', { method: 'POST', body: new Uint8Array([1]) });
+  await ready;
+  const old = deps.db;
+  deps.db = openDb(':memory:');
+  resume({ ipa: 'k æ t', reachable: true, phones: null, reason: null });
+  expect((await pending).status).toBe(409);
+  expect(overallStats(old).attempts).toBe(0);
+  expect(overallStats(deps.db).attempts).toBe(0);
+  old.close(); deps.db.close();
+});
+it('keeps original positions after an uncertain substitution', async () => {
+  const deps = testDeps();
+  deps.recognizePhonemes = vi.fn().mockResolvedValue({ reachable: true, ipa: 'g æ d', phones: [
+    {ipa:'g',conf:0.1},{ipa:'æ',conf:0.99},{ipa:'d',conf:0.99}
+  ] });
+  const response = await createApp(deps).request('/api/pronounce?target=cat&snr=35', { method:'POST',body:new Uint8Array([1]) });
+  expect(response.status).toBe(200);
+  expect(deps.db.prepare('SELECT at_index FROM attempt_error').all()).toEqual([{at_index:2}]);
+  deps.db.close();
+});
+
+it('rejects malformed backup before adding entries', async () => {
+  const deps = testDeps();
+  const res = await createApp(deps).request('/api/backup', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({version:1,entries:[{text:'cat',words:{},createdAt:'t',updatedAt:'t'}],attempts:[]})});
+  expect(res.status).toBe(400);
+  expect(deps.db.prepare('SELECT * FROM entries').all()).toEqual([]);
+  deps.db.close();
+});
+it('reports persistence failure without claiming the recording was saved', async () => {
+  const deps = testDeps();
+  vi.spyOn(deps.db, 'transaction').mockImplementation(() => { throw new Error('write failed'); });
+  const res = await createApp(deps).request('/api/pronounce?target=night&snr=35',{method:'POST',body:new Uint8Array([1])});
+  expect((await res.json()).recorded).toBe(false);
+  deps.db.close();
 });

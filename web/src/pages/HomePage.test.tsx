@@ -536,3 +536,10 @@ async function screen_get(container: HTMLElement, word: string) {
   await waitFor(() => expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === word)).toBe(true));
   return [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === word)!;
 }
+it('查新词时说明本机保存与远程只查不存，不许无条件承诺新建', async () => {
+  const c = await draw();
+  fireEvent.change(c.querySelector('input')!, { target: { value: 'coffee' } });
+  expect(c.textContent).toContain('远程只查不存');
+  expect(c.textContent).toContain('本机访问会保存词条');
+  expect(c.textContent).not.toContain('按「查这个词」就能建');
+});

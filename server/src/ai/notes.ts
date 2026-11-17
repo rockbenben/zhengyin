@@ -100,16 +100,9 @@ export function saveAiNote(deps: AiNotesDeps, input: NoteDraft): { id: string; t
     id, title: draft.title, triggers, contrasts: draft.contrasts, words,
     severity: 'info', markdown: draft.body, file: `${id}.md`, source: 'local',
   };
-  const warnings = [...validateTriggers([candidate]), ...validateShape([candidate])];
-  if (warnings.length > 0) throw new Error(`笔记没通过校验：\n${warnings.join('\n')}`);
-
-  const frontmatter: Record<string, unknown> = { id, title: draft.title };
-  if (triggers.length > 0) frontmatter.triggers = triggers;
-  if (words.length > 0) frontmatter.words = words;
-  if (draft.contrasts.length > 0) frontmatter.contrasts = draft.contrasts;
-
+  const content = serializeAiNote(candidate);
   mkdirSync(deps.localNotes, { recursive: true });
-  writeFileAtomic(join(deps.localNotes, `${id}.md`), matter.stringify(`${draft.body}\n`, frontmatter));
+  writeFileAtomic(join(deps.localNotes, `${id}.md`), content);
   deps.noteStore.load();
 
   // 笔记已经落盘了，下面两样是派生数据：失败只告警，不能把“写成功”报成失败。
@@ -125,4 +118,15 @@ export function saveAiNote(deps: AiNotesDeps, input: NoteDraft): { id: string; t
   }
 
   return { id, title: draft.title, file: `${id}.md` };
+}
+
+/** Both single-note drafts and batch plans use application-generated frontmatter. */
+export function serializeAiNote(candidate: Note): string {
+  const warnings = [...validateTriggers([candidate]), ...validateShape([candidate])];
+  if (warnings.length > 0) throw new Error(`笔记没通过校验：\n${warnings.join('\n')}`);
+  const frontmatter: Record<string, unknown> = { id: candidate.id, title: candidate.title };
+  if (candidate.triggers.length) frontmatter.triggers = candidate.triggers;
+  if (candidate.words.length) frontmatter.words = candidate.words;
+  if (candidate.contrasts.length) frontmatter.contrasts = candidate.contrasts;
+  return matter.stringify({ content: `${candidate.markdown.trim()}\n` }, frontmatter);
 }

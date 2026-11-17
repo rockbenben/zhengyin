@@ -81,12 +81,12 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
   if (loadError) return <LoadFailed what="AI 整理" />;
   if (!ai || !status) return <Spin style={{ marginTop: 48 }} />;
 
-  const gate = ai.mode !== 'cli'
-    ? '整理需要命令行代理：接口模式只能讲解，不能读写文件。'
+  const gate = ai.agentReason
+      ? ai.agentReason
     : !ai.configured
-      ? `没找到可用的命令行工具。${ai.reason ?? ''}`
+      ? `AI 尚未配置好。${ai.reason ?? ''}`
       : !ai.consent
-        ? `已经找到 ${ai.provider}，但还没同意让它读写这台机器上的笔记和档案。`
+        ? '请先在设置中同意使用 AI 处理发音档案和笔记。'
         : null;
 
   const running = status.state === 'running';
@@ -150,7 +150,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
           type="info"
           showIcon
           message={gate}
-          description={<Link to="/settings">去设置里接上命令行代理</Link>}
+          description={<Link to="/settings">去设置里配置 AI</Link>}
         />
       )}
 
@@ -162,7 +162,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
         >
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Typography.Text type="secondary" className="measure">
-              代理正在按你的档案整理笔记。这里会实时显示它说了什么；随时可以取消。
+              AI 正在按你的档案整理笔记。这里会显示进度；随时可以取消。
             </Typography.Text>
             <pre className="mono-note" style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto', margin: 0 }}>
               {status.logs.join('\n') || '（还没有输出）'}
@@ -187,7 +187,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
             {status.error && <Alert type="error" showIcon message={status.error} />}
 
             {status.state === 'undone' && (
-              <Alert type="success" showIcon message="已撤销" description="本机笔记和档案已回到整理前；越界改动不会恢复。" />
+              <Alert type="success" showIcon message="已撤销" description="已恢复本次整理可撤销的改动。后续编辑已保留，冲突和越界改动请查看提示。" />
             )}
 
             {changedCount === 0 ? (
@@ -204,7 +204,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
               <Alert
                 type="warning"
                 showIcon
-                message="代理动了不该动的文件"
+                message="检测到整理范围外的文件变动"
                 description={
                   <>
                     <div>这些不在撤销范围内，请自己检查一下：</div>
@@ -222,7 +222,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
               <Alert
                 type="warning"
                 showIcon
-                message="这些笔记没通过检查"
+                message={status.state === 'undone' ? '撤销提示' : '这些笔记没通过检查'}
                 description={status.noteWarnings.map((w, i) => <div key={`${i}-${w}`}>{w}</div>)}
               />
             )}
@@ -309,7 +309,9 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
             <strong>不能改</strong>：词条、录音记录、复习进度、AUTO 统计块、随附笔记、代码。
           </Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            跑完会列出改了哪些文件；不满意可以整批撤销。越界改动不会被撤销，只会被点名。
+            {ai.mode === 'api'
+              ? '将发送当前用户完整发音档案、本机笔记和随附参考笔记给所选接口。应用校验返回的修改方案后保存；跑完列出改动，可整批撤销。'
+              : '跑完会列出改了哪些文件；不满意可以整批撤销。越界改动不会被撤销，只会被点名。'}
           </Typography.Text>
         </Space>
       </Modal>

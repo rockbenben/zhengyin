@@ -37,7 +37,7 @@ describe('模型清单', () => {
   });
 
   it('打包文件名跟 /api/model/:file 的白名单正则相容', () => {
-    // app.ts 用 /^[\w.-]+\.tar\.gz$/ 挡路径穿越。清单里加个带空格或斜杠的 name，
+    // app.ts 用 /^[a-z0-9.-]+\.tar\.gz$/ 挡路径穿越。清单里加个带空格或斜杠的 name，
     // 下载脚本能打出来、托管接口却会 400，听辨直接报"模型没装"。
     for (const m of reg.models) expect(modelFile(m)).toMatch(/^[\w.-]+\.tar\.gz$/);
   });

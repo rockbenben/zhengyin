@@ -133,7 +133,7 @@ const VALID_ONSETS = new Set([...LEGAL_ONSETS].map(withLookalikesReplaced));
  * ── 为什么值得一条校验 ──
  *
  * 笔记模板原来把六段并列，还写着「`notes/` 里现有两篇就是范例」。而那两篇
- * （kl-cluster、l-vs-n，都是 7-28 加的）恰恰是**唯一不照模板写的两篇**：
+ * （kl-cluster、l-vs-n，都是 7-28 加的）当时恰恰是**唯一不照模板写的两篇**：
  * kl-cluster 缺「自检法」和「对比训练」，后者更是一个 minimal pair 都没有。
  * **照着「看范例」做的人，产出的就是不合模板的笔记**——而没有任何东西会红。
  *
@@ -284,6 +284,15 @@ export function validateTriggers(notes: Note[]): string[] {
   return warnings;
 }
 
+/** Only data frontmatter is accepted, including when a file declares its engine. */
+export function parseNoteMatter(text: string) {
+  const header = /^(?:\uFEFF)?---([^\r\n]*)/.exec(text);
+  if (header && !['', 'yaml', 'yml', 'json'].includes(header[1].trim().toLowerCase())) {
+    throw new Error('笔记元数据只支持 YAML 或 JSON');
+  }
+  return matter(text.replace(/^(\uFEFF)?---yml(?=\r?\n)/, '$1---yaml'));
+}
+
 export class NoteStore {
   private notes = new Map<string, Note>();
   private watcher: FSWatcher | undefined;
@@ -323,7 +332,7 @@ export class NoteStore {
 
       for (const file of files) {
         try {
-          const { data, content } = matter(readFileSync(join(root.dir, file), 'utf8'));
+          const { data, content } = parseNoteMatter(readFileSync(join(root.dir, file), 'utf8'));
           // triggers 和 words 都可以缺省（缺省即空数组），但**至少要有一个非空**，
           // 否则这篇笔记永远匹配不上任何词条——文件躺在 notes/ 里却从不出现，最难查的那种。
           const rawTriggers = Array.isArray(data.triggers) ? data.triggers : [];

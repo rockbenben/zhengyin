@@ -184,8 +184,8 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
   lines.push('### 最常犯的音素错误', '',
     '| 次数 | 错法 | 例词 | 有没有笔记 |', '|---:|---|---|---|');
 
-  // 有没有对应笔记，是"下一篇该写什么"的直接依据——次数多又没笔记的排在最上面，
-  // 一眼就能看出该补哪一课。
+  // 有没有对应笔记，是"下一篇该写什么"的直接依据。stats 本身按次数排，所以这张
+  // 候选表天然是次数多的在前——一眼就能看出该补哪一课。
   const missing: PhonemeStat[] = [];
   for (const s of stats) {
     const hit = notesCovering(s, notes.all());
@@ -199,8 +199,8 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
   const worth = missing.filter(worthANote);
   if (worth.length > 0) {
     lines.push('', '### 该补的笔记', '',
-      `下面这些音**反复出错**（≥${MIN_COUNT} 次）、而且**不止在一个词上**出错，` +
-      '但 `notes/` 里还没有对应的笔记——问 AI 这几个音怎么发，让它补上：', '');
+      `下面这些音**反复出错**（≥${MIN_COUNT} 次），要么不止在一个词上、要么至少有 ${MIN_COUNT} 次是` +
+      '整条转写只错这一个音，但 `notes/` 里还没有对应的笔记——问 AI 这几个音怎么发，让它补上：', '');
     for (const s of worth) {
       lines.push(`- ${describe(s)}（${s.count} 次，如 ${s.words.slice(0, 3).join('、')}）`);
     }
@@ -222,7 +222,7 @@ export function renderBlock(db: Database.Database, notes: NoteStore, now: string
       '**次数大的不该无声消失**，所以连原因一起写在这里。判据要是错了，从这份名单最看得出来：', '');
     for (const s of loudButRejected) {
       lines.push(`- ${describe(s)}（${s.count} 次）——只在 ${s.words.join('、')} 上出现过，`
-        + '而且那几次的转写里多数还有别的错，更像是那次录音的问题');
+        + '而且那几次的转写里还有别的错，更像是那次录音的问题');
     }
   }
 

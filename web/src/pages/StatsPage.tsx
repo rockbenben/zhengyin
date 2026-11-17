@@ -224,9 +224,9 @@ export default function StatsPage() {
                 </span>
               ) : r.worthANote ? (
                 /* **只标够格的**。原来凡是没笔记就打一个琥珀色的框，
-                   于是十几行里排下来一整列告警——包括那些只出现过一次、
-                   只在一个词上出现过的（那种更可能是那次录音的问题，不是发音习惯）。
-                   标常态会把真正该看的那两条淹掉。 */
+                   于是十几行里排下来一整列告警——包括那些只出现过一次的，
+                   也包括出现几次、但转写整条都崩了的（那种更可能是那次录音的问题，
+                   不是发音习惯）。标常态会把真正该看的那两条淹掉。 */
                 <span
                   className="mono"
                   style={{
@@ -241,7 +241,7 @@ export default function StatsPage() {
       </section>
 
       {missing.length > 0 && (
-        <Notice tone="warn" label={`该补 ${missing.length} 篇`} title="这几个音反复出错，而且不止在一个词上，但还没有笔记">
+        <Notice tone="warn" label={`该补 ${missing.length} 篇`} title="这几个音反复出错、够格写一篇了，但还没有笔记">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {/* 不写 notes/：那是仓库里的目录名、开发者的叫法，界面里它叫「发音笔记」 */}
             <span>把它们告诉 AI，它会写成一篇<Link to="/notes">发音笔记</Link>——写完之后评测报错时会直接给出「该怎么改」。</span>

@@ -27,6 +27,9 @@ const stub = vi.hoisted(() => ({
   graded: [] as Array<{ text: string; grade: string }>,
   result: null as PronounceResult | null,
   starred: false,
+  dueError: null as (Error & { status: number }) | null,
+  detailError: null as (Error & { status: number }) | null,
+  gradeError: null as (Error & { status: number }) | null,
   /** 队列空不空，由用例定 */
   empty: false,
   /** 队列里还没到期的：几张、最早哪天 */
@@ -36,16 +39,17 @@ const stub = vi.hoisted(() => ({
 vi.mock('../api', () => ({
   isOffline: () => false,
   api: {
-    reviewDue: () => Promise.resolve({
+    reviewDue: () => stub.dueError ? Promise.reject(stub.dueError) : Promise.resolve({
       cards: stub.empty ? [] : [{ text: 'thin', rung: 0, due: '2026-08-01', starred: stub.starred }],
       upcoming: stub.upcoming,
     }),
-    getEntry: (t: string) => Promise.resolve({
+    getEntry: (t: string) => stub.detailError ? Promise.reject(stub.detailError) : Promise.resolve({
       text: t, createdAt: '', words: [{ word: t, found: true, arpabet: [], ipa: 'θɪn', tags: [], phoneIpa: [], phoneTags: [], syllables: [], syllableStress: [] }],
       audio: [], phraseAudio: null, notes: [], review: null,
     }),
     reviewGrade: (text: string, grade: string) => {
       stub.graded.push({ text, grade });
+      if (stub.gradeError) return Promise.reject(stub.gradeError);
       return Promise.resolve({ graduated: false });
     },
   },
@@ -86,6 +90,7 @@ const UNSURE: PronounceResult = {
 
 beforeEach(() => {
   stub.graded = []; stub.result = null; stub.starred = false;
+  stub.dueError = null; stub.gradeError = null; stub.detailError = null;
   stub.empty = false; stub.upcoming = { count: 0, next: null };
 });
 
@@ -306,4 +311,36 @@ describe('评分成功发 STATS_CHANGED；跳过不发', () => {
       window.removeEventListener(STATS_CHANGED, onChange);
     }
   });
+});
+describe('权限和会话失败不可盲目重交', () => {
+  it.each([403, 409])('队列 %s 保留原因并给准确出口', async (status) => {
+    const reason = status === 403 ? '仅允许本机访问' : '用户已切换，请刷新复习队列';
+    stub.dueError = Object.assign(new Error(reason), { status });
+    const { container: c } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+    await waitFor(() => expect(c.textContent).toContain(reason));
+    expect(c.textContent).not.toContain('服务这次没答上来');
+    expect(c.textContent).toContain(status === 403 ? '运行服务的电脑' : '刷新复习队列');
+    expect(c.querySelector('button')?.textContent ?? '').toBe(status === 403 ? '' : '刷新复习队列');
+  });
+  it.each([403, 409])('评分 %s 后按钮与键盘都不能重交旧结果', async (status) => {
+    const reason = status === 403 ? '仅允许本机访问' : '用户已切换，请刷新复习队列';
+    stub.gradeError = Object.assign(new Error(reason), { status });
+    const c = await drawAndRecord(ALL_OK);
+    fireEvent.keyDown(window, { key: ' ' });
+    await waitFor(() => expect(c.textContent).toContain(reason));
+    expect(buttons(c)).not.toContain('下一个');
+    expect(c.textContent).not.toContain('复习完了');
+    fireEvent.keyDown(window, { key: ' ' });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(stub.graded).toEqual([{ text: 'thin', grade: 'remembered' }]);
+  });
+});
+
+it.each([403, 409])('详情 %s 失败也停止当前会话，不滞留在空详情录音页', async (status) => {
+  stub.detailError = Object.assign(new Error('详情拒绝原因'), { status });
+  const { container: c } = render(<MemoryRouter><ReviewPage /></MemoryRouter>);
+  await waitFor(() => expect(c.textContent).toContain('详情拒绝原因'));
+  expect(c.textContent).toContain('暂时不能继续复习');
+  expect(c.textContent).not.toContain('录音替身');
+  expect(stub.graded).toEqual([]);
 });

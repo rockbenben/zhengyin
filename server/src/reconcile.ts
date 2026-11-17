@@ -1,8 +1,7 @@
 import type Database from 'better-sqlite3';
 import { putAttribution } from './db.js';
 import { lookupWord, tokenize } from './analysis/lookup.js';
-import { attributeTags } from './analysis/features.js';
-import { syllabify } from './analysis/syllables.js';
+import { phrasePhoneTags } from './analysis/features.js';
 import { explainersFor, type ErrorTags } from './judge.js';
 import type { Note } from './notes.js';
 
@@ -10,7 +9,7 @@ import type { Note } from './notes.js';
  * 把 `attempt_note` 按**当前**的匹配规则重算一遍。
  *
  * 这张表是缓存，不是流水：内容全由（错误行 + 这次念的词 + 当前的 notes/）派生，
- * 判据只有一处（judge.ts 的 `explainersFor`）。启动时和导入后各对一次账，
+ * 判据只有一处（judge.ts 的 `explainersFor`）。启动时、笔记一变和导入后各对一次账，
  * 所以改匹配规则不用写迁移。
  *
  * 它当过流水，代价是判据一改库里就欠账——实测 182 条证据有 39 条站不住，
@@ -60,8 +59,7 @@ export function attributionOf(
 ): Set<string> | null {
   const looked = tokenize(target).map((w) => lookupWord(w));
   if (looked.length === 0 || looked.some((p) => !p)) return null;
-  const phones = looked.flatMap((p) => p!);
-  const perPhone = attributeTags(phones, syllabify(phones));
+  const perPhone = phrasePhoneTags(target);
   return explainersFor(toErrorTags(errors, perPhone), notes, target);
 }
 
