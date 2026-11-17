@@ -4,6 +4,21 @@ import { dirname } from 'node:path';
 export interface DesktopSettings {
   schemaVersion: 1;
   appRoot: string;
+  preferences?: RendererPreferences;
+}
+
+const PREFERENCE_KEYS = ['overprint.hue', 'overprint.paper', 'pron:noise-suppression'] as const;
+type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
+export type RendererPreferences = Partial<Record<PreferenceKey, string>>;
+
+export function isPreference(key: unknown, value: unknown): key is PreferenceKey {
+  if (typeof value !== 'string') return false;
+  switch (key) {
+    case 'overprint.hue': return /^\d{1,3}$/.test(value) && Number(value) < 360;
+    case 'overprint.paper': return ['"light"', '"dark"', '"system"'].includes(value);
+    case 'pron:noise-suppression': return value === 'on' || value === 'off';
+    default: return false;
+  }
 }
 
 export function readDesktopSettings(file: string): DesktopSettings | null {
@@ -11,7 +26,14 @@ export function readDesktopSettings(file: string): DesktopSettings | null {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<DesktopSettings>;
     if (raw.schemaVersion !== 1 || typeof raw.appRoot !== 'string' || !raw.appRoot.trim()) return null;
-    return { schemaVersion: 1, appRoot: raw.appRoot };
+    const result: DesktopSettings = { schemaVersion: 1, appRoot: raw.appRoot };
+    const preferences: RendererPreferences = {};
+    for (const key of PREFERENCE_KEYS) {
+      const value = raw.preferences?.[key];
+      if (isPreference(key, value)) preferences[key] = value;
+    }
+    if (Object.keys(preferences).length) result.preferences = preferences;
+    return result;
   } catch {
     return null;
   }

@@ -1,5 +1,5 @@
 /**
- * 主题：浅/深/跟随系统，加上第二版油墨的颜色。两项都只存在本机浏览器里。
+ * 主题：浅/深/跟随系统，加上第二版油墨的颜色。两项都是本机偏好。
  *
  * 卡里那套印刷隐喻叫「纸与墨」（两个小节还叫「纸」「墨屉」），但**设置项的名字是
  * 「主题」**——找主题的人看不出「纸与墨」就是它（2026-10-28 改名）。
@@ -15,6 +15,7 @@
  * L/C 量自现有那两版蓝（#1b3fa8 / #8aa5ea），所以默认色相算出来就是原来那个颜色。
  * 公式是 Björn Ottosson 的 oklab，标准实现。
  */
+import { getPreference, HUE_KEY, PAPER_KEY, setPreference } from './preferences';
 
 /** 一版油墨在某个主题下的两个色值 */
 export interface Ink {
@@ -125,7 +126,6 @@ export const PRESETS: Array<{ name: string; hue: number }> = [
   { name: '紫', hue: 300 },
 ];
 
-const KEY = 'overprint.hue';
 
 /**
  * 读存下来的色相。没存过、存的是坏值、**或者那款墨已经不在墨屉里了**，都回默认。
@@ -139,7 +139,7 @@ export function loadHue(): number {
     // 不再先 normalizeHue：**"必须在屉里"把它整个吞掉了**。
     // 归一化只多认一种输入（-94 也算群青），而没有任何路径会产生那种值——
     // saveHue 存的就是墨屉里的数。杀不掉的分支就是多余的分支。
-    const raw = localStorage.getItem(KEY);
+    const raw = getPreference(HUE_KEY);
     if (raw === null) return DEFAULT_HUE;
     const hue: unknown = JSON.parse(raw);
     return PRESETS.some((p) => p.hue === hue) ? (hue as number) : DEFAULT_HUE;
@@ -156,7 +156,7 @@ export function loadHue(): number {
  */
 export function saveHue(hue: number): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(hue));
+    setPreference(HUE_KEY, JSON.stringify(hue));
   } catch {
     /* 存不下就这次生效、下次回默认，不打断使用 */
   }
@@ -178,13 +178,12 @@ export function saveHue(hue: number): void {
  */
 export type PaperPref = 'system' | 'light' | 'dark';
 
-const PAPER_KEY = 'overprint.paper';
 const PAPERS: PaperPref[] = ['system', 'light', 'dark'];
 
 /** 读存下来的纸。没存过、或存的不是这三个值之一，都回「跟随系统」 */
 export function loadPaper(): PaperPref {
   try {
-    const raw = localStorage.getItem(PAPER_KEY);
+    const raw = getPreference(PAPER_KEY);
     if (raw === null) return 'system';
     const v: unknown = JSON.parse(raw);
     return PAPERS.includes(v as PaperPref) ? (v as PaperPref) : 'system';
@@ -196,7 +195,7 @@ export function loadPaper(): PaperPref {
 /** 存纸。跟 saveHue 一样，存不下就静默失败，不打断使用 */
 export function savePaper(p: PaperPref): void {
   try {
-    localStorage.setItem(PAPER_KEY, JSON.stringify(p));
+    setPreference(PAPER_KEY, JSON.stringify(p));
   } catch {
     /* 存不下就这次生效、下次回跟随系统 */
   }

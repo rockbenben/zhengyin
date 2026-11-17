@@ -1,0 +1,33 @@
+import { desktopBridge } from './desktop';
+
+export const HUE_KEY = 'overprint.hue';
+export const PAPER_KEY = 'overprint.paper';
+export const NS_KEY = 'pron:noise-suppression';
+
+let desktopPreferences: Record<string, string> = {};
+
+export async function loadDesktopPreferences(): Promise<void> {
+  const bridge = desktopBridge();
+  if (!bridge) return;
+  try {
+    desktopPreferences = { ...await bridge.preferences() };
+    for (const key of [HUE_KEY, PAPER_KEY, NS_KEY]) {
+      const legacy = localStorage.getItem(key);
+      if (legacy !== null && !Object.hasOwn(desktopPreferences, key)) setPreference(key, legacy);
+    }
+  } catch { /* Existing preferences remain available from localStorage for this origin. */ }
+}
+
+export function getPreference(key: string): string | null {
+  if (Object.hasOwn(desktopPreferences, key)) return desktopPreferences[key];
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+export function setPreference(key: string, value: string): void {
+  const bridge = desktopBridge();
+  if (bridge) {
+    desktopPreferences[key] = value;
+    void bridge.setPreference(key, value).catch(() => {});
+  }
+  try { localStorage.setItem(key, value); } catch { /* Persistence is optional in the browser. */ }
+}

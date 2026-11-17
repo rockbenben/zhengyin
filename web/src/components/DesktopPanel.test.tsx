@@ -16,6 +16,8 @@ function fakeBridge(over: Partial<DesktopState> = {}): DesktopBridge {
       updateState: 'idle' as UpdateState,
       ...over,
     })),
+    preferences: vi.fn(async () => ({})),
+    setPreference: vi.fn(async () => {}),
     openDataFolder: vi.fn(async () => {}),
     changeDataFolder: vi.fn(async () => {}),
     reload: vi.fn(async () => {}),

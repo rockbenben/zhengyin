@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveDesktopPaths, desktopUserData } from './paths.js';
-import { readDesktopSettings, writeDesktopSettings, type DesktopSettings } from './settings.js';
+import { isPreference, readDesktopSettings, writeDesktopSettings, type DesktopSettings } from './settings.js';
 import { askFirstRun, askLockedDataRoot, validateDataRoot, type FirstRunDialog } from './firstRun.js';
 import { decideLink } from './links.js';
 import { decidePermission } from './permissions.js';
@@ -152,6 +152,15 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(CHANNEL.state, () => state());
+  ipcMain.handle(CHANNEL.preferences, () => settings?.preferences ?? {});
+  ipcMain.handle(CHANNEL.setPreference, (event, key: unknown, value: unknown) => {
+    if (!settings || event.sender !== win?.webContents
+        || !event.senderFrame?.url.startsWith(`http://127.0.0.1:${port}/`)) return;
+    if (typeof value !== 'string' || !isPreference(key, value)) return;
+    const next = { ...settings, preferences: { ...settings.preferences, [key]: value } };
+    writeDesktopSettings(SETTINGS_FILE, next);
+    settings = next;
+  });
   ipcMain.handle(CHANNEL.openDataFolder, () => { void shell.openPath(dataRoot); });
   ipcMain.handle(CHANNEL.changeDataFolder, () => { void changeDataFolder(); });
   ipcMain.handle(CHANNEL.reload, () => { win?.reload(); });
@@ -172,7 +181,9 @@ async function changeDataFolder(): Promise<void> {
     return;
   }
   if (!settings) return;
-  writeDesktopSettings(SETTINGS_FILE, { ...settings, appRoot: r.filePaths[0] });
+  const next = { ...settings, appRoot: r.filePaths[0] };
+  writeDesktopSettings(SETTINGS_FILE, next);
+  settings = next;
   const { response } = await dialog.showMessageBox({
     type: 'question',
     title: '更换数据文件夹',

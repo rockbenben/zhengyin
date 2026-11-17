@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { getPreference, NS_KEY } from '../lib/preferences';
 import { Alert, Button, Collapse, Space, Typography, message } from 'antd';
 import { AudioOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router';
@@ -65,8 +66,6 @@ const POLL_MS = 2000;
  */
 const GIVE_UP_MS = 90_000;
 
-/** 浏览器降噪的开关。存在 localStorage：它是采集端的偏好，跟服务端无关 */
-export const NS_KEY = 'pron:noise-suppression';
 
 // 信噪比低于这个数就提示。20dB 是个宽松的界：安静房间里对着麦克风说话通常在 30dB 以上，
 // 20dB 以下基本上就是「背景里一直有东西在响」。
@@ -318,7 +317,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
         audio: {
           echoCancellation: false,
           autoGainControl: false,
-          noiseSuppression: localStorage.getItem(NS_KEY) !== 'off',
+          noiseSuppression: getPreference(NS_KEY) !== 'off',
         },
       });
       setMicError(null);

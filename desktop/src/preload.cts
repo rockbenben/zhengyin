@@ -19,6 +19,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 /** 抄自 desktop/src/bridge.ts（见本文件开头的说明：抄不了，只能抄） */
 const CHANNEL = {
   state: 'desktop:state',
+  preferences: 'desktop:preferences',
+  setPreference: 'desktop:set-preference',
   openDataFolder: 'desktop:open-data-folder',
   changeDataFolder: 'desktop:change-data-folder',
   reload: 'desktop:reload',
@@ -33,6 +35,8 @@ const CHANNEL = {
 contextBridge.exposeInMainWorld('zhengyinDesktop', {
   /** 这个应用现在是什么状态：版本、有没有更新器、自动检查开没开 */
   state: (): Promise<unknown> => ipcRenderer.invoke(CHANNEL.state),
+  preferences: (): Promise<unknown> => ipcRenderer.invoke(CHANNEL.preferences),
+  setPreference: (key: string, value: string): Promise<void> => ipcRenderer.invoke(CHANNEL.setPreference, key, value),
 
   // ── 原来菜单栏「文件」里的 ──
   openDataFolder: (): Promise<void> => ipcRenderer.invoke(CHANNEL.openDataFolder),

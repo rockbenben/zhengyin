@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Card, Radio, Space, Typography } from 'antd';
-import { NS_KEY } from './Recorder';
+import { getPreference, NS_KEY, setPreference } from '../lib/preferences';
 
 /**
  * 采集设置：浏览器降噪开不开。
@@ -13,10 +13,10 @@ import { NS_KEY } from './Recorder';
  * 另外两项（回声消除、自动增益）已经在 Recorder 里一律关掉，没有开关：
  * 这里没有远端声音要消；自动增益会动态改电平，把振幅包络一起改了，A/B 对比要的是原样。
  *
- * 存在 localStorage 而不是服务端 .env：它是这台机器上采集端的偏好，跟服务无关。
+ * 降噪是采集端偏好，浏览器和桌面版各自保存。
  */
 export default function CaptureSetting() {
-  const [off, setOff] = useState(() => localStorage.getItem(NS_KEY) === 'off');
+  const [off, setOff] = useState(() => getPreference(NS_KEY) === 'off');
 
   return (
     <Card title="录音采集">
@@ -31,7 +31,7 @@ export default function CaptureSetting() {
           value={off ? 'off' : 'on'}
           onChange={(e) => {
             const next = e.target.value === 'off';
-            localStorage.setItem(NS_KEY, next ? 'off' : 'on');
+            setPreference(NS_KEY, next ? 'off' : 'on');
             setOff(next);
           }}
         >

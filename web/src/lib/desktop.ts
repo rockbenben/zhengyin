@@ -33,6 +33,8 @@ export interface DesktopState {
  */
 export interface DesktopBridge {
   state(): Promise<DesktopState>;
+  preferences(): Promise<Record<string, string>>;
+  setPreference(key: string, value: string): Promise<void>;
   openDataFolder(): Promise<void>;
   changeDataFolder(): Promise<void>;
   reload(): Promise<void>;

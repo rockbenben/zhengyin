@@ -17,6 +17,8 @@
 export const CHANNEL = {
   /** 渲染进程问：这个应用现在是什么状态（版本、有没有更新器、自动检查开没开） */
   state: 'desktop:state',
+  preferences: 'desktop:preferences',
+  setPreference: 'desktop:set-preference',
   /** 打开数据文件夹（系统文件管理器） */
   openDataFolder: 'desktop:open-data-folder',
   /** 换数据文件夹，选完要重启 */
