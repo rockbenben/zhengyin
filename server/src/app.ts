@@ -196,7 +196,8 @@ async function referenceBaseline(
 ): Promise<{ ipa: string[]; file: string; drift: number[]; repaired: BaselineRepair[] } | null> {
   const dictLength = dictIpa.length;
   const db = deps.db;
-  // 只认整段 target 对应的那一条真人录音。短语的整句音频服务端只有 TTS，所以短语走词典。
+  // 只认 word === target 的那一条真人录音：短语词条是逐词录的，每个词都有自己的 MW 录音，
+  // 照样拿得到基准；整句音频服务端只做 TTS，所以 target 是整条短语时才退回词典。
   const row = store.getAudio(deps.db, owner).find((a) => a.source === 'mw' && a.word === target);
   if (!row) return null;
 

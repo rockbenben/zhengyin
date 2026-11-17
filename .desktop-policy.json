@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "status": "project-deviations",
-  "verifiedOn": "2026-10-27",
+  "verifiedOn": "2026-11-18",
   "framework": "electron",
   "channel": "stable",
   "platforms": ["windows-x64"],
@@ -16,7 +16,7 @@
     "windows": "unsigned; SmartScreen warning documented in README"
   },
   "versionSource": "git tag vX.Y.Z; root and desktop/package.json asserted equal",
-  "release": "validate (tests + uv lock) -> Windows build -> single draft -> verify feed -> SHA256SUMS + attestation -> release environment approval -> publish + make_latest -> anonymous feed check",
+  "release": "validate (tests + uv lock) -> Windows build -> automatic publish (no manual approval; desktop-app-standard default) -> verify feed -> SHA256SUMS + attestation -> create or refresh the single draft from docs/releases/<tag>.md and upload -> publish + make_latest -> anonymous feed check",
   "actionPins": "major tags; no Dependabot",
   "immutableReleases": "not enabled yet",
   "deviations": [

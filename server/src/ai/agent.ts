@@ -588,7 +588,7 @@ export class AgentRunner implements AgentController {
     const profileRel = relTo(deps.dataDir, resolve(deps.appRoot, before.profileRel));
     const notesRel = relTo(deps.dataDir, deps.localNotes).replace(/\/+$/, '');
     // 新增的笔记在运行前并不存在，所以不能只拿 before.notes 的键当白名单；
-    // 整个笔记目录都是允许写的，档案只有那一个文件。
+    // 允许集是「笔记目录整棵子树 + 档案这一个文件」。
     const allowed = (rel: string) =>
       rel === profileRel || rel === notesRel || (!!notesRel && rel.startsWith(`${notesRel}/`));
     const out: OutOfScope[] = [];

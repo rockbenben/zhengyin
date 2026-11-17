@@ -122,9 +122,9 @@ function splitConsonants(s: string): string[] | null {
 }
 
 // cluster-onset:<s> 的合法取值：取自 syllables.ts 的 LEGAL_ONSETS，并做同样的形近字符规整——
-// LEGAL_ONSETS 里 gl/gr/gw/gj 四项源码里写的是 ASCII "g"，而 extractTags 实际吐出的是
-// phones.ts 里 G 对应的 IPA script-g "ɡ"，两者字面不相等；规整后才能既正确接受真正会被
-// extractTags 产出的 "ɡl" 这类值，又正确拒绝 ASCII "gl" 这种永远不会被产出的误写。
+// LEGAL_ONSETS 里 gl/gr/gw/gj 写的已经是 IPA script-g "ɡ"（phones.ts 里 G 对应的音，
+// extractTags 吐出的也是它），而手写的 trigger 常敲成 ASCII "g"，两者字面不相等；规整后
+// "ɡl" 这类真值能正确通过，ASCII "gl" 这种永远不会被产出的误写会被拒、并提示该写成 "ɡl"。
 const VALID_ONSETS = new Set([...LEGAL_ONSETS].map(withLookalikesReplaced));
 
 /**

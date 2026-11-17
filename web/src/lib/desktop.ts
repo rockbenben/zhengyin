@@ -30,6 +30,8 @@ export interface DesktopState {
  * 原来那条菜单栏上的动作，现在是这些方法。
  *
  * 菜单撤了，但菜单里有的这里都得有——少一个就等于悄悄少给了功能。
+ * 例外是 `preferences` / `setPreference`：它们不是菜单动作，是主题和降噪偏好的
+ * 存取通道（桌面版换端口后 origin 变了，localStorage 记不住，得由主进程存）。
  */
 export interface DesktopBridge {
   state(): Promise<DesktopState>;

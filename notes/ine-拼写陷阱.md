@@ -10,8 +10,8 @@ title: 词尾 -ine 不都读 /aɪn/——machine、routine 这一类读 /iːn/
 # 更荒谬的是 aɪ 在这篇里的身份恰恰是**念错了才会得到的音**。
 # 通则：念错了才会得到的那个音，不该当 trigger。
 #
-# 加这篇是因为：在此之前只有 dopamine 一个词挂得上笔记，machine / marine /
-# routine / caffeine 录进去什么都不弹。
+# 加这篇是因为：在此之前只有 dopamine 有讲这个词自己的笔记（words:），而
+# machine / marine / routine / caffeine 录进去只能弹出零散的音素讲解，没有一篇讲这个词尾。
 # 注意这**不是**在断言使用者有这个毛病——是不是他的短板由他的评测记录说了算
 # （见 AGENTS.md「severity 是派生的」）。
 triggers: []

@@ -42,8 +42,8 @@ export default function HowItWorks({ attempts }: { attempts: number }) {
       {'里有针对这个音的一篇，自检法和对比训练也会一起出来。'}
     </>],
     ['反复错的自动进复习', <>
-      {'只有'}<strong>真念错过</strong>{'的词才进'}<Link to="/review">复习</Link>
-      {'队列——查过一眼的不进。哪些音反复出错，在'}<Link to="/stats">发音统计</Link>{'里看。'}
+      <strong>真念错过</strong>{'的词自己进'}<Link to="/review">复习</Link>
+      {'队列——查过一眼的不进；自己拿不准的，在单词页点「加入复习」也能加。哪些音反复出错，在'}<Link to="/stats">发音统计</Link>{'里看。'}
     </>],
   ];
 

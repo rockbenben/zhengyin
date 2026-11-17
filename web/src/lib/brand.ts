@@ -2,7 +2,7 @@
  * 这个工具的名字，只此一份。
  *
  * 它还要出现在两个 React 管不着的地方——静态 index.html 的标题、package.json 的
- * name。`brand.test.ts` 把这几处钉在一起：改一处忘了别处会直接红。
+ * 包名（这个名字的拼音 `zhengyin`）。`brand.test.ts` 把这几处钉在一起：改一处忘了别处会直接红。
  */
 export const APP_NAME = '正音';
 
@@ -32,7 +32,7 @@ export const REPO_URL = 'https://github.com/rockbenben/zhengyin';
  * 端口从当前页面取——`.env` 里 `PORT=30041` 改过之后这里跟着变；取不到才退回默认。
  * 写成一处是因为它曾经有两份：Recorder 那句 toast 写死 30031，
  * 而同一情形下面那条 Notice 用的是 location.port——**同一句话，一个对一个错**。
- * 默认值 30031 的由来见 server/src/index.ts 顶上那段。
+ * 默认值 30031 的由来见 server/src/index.ts 里解释端口的那段（AGENTS.md 的「端口」一节也有同一份）。
  */
 export function localAppUrl(): string {
   const host = typeof location !== 'undefined' && location.hostname ? location.hostname : 'localhost';

@@ -102,8 +102,8 @@ describe('ReviewStore', () => {
     expect(s.due('2026-12-31').map((c) => c.text)).toEqual(['hello']);
   });
 
-  // 下面这些必须从「磁盘上已有文件」这条路进：生产环境的 review-state.json 是 git 跟踪的、
-  // 永远存在，所以每个真实 ReviewStore 走的都是构造函数里读文件那一支。只用 freshStore()
+  // 下面这些必须从「磁盘上已有文件」这条路进：生产环境的 review-state.json 在用户目录里
+  // 一直有（第一次评分后就写下了），老用户每次启动都走构造函数里读文件那一支。只用 freshStore()
   // （磁盘无文件）测原型键，等于把唯一真正生效的那条分支整个跳过——把构造函数改回裸的
   // JSON.parse、不做 Object.create(null) 归一化，那样的测试照样全绿。
   function storeWith(state: unknown): ReviewStore {
@@ -129,7 +129,7 @@ describe('ReviewStore', () => {
     expect(s.due('2026-12-31').find((c) => c.text === 'constructor')!.due).not.toBe('2026-07-30');
   });
 
-  // 最贴近生产的一条：review-state.json 已经存在（git 跟踪，永远存在），然后用户新问了一个
+  // 最贴近生产的一条：review-state.json 已经存在（第一次评分后就在），然后用户新问了一个
   // 跟 Object.prototype 属性同名的词。构造函数若不做 Object.create(null) 归一化，state 就带着
   // 原型，addCard 里的 state['constructor'] 命中原型上的构造函数（真值）→ 直接 return，
   // 这个词永远建不上卡片。freshStore()（磁盘无文件）走不到这条分支，测不出来。
@@ -247,7 +247,7 @@ describe('ReviewStore', () => {
 
   // 文件在运行期间被删掉/改名之后再写入：readRaw 曾把"文件不存在"当成"读到一份空状态"，
   // 于是那次写入只落下当前这一个键，内存里其余卡片被一并抹出磁盘。
-  // 文件被 git checkout / stash 还原成 {}（这文件是 git 跟踪的），或被外部截断。它是**存在
+  // 文件被外部还原成 {}（手工清空、旧副本覆盖），或被截断。它是**存在
   // 且能解析**的，所以走不到"损坏"分支——只取磁盘那一份的话，下一次评分会把其余卡片全部
   // 抹掉，而且悄无声息。
   it('restores cards missing from disk after an external reset', () => {
@@ -258,7 +258,7 @@ describe('ReviewStore', () => {
       b: { rung: 3, due: '2026-09-02', lastReviewed: null },
     }), 'utf8');
     const s = new ReviewStore(file);
-    writeFileSync(file, '{}', 'utf8');                      // git checkout .
+    writeFileSync(file, '{}', 'utf8');                      // 外部清空
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       s.grade('a', 'remembered', '2026-07-29');
@@ -543,7 +543,7 @@ describe('merge：把备份的进度并进来', () => {
 /**
  * 导入备份不该打「磁盘上缺少…」那句告警。
  *
- * persist 里那句是给真事故留的（文件被 git checkout 还原、被截断、被删）。
+ * persist 里那句是给真事故留的（文件被外部还原、被截断、被删）。
  * 而 merge 原来**先写内存再落盘**，于是每并一张卡都会误触发它一次——
  * 实测全新机器导入 30 张卡的备份，会打 30 句「磁盘上缺少 1 张服务已知的卡片…
  * 若你是有意手工删卡，请在服务停止时操作」。什么都没缺，全是顺序反了造成的。

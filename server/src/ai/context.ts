@@ -91,7 +91,7 @@ export function buildWordContext(deps: AiContextDeps, word: string, target?: str
   return { text: lines.join('\n\n'), sources: notes.map((n) => ({ id: n.id, title: n.title })) };
 }
 
-/** 消息里能认出哪些音素。走发音表而不是 IPA 码表：ə/ɚ/ɝ 不在后者里。 */
+/** 消息里能认出哪些音素。走发音表而不是 IPA 码表：ə/ɚ 不在后者里。 */
 const IPA_SYMBOLS = articulationTable().map((a) => a.ipa);
 
 export function buildChatContext(deps: AiContextDeps, message: string): AiContext {

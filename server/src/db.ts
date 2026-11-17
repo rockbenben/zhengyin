@@ -293,6 +293,9 @@ export function putAttribution(db: Database.Database, attemptId: number, noteIds
 
 /**
  * 每篇笔记在**你**身上命中过几次、跨几个词。
+ *
+ * 「词」数的是 `attempt.target`（这次实际念的那个词），不是词条：短语词条是逐词录的，
+ * 同一个 `dopamine detox` 里录过 dopamine 和 detox 就算两个词。
  * 给 profile.ts 的 severityOf 当证据——**不是**「该补的笔记」那条（worthANote 还多一条
  * soloCount 的 OR 分支，两者问的不是同一件事，理由见 profile.ts 那段）。
  */
@@ -311,7 +314,7 @@ export interface PhonemeStat {
   heardIpa: string | null;
   count: number;
   lastAt: string;
-  /** 出现过这个错的词，最多列几个，给档案里当例词用 */
+  /** 出现过这个错的词条（`entry_text`），最多列几个，给档案里当例词用 */
   words: string[];
   /** 实际念的目标数。words 保留词条入口，用于导航。 */
   targetCount: number;

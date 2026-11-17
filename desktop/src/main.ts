@@ -135,7 +135,7 @@ function showAbout(): void {
  *
  * 动作 handler 一律不回值：这些动作的结果要么是界面自己变了（重新加载、退出），
  * 要么是弹了个对话框（换数据文件夹、关于），网页那边不需要等一个结果。
- * （`CHANNEL.state` 是查询，要回一份状态，不在这条里。）
+ * （`CHANNEL.state` 和 `CHANNEL.preferences` 是查询，要回值，不在这条里。）
  */
 function registerIpc(): void {
   const state = (): DesktopState => ({

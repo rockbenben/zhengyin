@@ -59,8 +59,8 @@
 
 代码照常有网：改 `server/` 写测试、跑 `npm test`；`web/` 有两层——**类型检查**
 （在 `npm test` 和 `npm run build` 里都有）和 **`npm test` 的 `dom` 那一档**
-（jsdom + @testing-library/react，扫 `web/src/**/*.test.tsx`；纯函数在 `node` 档，
-扫 `web/src/lib/**/*.test.ts` 和 `server/src/**/*.test.ts`）。
+（jsdom + @testing-library/react，扫 `web/src/**/*.test.tsx`；纯函数和 Node 侧在 `node` 档，
+扫 `web/src/lib/**/*.test.ts`、`server/src/**/*.test.ts` 和 `desktop/src/**/*.test.ts`）。
 
 **根目录的 `typecheck` 可以直接调三个 `tsc`**：Node 26 全线是 npm 11，
 嵌套 workspace 也能找到根 `node_modules/.bin`，`npm run typecheck -w web` 已经不再是坑。
@@ -126,8 +126,8 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
 | `docs/superpowers/` | **历史设计稿**（当时的计划与规格）。它记录的是那次的决定，**不回改**——里面嵌着 shell 片段和旧方案（比如当年打算把「更换数据文件夹…」放进原生菜单），照着现在的样子改反而会篡改记录。散文排版守卫也明确排除了它 |
 | `workflows/` | AI 的提示词正本：`coach.md`（讲解、笔记草稿、助教对话）、`agent.md`（整理边界）、`agent-api.md`（接口整理方案格式）。桌面版从只读资源根读它 |
 | `data/notes/` | 本机笔记，AI 写这里；随附 `notes/` 只读，同名时本机优先 |
-| `data/ai-settings.json` | 整机一份的 AI 设置（接口地址、模型、打码后的密钥、命令行选择）。**不跟当前用户走，也不进备份** |
-| `data/ai-runs/<runId>/snapshot.json` | 每次 AI 整理前存的一份快照（允许写的内容 + `data/` 基线 hash）。**撤销不读它**——撤销只用进程里那两份（运行前 / 提交后快照），重启后就没有撤销入口了；它留在磁盘上供人查看。两种整理的改动都先落在同目录的 `workspace/` 工作副本里，整批校验通过才写回本机数据 |
+| `data/ai-settings.json` | 整机一份的 AI 设置（接口地址、模型、密钥、命令行选择；密钥在盘上是明文，只有 `GET /api/ai/settings` 读回时打码）。**不跟当前用户走，也不进备份** |
+| `data/ai-runs/<runId>/snapshot.json` | 每次 AI 整理前存的一份快照（允许写的内容 + `data/` 基线 hash）。**撤销不读它**——撤销只用进程里那两份（运行前 / 提交后快照；接口整理的档案按提交时记下的小节改动回滚），重启后就没有撤销入口了；它留在磁盘上供人查看。两种整理的改动都先落在同目录的 `workspace/` 工作副本里，整批校验通过才写回本机数据 |
 | `.ai-reference/` | 只读参考副本（随附笔记 + 提示词）。生产里只有命令行整理会在单次运行的工作副本内铺一份（`data/ai-runs/<runId>/workspace/.ai-reference`）；接口模式不铺，资料直接拼进消息；仓库根这份只在测试注入时出现在临时目录。会整体刷新，不进版本库 |
 | `美音要点-中文母语者.md` | **通用先验**：中文母语者统计上容易错在哪。跟 `notes/` 的分工是「跟谁在念无关」 vs 「这个人的问题」——写笔记时别把先验写成对他的断言 |
 | `server/src/analysis/articulation.ts` | **每个音素客观上怎么发**（舌尖顶哪、气流走哪、唇形），全集覆盖。跟 `notes/` 分工同上。评测报错时即使还没有笔记，界面也答得出「那这个音该怎么发」。加音素时两张表（位置 + 怎么发）都要填，漏了启动会告警、测试会红 |
@@ -169,7 +169,9 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
   （退出按进程树杀）——关窗口/停止脚本已经覆盖，页面上再放一个按钮只会多一条容易误解的路径。
   30032 只在开发模式（`npm run asr` 单跑）或手工固定 `ASR_PORT` 时出现；服务托管的边车
   用动态端口，会跟着 30031 的服务进程树一起停。
-- `npm run dev` —— 开发模式：server（30031）+ vite（5173）一起起，改代码热更新
+- `npm run dev` —— 开发模式：server（30031）+ vite（5173）+ 识别服务（30032）一起起，改代码热更新。
+  边车由 `npm run asr` 独立跑（`scripts/dev-server.mjs` 给 server 设 `ASR_AUTOSTART=0`），
+  所以改服务端代码时 tsx watch 重启不会每遍都重新加载一次 1.2GB 模型。
 - `npm run build && npm start` —— 生产模式：构建后单进程跑在 http://localhost:30031（前端也从这个端口托管，`/word/click`、`/review` 这类深链接直接输网址也能打开，不会 404）
 - `npm test` —— Vitest 全量测试（开头先过 Node 版本闸，见上面「Node 版本」那节）
 - `npm run desktop` / `npm run dist:desktop` / `npm run dist:desktop:zip` —— 开发时起桌面壳 /
@@ -179,8 +181,11 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
 - `npm run asr` —— 起本地**音素识别服务**（Python/FastAPI，默认 30032 端口。**代码注释和测试里一律叫它「边车」/ sidecar**，那个词只在仓库内部用；文档和界面上说「识别服务」，别让用户去理解一个服务网格的黑话）。评测的主路径靠它：录音转成 IPA 之后跟 CMUdict 的目标音素逐个对齐，能说出「第几个音发成了什么 / 漏了 / 多了」。首次运行会下模型（约 1.2GB；默认从 ModelScope 下，本地 HF 缓存命中就直接复用），之后启动约十几秒。
   **它走 `scripts/asr.mjs` 这层包装，不是直接调 uv**：`dotenv/config` 只在 server 那个进程里
   import，而手工单跑（`npm run asr`）或开发模式里的边车是**兄弟进程**，读不到 appRoot 的
-  `.env`——所以由这层包装把键合并进环境。包装只干两件事：把 `.env` 合并进环境再 spawn uv；认出连接类失败时补一段
-  中文说明。**服务自己拉起边车时不需要这层包装**：它已经读过 appRoot 下的 `.env`，并把
+  `.env`——所以由这层包装把键合并进环境。包装做四件事：把 `.env` 合并进环境再 spawn uv；钉死两个不能被 `.env`
+  覆盖的管道变量（`PYTHONIOENCODING=utf-8`——不然 Python 在中文 Windows 上按系统区域编码往管道里写，那几句中文提示
+  会变成「锟斤拷」；`DISABLE_SAFETENSORS_CONVERSION=1`——挡住 transformers 加载完之后去 hub 翻转换 PR 的请求）；
+  认出连接类失败时补一段中文说明；把自己登记进 `data/stop-control/`，服务停时按进程树把边车一起带走。
+  **服务自己拉起边车时不需要这层包装**：它已经读过 appRoot 下的 `.env`，并把
   `MODEL_SOURCE` / `HF_ENDPOINT` 传进子进程。**模型默认从 ModelScope 下**
   （`asr-service/main.py` 的 `resolve_model`）：**先查本地 HF 缓存**——已经下过的人
   升上来一个字节都不该重下；要下才走 ModelScope；ModelScope 不通自动回落 HuggingFace。
@@ -247,8 +252,8 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
 （查词、真人音、逐音素评测、复习、41 个音素的「怎么发」全是本地的），
 你要做的是读这份单子，把只有你能做的那件事补上——讲解。
 
-这个块**始终是新的**：服务启动时同步一次、笔记一有变动就同步、每次评测后也同步
-（`server/src/index.ts` 的 `refreshProfile`）。所以它反映的是当下，不是上次录音那一刻。
+这个块**始终是新的**：打开/切换用户时、笔记一有变动、每次评测后、删词条和导入备份后都会同步
+（`profile.ts` 的 `syncProfile`；入口在 `server/src/index.ts` 的 `openRituals` / `refreshProfile`、`app.ts` 和 `ai/`）。所以它反映的是当下，不是上次录音那一刻。
 服务没启动的话它可能停在上次退出时的状态——那种情况下如实说明，别把它当实时数据用。
 
 ## 每次回答的固定动作
@@ -334,6 +339,8 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
 |---|---|
 | **录音里反复出现** | 讲音的笔记（`triggers:`）要在他身上命中过 **≥3 次、且跨 ≥2 个词**；讲词的笔记（`words:`）只要 **≥3 次**——它讲的就是这几个词，没有泛化主张可提 |
 | 素材库 | 命中过但不够，或者根本没出现过。**全新装上的人全都是这一档** |
+
+「跨 ≥2 个词」数的是**实际练习目标**（`attempt.target`）、不是词条：一条短语词条可以只录其中一个词，那几次的归属按实际念的那个词算（`db.ts` 的 `targetCount`）。所以同一条短语里不同次念的词，也算跨了两个目标。
 
 措辞是改过的。原来叫「你确认过的短板」，而它**跟自己的副标题打架**：副标题写着
 「反复出错、而且不止在一个词上出现过，才会进这里」——那是一句测量，标题却说
@@ -532,7 +539,7 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 |---|---|---|
 | 首页「卡住的地方」 | 卡住的词 + 反复错却没讲解的音，各配一个能点的动作。**不含到期复习**——侧栏角标一直在，这儿再说一遍只是重复；这一块只端侧栏端不出来的 | `TodayPlan`，只读 `/api/stats` |
 | 统计页「卡住的词」 | 练了 ≥5 次、全对率仍 ≤40% 的词 | `db.ts` 的 `stuckWords`，跟发音档案那一节共用判据 |
-| 音素页「练一下」 | 就地挑一个例词开录，不用回首页 | `DrillPhoneme`，点了才取词条（不预取） |
+| 音素页「练」 | 就地挑一个例词开录，不用回首页 | `DrillPhoneme`，点了才取词条（不预取） |
 | 设置页「搬家」 | 导出/导入练习记录 | `/api/backup`，见下 |
 
 **判据一律在服务端，前端不另立一套。** `worthANote`、`stuckWords`、`severityOf`、
@@ -588,8 +595,8 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 ### 接口 / 命令行只在 `runAiText` 分一次流
 
 - 接口走 `callAi`（`ai/protocols.ts`），三家共用一套错误映射和脱敏；非流式。
-- 命令行走 `resolveCliInvocation` + `runCliAgent`（`ai/cli.ts`），用 `cross-spawn`
-  直接起进程，**不拼 shell 字符串**；取消按进程树杀。
+- 命令行走 `resolveCliInvocation`（`ai/cli.ts`）：讲解、对话、测试连接用 `runCliText`，
+  整理用 `runCliAgent`；用 `cross-spawn` 直接起进程，**不拼 shell 字符串**；取消按进程树杀。
 - **Codex 的提示词通过 stdin 传入**（`exec -`），不能恢复为参数：Windows 的 npm
   `.cmd` 启动器会截断多行参数，实际整理只能收到第一行，任务和边界说明都会丢失。
   `cli.process.test.ts` 通过真实批处理启动器检查换行、引号和 shell 符号原样送达。
@@ -602,7 +609,7 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 
 - **命令行调用的 cwd 是专用的空目录**（`ai/workspace.ts`，落在 `data/ai-workspace/`），**不继承服务进程所在的目录**。
   那些工具会把自己所在目录当成工作区，把里面的规则文件读成上下文——实测 agy 会把仓库里
-  那份 68 KB 的 `AGENTS.md` 截到 24 KB 塞进「讲解发音」这个跟项目规则毫无关系的请求里，
+  那份 78 KB 的 `AGENTS.md` 截到 24 KB 塞进「讲解发音」这个跟项目规则毫无关系的请求里，
   既慢又跑题。命令行整理是例外：它在单次运行的工作副本中编辑，校验后再写回本机数据。
 - **推理档位和模型可以自己选**（agy）。设置里的「推理档位」和「模型」留空 = 不传这个参数，
   用工具自己的默认。agy 默认拿的是带思考的档：回一句「OK」也要先想一遍。
@@ -614,9 +621,10 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 
 ### 上下文复用现有判据，不另造一套
 
-- `ai/context.ts` 的 `buildWordContext` / `buildChatContext` 只做**组装**：
-  档案（含 AUTO 统计块）、词条音标、`latestAttemptFor` 的最近一处错、相关笔记、
-  `howToPronounce` 的发音要点。判据仍然在 `noteLinks.ts`、`matchNotes`、
+- `ai/context.ts` 的 `buildWordContext` / `buildChatContext` 只做**组装**：档案（含 AUTO
+  统计块）、词条音标、相关笔记两边都有；讲解用的 `buildWordContext` 另取 `latestAttemptFor`
+  的最近一处错和 `howToPronounce` 的发音要点，助教用的 `buildChatContext` 取的是
+  `errorsOnWord` 的按词汇总和笔记索引。判据仍然在 `noteLinks.ts`、`matchNotes`、
   `notesCovering`、`profile.ts`、`articulation.ts` 里——这里不许再写一份。
 - 短语词条逐词录音，`latestAttemptFor(db, entry, target)` 必须按这次实际念的词过滤；
   不过滤会把另一个词的错摆进讲解。
@@ -658,7 +666,7 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
   越界改动在结果区点名。整理后又被改过的笔记或档案小节保留后来的编辑，并列出冲突。
   AUTO 标记会单独检查：必须恰好一对、顺序正确。
 - 一次只跑一个，状态在内存里（重启即丢），所以**重启之后没有撤销入口**。磁盘上的
-  `snapshot.json` 只是留档，撤销不读它（依据是进程里那份 before/after 快照）。
+  `snapshot.json` 只是留档，撤销不读它（依据是进程里的 before/after 快照和提交时记下的档案小节改动）。
   日志有上限，防止一个输出狂魔把内存吃满。
   页面轮询 `GET /api/ai/agent/status`，取消/撤销分别走独立端点。
 
@@ -726,6 +734,8 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 抄错不会报错，只会让按钮点了没反应——所以有守卫：
 `desktop/src/bridge.test.ts`（preload 的频道名 vs 正本、handler vs 清单）、
 `web/src/lib/desktop.test.ts`（网页 / preload / 正本三份动作清单是同一批）。
+
+**主题和降噪这类偏好不跟着网页地址走。** 它们原来是 `localStorage`，而它按 origin 分：桌面版的页面地址带着端口，换个端口就像换了台机器（挑好的纸和墨会一声不响地回到默认）。现在桥上另有一对频道（`desktop:preferences` / `desktop:set-preference`），主进程把值写进 userData 下的 `desktop-settings.json`；网页侧统一从 `web/src/lib/preferences.ts` 读写（浏览器模式仍退回 `localStorage`，页面首次加载会把旧值迁过去）。`desktop/src/settings.ts` 的 `isPreference` 逐键校验键名和值形状——渲染进程传来的东西不能直接落盘。
 
 **能不能更新、要不要摆「开发者工具」由主进程说了算**（`CHANNEL.state` 里的
 `updater` / `devTools`）：那取决于打包形态（只有打包的 Windows NSIS 安装版有更新器，
@@ -796,6 +806,10 @@ workflow 找的是 `docs/releases/$TAG.md`，而 `$TAG` 就是带 `v` 的 tag）
 当 release 正文（`.github/workflows/release.yml` 的 `--notes-file`）。
 **缺文件发布就停**——宁可发布失败，也不要发一份说明不全的版本。
 
+**重跑要用仓库里的说明覆盖草稿正文。** 上一次跑到建草稿之后才挂（上传、发布、匿名核验），草稿已经存在；再跑时若只认「草稿在 → 跳过创建」，正文就永远停在那次旧的说明上，改过的 `docs/releases/<tag>.md` 一个字都不会生效（实测发生过）。所以那一步先看 `isDraft`：还是草稿就用 `gh release edit --notes-file` 把正文换成仓库文件，再用 `--clobber` 重传产物；已经正式发布的 tag 直接报错退出，不覆盖已发布的说明。
+
+**发布是全自动的，不设人工审批。** publish job 不挂 required reviewers（`desktop-app-standard` 的默认）：构建、更新清单、SHA256 和 attestation 都校验过就直接公开。要临时把关，自己在那次发版上加环境保护规则，别把它写成默认流程——写进去之后每一版都要卡在等人点。
+
 **`publish` 那一步必须 checkout**：发布说明是仓库里的文件，而每个 job 跑在
 **干净的 runner** 上——不取仓库，工作目录里只有 `dist/`，那句「缺发布说明就停」
 每次都命中，一版也发不出去（而且报错看着像「说明没写」，其实只是仓库没取下来）。
@@ -828,7 +842,7 @@ README、发布说明、启动脚本的注释里都长过这种：
 
 41 个音素每个都有自己的一页：怎么发（`articulation.ts` 的 `HOW_TO`）、部位/方式、
 **库里含这个音的例词**（点过去能听真人音、看逐音素拆解）、以及真正讲这个音的笔记。
-音素条上点一个音，去的是这里，不再是「命中的某篇笔记」。
+音素条上点一个音，会**就地摊开**这个音的「怎么发」（不再跳到「命中的某篇笔记」）；摊开的那块里有「这个音怎么发 · 例词 →」通到它自己那一页，真正讲这个音的笔记另给一条出路。
 
 索引页（`/phonemes`）是**两张格子**，不是两排 chips：辅音按部位 × 方式，
 元音按高低 × 前后。行列由服务端定（`articulation.ts` 的 `PLACES`/`MANNERS`/

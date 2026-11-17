@@ -15,7 +15,7 @@ export async function loadDesktopPreferences(): Promise<void> {
       const legacy = localStorage.getItem(key);
       if (legacy !== null && !Object.hasOwn(desktopPreferences, key)) setPreference(key, legacy);
     }
-  } catch { /* Existing preferences remain available from localStorage for this origin. */ }
+  } catch { /* 桌面设置读不到就退回浏览器里那份：这个 origin 的 localStorage 还在。 */ }
 }
 
 export function getPreference(key: string): string | null {
@@ -29,5 +29,5 @@ export function setPreference(key: string, value: string): void {
     desktopPreferences[key] = value;
     void bridge.setPreference(key, value).catch(() => {});
   }
-  try { localStorage.setItem(key, value); } catch { /* Persistence is optional in the browser. */ }
+  try { localStorage.setItem(key, value); } catch { /* localStorage 存不下就算了：浏览器里只是这次生效，桌面版那份另有主进程存。 */ }
 }

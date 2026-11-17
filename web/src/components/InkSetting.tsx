@@ -150,9 +150,9 @@ export default function InkSetting() {
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
           屉里都是冷色：暖色那半圈已经被<span style={{ color: 'var(--amber)' }}>提醒</span>和
           <span style={{ color: 'var(--red)' }}> 清除</span>占着，第二版油墨落进去就跟它们撞了。
-          {/* `localStorage` 这个词对用户没有意义，也没告诉他能做什么。
-              他要知道的是：这个选择只在这台机器、这个浏览器里，换了就得重挑。 */}
-          {'纸和墨只记在这台机器的这个浏览器里，不上传；换电脑、换浏览器都要重挑。'}
+          {/* `localStorage` / 桌面设置这些词对用户没有意义，也没告诉他能做什么。
+              他要知道的是：这个选择只记在这台机器上，换了就得重挑——浏览器模式下还绑在这个浏览器上。 */}
+          {'纸和墨只记在本机，不上传；换电脑要重挑，浏览器模式下换浏览器也一样。'}
         </Typography.Text>
       </Space>
     </Card>

@@ -637,8 +637,8 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       )}
 
       {/* 边车状态的提示（正在启动 / 没装 uv / 没托管 / 出错 / 备用模型检测失败）
-             搬去了 AsrStatus——那是这台机器的状态，不是每个音节的状态。
-             词条页逐音节各摆一个 Recorder，原来同一份三行字会整份重复多遍。
+             搬去了 AsrStatus——那是这台机器的状态，不是每个词的状态。
+             词条页逐词各摆一个 Recorder，原来同一份三行字会整份重复多遍。
              sidecar 这个 state 留着，只因为它还管着下面那行操作说明的出现时机。 */}
       {/* 复习流里一次要过七八张卡，每张都摊开同样几行灰字就只是噪音——
              那时人在做题，不是在学怎么用。所以复习页（brief）只留操作那一句。 */}

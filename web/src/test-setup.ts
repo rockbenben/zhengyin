@@ -37,7 +37,7 @@ if (!globalThis.ResizeObserver) {
   } as unknown as typeof ResizeObserver;
 }
 
-// Recorder.tsx 第 35 行的 micSupported 是**模块加载时**求值的
+// Recorder.tsx 顶部的 micSupported 是**模块加载时**求值的
 // （navigator.mediaDevices?.getUserMedia）。这里不补的话组件一律渲染成
 // "当前浏览器不支持录音"，测不到正常状态——而 setupFiles 早于测试文件导入，
 // 所以在这儿补是有效的。

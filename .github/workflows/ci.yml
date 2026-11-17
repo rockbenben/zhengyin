@@ -7,10 +7,12 @@
 # Git for Windows 默认 autocrlf=true，于是别人在 Windows 上 clone 到的 notes/*.md
 # 是 CRLF，而开发机工作区里是 LF。
 #
-# 这不是假设：发布前把仓库 clone 一份跑测试，本机全绿、克隆里红一条——
-# splitSections 只切 `\n`，CRLF 下标题正则一个都匹配不上，17 篇笔记全抽不出小节，
+# 这不是假设：发布前把仓库 clone 一份跑测试，本机全绿、克隆里红了一条——
+# 当时的 splitSections 只切 `\n`，CRLF 下标题正则一个都匹配不上，17 篇笔记全抽不出小节，
 # 界面上「该怎么发」整块消失。**Linux runner 复现不了这个条件**（那边永远是 LF），
-# 只有 windows 会。
+# 只有 windows 会。那个失效现在钉在 `guidance.test.ts` 的 CRLF 用例里（两个平台都跑）；
+# windows 这一格仍然不能撤——发出去的桌面版就是 win32-x64，`npm ci` 装的是 win32-x64 的
+# better-sqlite3 预编译包，只有真的 Windows 上才验得了（见下面 node 那一段）。
 #
 # ── 为什么 node 固定 26 ──
 #

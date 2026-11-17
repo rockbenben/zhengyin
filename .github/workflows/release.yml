@@ -1,11 +1,13 @@
 # 桌面版发布：tag 是唯一版本源。
 #
 # validate（版本对账 + 全量测试 + uv lock）→ Windows 打包（NSIS + zip，--publish never）
-# → 单一 publish（校验 feed / SHA256 / attestation / 人工审批 / 匿名核验）。
+# → 单一 publish（校验 feed / SHA256 / attestation / 自动公开 / 匿名核验）。
+# **发布是全自动的，不设人工审批**（desktop-app-standard 的默认）：publish job 不挂
+# required reviewers，校验通过就直接公开——给这里加人工门禁会让每次发版都卡住。
 # 发布说明用**仓库里的中文文件** `docs/releases/<tag>.md`；缺文件就停，不发半成品。
 #
 # 平台首发只有 Windows x64，见 .desktop-policy.json；mac/Linux 的偏离和复查条件也写在那里。
-# 本文件必须留在默认分支：tag 触发跑的是被打 tag 那个提交里的 workflow。
+# 本文件必须留在默认分支（`workflow_dispatch` 只从默认分支取 workflow）；tag 触发跑的是被打 tag 那个提交里的 workflow。
 name: release
 on:
   push:
@@ -88,7 +90,6 @@ jobs:
   publish:
     needs: [validate, build]
     runs-on: ubuntu-latest
-    environment: release
     permissions:
       contents: write
       id-token: write

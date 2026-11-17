@@ -246,8 +246,8 @@ export class ReviewStore {
 
     // 内存 ∪ 磁盘，**磁盘优先**。两个方向都必须成立：
     //   磁盘有内存没有（用户手工加的、校验没过被忽略的）→ 保留，不能被这次写入抹掉
-    //   内存有磁盘没有（文件被 git checkout 还原成 {}、被截断、被删）→ 用内存补回来
-    // 只取磁盘那一份的话，一次 `git checkout .`（这文件是 git 跟踪的）就能让下一次评分
+    //   内存有磁盘没有（文件被外部还原成 {}、被截断、被删）→ 用内存补回来
+    // 只取磁盘那一份的话，用户手工清空一次文件（或拿旧副本覆盖）就能让下一次评分
     // 把其余所有卡片从磁盘上抹干净，而且悄无声息。
     const next: Record<string, unknown> = Object.assign(emptyState(), this.state, ok ? raw : {});
     const restored = Object.keys(this.state).filter((k) => ok && !(k in raw));
