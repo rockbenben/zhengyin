@@ -105,7 +105,10 @@ export function resolveCliInvocation(
       args: parseCustomArgs(customArgs, prompt),
     };
   }
-  const claudeModel = (over.model ?? settings.cli.model ?? '').trim() || nativeClaudeModel();
+  // 设置里的「命令行模型」只对 agy 生效（界面上也只有选 agy 时才露出来）。
+  // 这里再读 settings.cli.model 的话，从 agy 切到 claude 会把 agy 的模型名传给 claude，
+  // 而 claude 会拿一个不认识的型号去请求并被拒。claude 只认调用方显式覆盖或它自己的配置。
+  const claudeModel = (over.model ?? '').trim() || nativeClaudeModel();
   return {
     command: custom || 'claude',
     displayName: 'claude',

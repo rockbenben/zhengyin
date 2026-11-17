@@ -54,6 +54,13 @@ describe('CLI 参数', () => {
     expect(set.args[1]).toBe('P');
   });
 
+  it('agy 的模型不会串到 claude——设置里那个输入框只对 agy 生效', () => {
+    const inv = resolveCliInvocation(s('claude', '', '', 'low', 'agy-only-model'), 'P', 'agent');
+    expect(inv.args).not.toContain('agy-only-model');
+    const i = inv.args.indexOf('--model');
+    if (i >= 0) expect(inv.args[i + 1]).not.toBe('agy-only-model');
+  });
+
   it('覆盖优先于设置：连接测试用最低档、不带模型', () => {
     const inv = resolveCliInvocation(s('agy', '', '', 'high', 'some-model'), 'P', 'text', { effort: 'low', model: '' });
     expect(inv.args[inv.args.indexOf('--effort') + 1]).toBe('low');
