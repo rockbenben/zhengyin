@@ -108,11 +108,17 @@ export function openDb(file: string): Database.Database {
   return db;
 }
 
-export function upsertEntry(db: Database.Database, text: string, words: WordAnalysis[], now: string): void {
+export function upsertEntry(
+  db: Database.Database,
+  text: string,
+  words: WordAnalysis[],
+  updatedAt: string,
+  createdAt = updatedAt,
+): void {
   db.prepare(`
     INSERT INTO entries (text, words_json, created_at, updated_at) VALUES (?, ?, ?, ?)
     ON CONFLICT(text) DO UPDATE SET words_json = excluded.words_json, updated_at = excluded.updated_at
-  `).run(text, JSON.stringify(words), now, now);
+  `).run(text, JSON.stringify(words), createdAt, updatedAt);
 }
 
 /**
@@ -307,14 +313,14 @@ export interface PhonemeStat {
   lastAt: string;
   /** 出现过这个错的词，最多列几个，给档案里当例词用 */
   words: string[];
+  /** 实际念的目标数。words 保留词条入口，用于导航。 */
+  targetCount: number;
   /**
    * 这个错**独占整条转写**的次数——那一次评测里除了它没有别的错。
    *
    * 这是「真短板」和「转写崩了」之间最硬的界线，比"跨了几个词"硬得多：
    * 模型不可能连续十几次在一条其余全对的转写里恰好错同一个位置。
    *   /ɑ/→/æ/ 17 次全在一个词上，但 15 次整条只错这一个音 → 真的
-  /** 实际念的目标数。words 保留词条入口，用于导航。 */
-  targetCount: number;
    *   /d/→/t/  6 次全在一个词上，而那几条转写整个是乱的   → 假的
    * 只看"跨几个词"的话，这两个长得一模一样。
    */
@@ -333,13 +339,13 @@ export function phonemeStats(db: Database.Database, limit = PHONEME_STATS_LIMIT)
     SELECT e.kind, e.target_ipa AS targetIpa, e.heard_ipa AS heardIpa,
            COUNT(*) AS count, MAX(a.at) AS lastAt,
            GROUP_CONCAT(DISTINCT a.entry_text) AS words,
+           COUNT(DISTINCT a.target) AS targetCount,
            -- 那一次评测里总共只有这一处错 = 其余的音模型全听对了
            SUM(CASE WHEN (SELECT COUNT(*) FROM attempt_error x WHERE x.attempt_id = e.attempt_id) = 1
                     THEN 1 ELSE 0 END) AS soloCount
     FROM attempt_error e JOIN attempt a ON a.id = e.attempt_id
     GROUP BY e.kind, e.target_ipa, e.heard_ipa
     ORDER BY count DESC, lastAt DESC
-           COUNT(DISTINCT a.target) AS targetCount,
     LIMIT ?
   `).all(limit) as Array<Omit<PhonemeStat, 'words'> & { words: string | null }>;
   return rows.map((r) => ({ ...r, words: (r.words ?? '').split(',').filter(Boolean).slice(0, 6) }));
@@ -361,13 +367,13 @@ export function errorsOnWord(db: Database.Database, entryText: string): PhonemeS
   const rows = db.prepare(`
     SELECT e.kind, e.target_ipa AS targetIpa, e.heard_ipa AS heardIpa,
            COUNT(*) AS count, MAX(a.at) AS lastAt,
+           COUNT(DISTINCT a.target) AS targetCount,
            SUM(CASE WHEN (SELECT COUNT(*) FROM attempt_error x WHERE x.attempt_id = e.attempt_id) = 1
                     THEN 1 ELSE 0 END) AS soloCount
     FROM attempt_error e JOIN attempt a ON a.id = e.attempt_id
     WHERE a.entry_text = ?
     GROUP BY e.kind, e.target_ipa, e.heard_ipa
     ORDER BY count DESC, lastAt DESC
-           COUNT(DISTINCT a.target) AS targetCount,
   `).all(entryText) as Array<Omit<PhonemeStat, 'words'>>;
   return rows.map((r) => ({ ...r, words: [entryText] }));
 }
@@ -587,7 +593,8 @@ export function importBackup(db: Database.Database, b: Backup): { added: number;
     for (const e of b.entries) {
       const cur = getEntry(db, e.text);
       if (cur && (hasManualIpa(cur.words) || !hasManualIpa(e.words))) continue;
-      upsertEntry(db, e.text, e.words, e.updatedAt || b.exportedAt);
+      const updatedAt = e.updatedAt || b.exportedAt;
+      upsertEntry(db, e.text, e.words, updatedAt, e.createdAt || updatedAt);
     }
     for (const a of b.attempts) {
       if (seen.get(a.entryText, a.at)) { skipped += 1; continue; }

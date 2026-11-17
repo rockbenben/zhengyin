@@ -2926,6 +2926,52 @@ describe('导出 / 导入备份', () => {
     expect(second.skipped).toBe(1);
   });
 
+  it('备份往返保留两个时间戳，已有同名词条保留本机时间戳', async () => {
+    const createdAt = '2026-01-01T10:00:00.123Z';
+    const updatedAt = '2026-02-01T11:00:00.456Z';
+    const localAt = '2026-03-01T12:00:00.789Z';
+    const src = testDeps();
+    const source = createApp(src);
+    src.now = () => createdAt;
+    await addEntry(source, 'thin');
+    await addEntry(source, 'click');
+    src.now = () => updatedAt;
+    await addEntry(source, 'thin');
+    await addEntry(source, 'click');
+    const backup = await (await source.request('/api/backup')).json();
+
+    const dst = testDeps();
+    dst.now = () => localAt;
+    const destination = createApp(dst);
+    await addEntry(destination, 'click');
+    const response = await destination.request('/api/backup', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(backup),
+    });
+    expect(response.status).toBe(200);
+    const roundTrip = await (await destination.request('/api/backup')).json();
+    expect(roundTrip.version).toBe(1);
+    expect(roundTrip.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'thin', createdAt, updatedAt }),
+      expect.objectContaining({ text: 'click', createdAt: localAt, updatedAt: localAt }),
+    ]));
+  });
+
+  it('仍接受时间戳为空字符串的旧备份', async () => {
+    const destination = createApp(testDeps());
+    const exportedAt = '2026-01-01T00:00:00Z';
+    const response = await destination.request('/api/backup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: 1, exportedAt, attempts: [],
+        entries: [{ text: 'thin', words: analyzeText('thin'), createdAt: '', updatedAt: '' }],
+      }),
+    });
+    expect(response.status).toBe(200);
+    const backup = await (await destination.request('/api/backup')).json();
+    expect(backup.entries[0]).toMatchObject({ text: 'thin', createdAt: exportedAt, updatedAt: exportedAt });
+  });
+
   it('导入不许抹掉本机已有的记录——它只加不减', async () => {
     const dst = testDeps();
     await addEntry(createApp(dst), 'thin');
@@ -3047,22 +3093,29 @@ describe('导出 / 导入备份', () => {
 
   it('反过来：本机没敲、备份里敲过 → 收下', async () => {
     const dst = testDeps();
+    const localCreatedAt = '2026-02-01T00:00:00Z';
+    dst.now = () => localCreatedAt;
     await addEntry(createApp(dst), 'anthropic');
 
     const typed = analyzeText('anthropic', '/ænˈθrɑpɪk/');
+    const importedUpdatedAt = '2026-03-01T00:00:00Z';
     await createApp(dst).request('/api/backup', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         version: 1,
         exportedAt: '2026-01-01T00:00:00Z',
-        entries: [{ text: 'anthropic', words: typed, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' }],
+        entries: [{ text: 'anthropic', words: typed, createdAt: '2026-01-01T00:00:00Z', updatedAt: importedUpdatedAt }],
         attempts: [],
       }),
     });
 
     const after = await (await createApp(dst).request('/api/entries/anthropic')).json();
     expect(after.words[0].ipa, '备份里有音标、本机没有，却没收下').toBe('/ænˈθrɑpɪk/');
+    const exported = await (await createApp(dst).request('/api/backup')).json();
+    expect(exported.entries[0]).toMatchObject({
+      text: 'anthropic', createdAt: localCreatedAt, updatedAt: importedUpdatedAt,
+    });
   });
 
   /**
