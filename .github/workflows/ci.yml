@@ -102,7 +102,7 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      - run: npx install-electron
+      - run: node node_modules/electron/install.js
       - run: npm run build
       - run: npm run build -w desktop
       - run: npm run fetch-runtime

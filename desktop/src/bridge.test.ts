@@ -48,8 +48,13 @@ describe('频道名自己不能撞', () => {
 });
 
 describe('主进程给每一个频道都装了 handler', () => {
+  // handler 都走 main.ts 的 handle() 包装（它先过 trustedSender），所以这里认包装。
   const handled = (): string[] =>
-    [...mainSrc.matchAll(/ipcMain\.handle\(CHANNEL\.(\w+)/g)].map((m) => m[1]);
+    [...mainSrc.matchAll(/\bhandle\(CHANNEL\.(\w+)/g)].map((m) => m[1]);
+
+  it('没有绕过 trustedSender 的 handler', () => {
+    expect(mainSrc, '有 handler 直接挂在 ipcMain 上，没校验 sender').not.toMatch(/ipcMain\.handle\(CHANNEL\./);
+  });
 
   it('清单里的频道一个不缺', () => {
     const missing = Object.keys(CHANNEL).filter((k) => !handled().includes(k));

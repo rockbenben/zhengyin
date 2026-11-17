@@ -1,0 +1,7 @@
+{
+  "npm": {
+    "electron": 45,
+    "electron-builder": 26,
+    "electron-updater": 6
+  }
+}

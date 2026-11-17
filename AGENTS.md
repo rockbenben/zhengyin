@@ -175,8 +175,8 @@ Electron 升级重编原生模块。打包 job 因此固定用 Node 26（现在�
 - `npm run build && npm start` —— 生产模式：构建后单进程跑在 http://localhost:30031（前端也从这个端口托管，`/word/click`、`/review` 这类深链接直接输网址也能打开，不会 404）
 - `npm test` —— Vitest 全量测试（开头先过 Node 版本闸，见上面「Node 版本」那节）
 - `npm run desktop` / `npm run dist:desktop` / `npm run dist:desktop:zip` —— 开发时起桌面壳 /
-  打 NSIS 安装版 / 打 zip。**先跑一次 `npx install-electron`**（Electron 42 起 npm install
-  不再代下二进制），并让 `npm run fetch-runtime` 把 node/uv 放进 `desktop/vendor/`。
+  打 NSIS 安装版 / 打 zip。**先跑一次 `node node_modules/electron/install.js`**（Electron 42 起 npm install
+  不再代下二进制；直接调包里的脚本，别用 `npx install-electron`——本地 bin 缺失时它会回落到 registry 上同名的包），并让 `npm run fetch-runtime` 把 node/uv 放进 `desktop/vendor/`。
   `npm run check:package` 对依赖闭包，`npm run smoke:package` 在仓库外真起一次打包布局。
 - `npm run asr` —— 起本地**音素识别服务**（Python/FastAPI，默认 30032 端口。**代码注释和测试里一律叫它「边车」/ sidecar**，那个词只在仓库内部用；文档和界面上说「识别服务」，别让用户去理解一个服务网格的黑话）。评测的主路径靠它：录音转成 IPA 之后跟 CMUdict 的目标音素逐个对齐，能说出「第几个音发成了什么 / 漏了 / 多了」。首次运行会下模型（约 1.2GB；默认从 ModelScope 下，本地 HF 缓存命中就直接复用），之后启动约十几秒。
   **它走 `scripts/asr.mjs` 这层包装，不是直接调 uv**：`dotenv/config` 只在 server 那个进程里
@@ -728,12 +728,16 @@ triggers 一样（ASCII `g` ≠ IPA `ɡ`），写错启动会告警。
 
 **preload 必须是 CommonJS（`.cts` → `.cjs`），而且不许 import 旁边的文件。**
 两个原因都是硬约束：沙箱渲染进程不加载 ESM preload；而沙箱里的 `require`
-只认白名单（electron / events / timers / url），取不到相对路径。
+只认 `electron`（Electron 45 起连 events / timers / url 这些 Node 内置也拿不到了），取不到相对路径。
 于是动作清单有**三份**：正本 `desktop/src/bridge.ts`（频道名 + 动作清单），preload 抄一份
 （沙箱里的 `require` 取不到旁边的文件），网页再抄一份动作名（两个包各编各的）。
 抄错不会报错，只会让按钮点了没反应——所以有守卫：
 `desktop/src/bridge.test.ts`（preload 的频道名 vs 正本、handler vs 清单）、
 `web/src/lib/desktop.test.ts`（网页 / preload / 正本三份动作清单是同一批）。
+
+**每个特权 IPC 都先过 `trustedSender`**（`main.ts`）：只认主窗口，而且这次调用的 frame 必须停在应用自己的地址上——主进程手里是文件系统、更新器和退出权，漏一道门，页面里的一段 XSS 就能直接指挥主进程。查询类 channel 也要过，它们回的是这台机器上的状态。权限同理：request / check 两道 handler 都实现，来源不是应用地址一律拒，媒体权限只放麦克风（`permissions.ts` 按 audio / video 细分，摄像头一起拒）。
+
+**打包产物用 Electron fuses 收窄能力**（`desktop/electron-builder.config.mjs`）：关 `runAsNode` / `NODE_OPTIONS` / `--inspect`，打开 asar 完整性校验和「只从 app.asar 加载」——改过的 app.asar 会被拒绝启动。fuses 只在打包时生效，开发模式跑的仍是没改过的二进制。
 
 **主题和降噪这类偏好不跟着网页地址走。** 它们原来是 `localStorage`，而它按 origin 分：桌面版的页面地址带着端口，换个端口就像换了台机器（挑好的纸和墨会一声不响地回到默认）。现在桥上另有一对频道（`desktop:preferences` / `desktop:set-preference`），主进程把值写进 userData 下的 `desktop-settings.json`；网页侧统一从 `web/src/lib/preferences.ts` 读写（浏览器模式仍退回 `localStorage`，页面首次加载会把旧值迁过去）。`desktop/src/settings.ts` 的 `isPreference` 逐键校验键名和值形状——渲染进程传来的东西不能直接落盘。
 
@@ -809,6 +813,8 @@ workflow 找的是 `docs/releases/$TAG.md`，而 `$TAG` 就是带 `v` 的 tag）
 **重跑要用仓库里的说明覆盖草稿正文。** 上一次跑到建草稿之后才挂（上传、发布、匿名核验），草稿已经存在；再跑时若只认「草稿在 → 跳过创建」，正文就永远停在那次旧的说明上，改过的 `docs/releases/<tag>.md` 一个字都不会生效（实测发生过）。所以那一步先看 `isDraft`：还是草稿就用 `gh release edit --notes-file` 把正文换成仓库文件，再用 `--clobber` 重传产物；已经正式发布的 tag 直接报错退出，不覆盖已发布的说明。
 
 **发布是全自动的，不设人工审批。** publish job 不挂 required reviewers（`desktop-app-standard` 的默认）：构建、更新清单、SHA256 和 attestation 都校验过就直接公开。要临时把关，自己在那次发版上加环境保护规则，别把它写成默认流程——写进去之后每一版都要卡在等人点。
+
+**工具链大版本有一份单独的对照表**：`.github/desktop-version-targets.json`（electron 45 / electron-builder 26 / electron-updater 6），release 的 validate 会在 `npm ci` 之后核对实际装出来的三件套大版本——升级时三处一起改，别只改 `desktop/package.json`。
 
 **`publish` 那一步必须 checkout**：发布说明是仓库里的文件，而每个 job 跑在
 **干净的 runner** 上——不取仓库，工作目录里只有 `dist/`，那句「缺发布说明就停」

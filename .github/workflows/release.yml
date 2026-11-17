@@ -48,6 +48,19 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 26, cache: npm }
       - run: npm ci
+      - name: 核对 Electron 工具链大版本
+        run: |
+          node - <<'NODE'
+          const targets = require('./.github/desktop-version-targets.json').npm;
+          for (const [name, major] of Object.entries(targets)) {
+            const version = require(`./node_modules/${name}/package.json`).version;
+            if (Number(version.split('.')[0]) !== major) {
+              console.error(`::error::${name} 装的是 ${version}，目标大版本是 ${major}`);
+              process.exit(1);
+            }
+            console.log(name, version);
+          }
+          NODE
       - run: npm test
       - name: uv lock 与 pyproject 同步
         run: |
@@ -63,7 +76,7 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 26, cache: npm }
       - run: npm ci
-      - run: npx install-electron
+      - run: node node_modules/electron/install.js
       - run: npm run build
       - run: npm run build -w desktop
       - run: npm run fetch-runtime

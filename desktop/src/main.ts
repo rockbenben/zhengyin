@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, session, shell, type IpcMainInvokeEvent } from 'electron';
 import electronUpdater from 'electron-updater';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -113,9 +113,28 @@ function createWindow(healthy: boolean): void {
   void win.loadURL(target);
 }
 
+/**
+ * 权限只发给应用自己的页面。
+ *
+ * 两道 handler 都要实现（Electron 文档要求）：request 管真正要用的那一刻，check 管页面
+ * 随时可能发起的查询；漏一道就会出现「查询说可以、实际要时被拒」这种前后不一致。
+ * 判断依据是请求来源是不是本机应用地址——别的来源、外部页面、子 frame 一律拒；
+ * 媒体权限再去 permissions.ts 按 audio/video 细分。
+ */
 function installPermissions(): void {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(decidePermission(permission)));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => decidePermission(permission));
+  const origin = `http://127.0.0.1:${port}`;
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
+    const fromApp = wc.getURL().startsWith(`${origin}/`);
+    const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
+    cb(fromApp && decidePermission(permission, mediaTypes));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
+    const fromApp = requestingOrigin === origin
+      || Boolean(details.requestingUrl?.startsWith(`${origin}/`));
+    const mediaTypes = details.mediaType && details.mediaType !== 'unknown'
+      ? [details.mediaType] : undefined;
+    return fromApp && decidePermission(permission, mediaTypes);
+  });
 }
 
 function showAbout(): void {
@@ -125,6 +144,23 @@ function showAbout(): void {
     message: `${PRODUCT_NAME} ${appVersion}`,
     detail: '美式发音逐音素评测与笔记。数据全部在这台机器上。',
   });
+}
+
+/**
+ * 每个特权 IPC 的准入：只认主窗口，而且这次调用的 frame 必须停在应用自己的地址上。
+ *
+ * 主进程手里是文件系统、更新器和退出权；漏一道门，页面里的一段 XSS（或误加载的
+ * 外部页面）就能直接指挥主进程开数据文件夹、装更新。bridge 里每个动作都过这里，
+ * 没有例外——查询也要，因为它们回的是这台机器上的状态。
+ */
+function trustedSender(event: IpcMainInvokeEvent): boolean {
+  return win !== null
+    && event.sender === win.webContents
+    && Boolean(event.senderFrame?.url.startsWith(`http://127.0.0.1:${port}/`));
+}
+
+function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (event, ...args) => (trustedSender(event) ? fn(...args) : undefined));
 }
 
 /**
@@ -151,25 +187,23 @@ function registerIpc(): void {
     updateState: updater?.state() ?? null,
   });
 
-  ipcMain.handle(CHANNEL.state, () => state());
-  ipcMain.handle(CHANNEL.preferences, () => settings?.preferences ?? {});
-  ipcMain.handle(CHANNEL.setPreference, (event, key: unknown, value: unknown) => {
-    if (!settings || event.sender !== win?.webContents
-        || !event.senderFrame?.url.startsWith(`http://127.0.0.1:${port}/`)) return;
-    if (typeof value !== 'string' || !isPreference(key, value)) return;
+  handle(CHANNEL.state, () => state());
+  handle(CHANNEL.preferences, () => settings?.preferences ?? {});
+  handle(CHANNEL.setPreference, (key, value) => {
+    if (!settings || !isPreference(key, value)) return;
     const next = { ...settings, preferences: { ...settings.preferences, [key]: value } };
     writeDesktopSettings(SETTINGS_FILE, next);
     settings = next;
   });
-  ipcMain.handle(CHANNEL.openDataFolder, () => { void shell.openPath(dataRoot); });
-  ipcMain.handle(CHANNEL.changeDataFolder, () => { void changeDataFolder(); });
-  ipcMain.handle(CHANNEL.reload, () => { win?.reload(); });
-  ipcMain.handle(CHANNEL.quit, () => { app.quit(); });
-  ipcMain.handle(CHANNEL.about, () => { showAbout(); });
-  ipcMain.handle(CHANNEL.checkUpdate, () => { updater?.checkManual(); });
-  ipcMain.handle(CHANNEL.setAutoCheck, (_e, v: unknown) => { updater?.setAutoCheck(v === true); });
-  ipcMain.handle(CHANNEL.restartToUpdate, () => { updater?.restartToInstall(); });
-  ipcMain.handle(CHANNEL.devTools, () => { win?.webContents.openDevTools(); });
+  handle(CHANNEL.openDataFolder, () => { void shell.openPath(dataRoot); });
+  handle(CHANNEL.changeDataFolder, () => { void changeDataFolder(); });
+  handle(CHANNEL.reload, () => { win?.reload(); });
+  handle(CHANNEL.quit, () => { app.quit(); });
+  handle(CHANNEL.about, () => { showAbout(); });
+  handle(CHANNEL.checkUpdate, () => { updater?.checkManual(); });
+  handle(CHANNEL.setAutoCheck, (v) => { updater?.setAutoCheck(v === true); });
+  handle(CHANNEL.restartToUpdate, () => { updater?.restartToInstall(); });
+  handle(CHANNEL.devTools, () => { if (!app.isPackaged) win?.webContents.openDevTools(); });
 }
 
 async function changeDataFolder(): Promise<void> {
