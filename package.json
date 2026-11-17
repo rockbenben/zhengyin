@@ -1,6 +1,6 @@
 {
   "name": "zhengyin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "中文母语者的美式发音纠正工具：逐音素告诉你第几个音发成了什么，全部跑在本机",
   "keywords": [
