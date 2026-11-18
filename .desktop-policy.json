@@ -16,7 +16,7 @@
     "windows": "unsigned; SmartScreen warning documented in README"
   },
   "versionSource": "git tag vX.Y.Z; root and desktop/package.json asserted equal",
-  "release": "validate (tests + uv lock) -> Windows build -> single automatic publish (no manual approval; desktop-app-standard default): verify feed -> SHA256SUMS + attestation -> create or refresh the single draft from docs/releases/<tag>.md and upload -> publish + make_latest -> anonymous feed check",
+  "release": "validate (version + toolchain targets + tests + uv lock) -> Windows build -> single automatic publish (no manual approval; desktop-app-standard default): verify feed -> SHA256SUMS + attestation -> create or refresh the single draft from docs/releases/<tag>.md and upload -> publish + make_latest -> anonymous feed check",
   "actionPins": "major tags; no Dependabot",
   "immutableReleases": "not enabled yet",
   "deviations": [

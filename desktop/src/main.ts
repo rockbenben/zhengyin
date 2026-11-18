@@ -50,7 +50,7 @@ let pendingNotification: Notification | null = null;
  * 正音自己的版本号。
  *
  * **不用 `app.getVersion()`**：开发模式下 Electron 读不到应用自己的 package.json，
- * 那个调用给的是 **Electron 的版本**（如 45.3.3）——界面上写「正音 45.3.3」是句假话。
+ * 那个调用给的是 **Electron 的版本**（一个跟正音无关的数）——界面上写「正音 45.x.y」是句假话。
  * `desktop/package.json` 里那份才是正音的版本，打包时 electron-builder 也用它。
  */
 let appVersion = '';

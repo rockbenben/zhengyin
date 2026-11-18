@@ -102,6 +102,8 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
+      # Electron 42 起 npm install 不再代下二进制；直接调包里的 install.js，
+      # 别用 npx install-electron（本地 bin 缺失时它会回落到 registry 上的同名包）。
       - run: node node_modules/electron/install.js
       - run: npm run build
       - run: npm run build -w desktop
