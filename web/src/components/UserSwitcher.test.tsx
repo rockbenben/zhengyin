@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { message } from 'antd';
 import { UserSwitcher } from './UserSwitcher';
 import { api } from '../api';
 
@@ -11,19 +12,10 @@ vi.mock('../api', () => ({
   },
 }));
 
-// message 是静态导入（跟 BackupSetting.tsx 等现有组件同一种写法），要拦下它
-// 弹的内容就得像 StarButton.test.tsx 那样局部替换 antd 的 message，其余照旧走真实现。
-const stub = vi.hoisted(() => ({ toast: [] as string[] }));
-vi.mock('antd', async () => {
-  const real = await vi.importActual<typeof import('antd')>('antd');
-  return { ...real, message: { ...real.message, error: (m: string) => stub.toast.push(m) } };
-});
-
 const mocked = vi.mocked(api);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  stub.toast = [];
   mocked.user.mockResolvedValue({ current: '默认', users: ['默认', '张三'] });
 });
 
@@ -74,8 +66,7 @@ describe('UserSwitcher', () => {
     render(<UserSwitcher />);
     fireEvent.click(await screen.findByText(/默认/));
     fireEvent.click(await screen.findByText('张三'));
-    await waitFor(() => expect(stub.toast.length).toBe(1));
-    expect(stub.toast[0]).toBe('没有叫「张三」的用户');
+    await waitFor(() => expect(message.error).toHaveBeenCalledExactlyOnceWith('没有叫「张三」的用户'));
   });
 it('添加用户弹窗的输入框算得出名字——placeholder 不是名字', async () => {
     // 本仓库自己的判据（HomePage 的 aria-label 注释）：一开始打字 placeholder 就没了，

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/react';
+import { message } from 'antd';
 
 const stub = vi.hoisted(() => ({ imported: [] as unknown[] }));
 vi.mock('../api', () => ({
@@ -28,8 +29,9 @@ describe('导入备份时选错了文件', () => {
     const bad = new File(['<html>这不是备份</html>'], 'saved-page.html', { type: 'text/html' });
     fireEvent.change(input, { target: { files: [bad] } });
 
-    await waitFor(() => expect(document.body.textContent).toMatch(/不是正音的备份/));
-    expect(document.body.textContent, '英文解析错误漏到了界面上').not.toMatch(/Unexpected token/i);
+    await waitFor(() => expect(message.error).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/不是正音的备份/)));
+    const [[hint]] = vi.mocked(message.error).mock.calls;
+    expect(hint, '英文解析错误漏到了提示里').not.toMatch(/Unexpected token/i);
     expect(stub.imported, '坏文件不该发给服务端').toEqual([]);
   });
 });

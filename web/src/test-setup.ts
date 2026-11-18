@@ -1,7 +1,24 @@
 // jsdom 里缺的那几个浏览器 API。只补 antd / React 挂载时真的会碰到的，
 // 缺一个就整棵树渲染不出来，跟被测行为无关。
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
+
+// antd 的静态 message 会创建一个 cleanup 管不到的 React 根。提示消失时，
+// 回调可能在 jsdom 销毁后才跑。组件测试记录提示调用，useMessage 仍走真实现。
+const staticMessage = vi.hoisted(() => ({
+  open: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  loading: vi.fn(),
+  destroy: vi.fn(),
+}));
+
+vi.mock('antd', async (importOriginal) => {
+  const antd = await importOriginal<typeof import('antd')>();
+  return { ...antd, message: { ...antd.message, ...staticMessage } };
+});
 
 // waitFor / findBy* 的默认超时是 **1000ms**，跟 vitest 的 testTimeout 是两码事——
 // 把后者抬到 15 秒并不会让前者跟着变。全量并发跑五十个文件、机器上还挂着这个应用
@@ -12,7 +29,10 @@ configure({ asyncUtilTimeout: 5_000 });
 
 // 每个用例之后卸载。不卸载的话下一个用例的 screen 查询会同时看到上一次的 DOM，
 // "断言某段文字不出现"会莫名其妙地失败。
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  for (const method of Object.values(staticMessage)) method.mockReset();
+});
 
 // antd 的响应式栅格/抽屉靠它。jsdom 没有实现。
 if (!window.matchMedia) {

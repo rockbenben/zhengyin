@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message } from 'antd';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import DesktopPanel from './DesktopPanel';
@@ -131,7 +132,7 @@ describe('检查更新要有回音', () => {
       version: '1.0.0', updater: true, devTools: false, autoCheck: false,
       updateReady: null, updateState: 'idle',
     });
-    await waitFor(() => expect(screen.getByText('已经是最新版本了')).toBeTruthy(), { timeout: 4000 });
+    await waitFor(() => expect(message.info).toHaveBeenCalledExactlyOnceWith('已经是最新版本了'), { timeout: 4000 });
   });
 
   it('读不到状态要说出来，不能把整块更新区悄悄收走', async () => {

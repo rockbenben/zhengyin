@@ -484,8 +484,6 @@ describe('非安全地址（局域网 http）下要说对原因', () => {
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
     vi.resetModules();
     const { default: Fresh } = await import('./Recorder');   // micSupported 是模块级常量，要重新加载
-    // 断言这一次渲染的 container，不是 document.body —— body 里混着前面用例留下的
-    // antd message（"评测失败"那几条），拿它断言会被别的用例污染。
     const { container } = render(
       <MemoryRouter>
         <Fresh target="book" entry="book" referenceUrl="/api/audio/book-mw.mp3" />
