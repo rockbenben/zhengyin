@@ -49,6 +49,8 @@ function ChangeList({ label, paths }: { label: string; paths: string[] }) {
  */
 export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
   useTitle('AI 整理');
+  // 撤销提示随页面卸载，避免静态 message 的独立 React 根继续更新。
+  const [toast, toastHolder] = message.useMessage();
   const [ai, setAi] = useState<AiStatusInfo | null>(null);
   const [status, setStatus] = useState<AgentStatusInfo | null>(null);
   const [loadError, setLoadError] = useState<null | 'offline' | 'failed'>(null);
@@ -129,7 +131,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
     setErr(null);
     try {
       setStatus(await api.aiAgentUndo());
-      message.success('已撤销这次整理');
+      toast.success('已撤销这次整理');
     } catch (e) {
       setErr(e instanceof Error ? e.message : '撤销失败');
     } finally {
@@ -137,7 +139,7 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
     }
   }
 
-  return (
+  const page = (
     <Space direction="vertical" size={40} style={{ width: '100%' }}>
       <PageHead
         slug="AI"
@@ -317,4 +319,6 @@ export default function OrganizePage({ pollMs = 1000 }: { pollMs?: number }) {
       </Modal>
     </Space>
   );
+
+  return <>{toastHolder}{page}</>;
 }

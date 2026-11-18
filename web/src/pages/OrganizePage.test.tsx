@@ -79,7 +79,7 @@ describe('AI 整理', () => {
     vi.spyOn(api, 'aiStatus').mockResolvedValue(ready);
     vi.spyOn(api, 'aiAgentStatus').mockResolvedValue(done);
     const undo = vi.spyOn(api, 'aiAgentUndo').mockResolvedValue(idleStatus({ state: 'undone', runId: 'r1', noteWarnings: ['保留后续编辑：x.md'] }));
-    draw();
+    const { unmount } = draw();
 
     fireEvent.click(await screen.findByRole('button', { name: '撤销这次整理' }));
     await waitFor(() => expect(undo).toHaveBeenCalledOnce());
@@ -88,6 +88,10 @@ describe('AI 整理', () => {
     expect(screen.getByText('撤销提示')).toBeTruthy();
     expect(screen.getByText('保留后续编辑：x.md')).toBeTruthy();
     expect(screen.queryByText('这些笔记没通过检查')).toBeNull();
+
+    expect(await screen.findByText('已撤销这次整理')).toBeTruthy();
+    unmount();
+    expect(screen.queryByText('已撤销这次整理')).toBeNull();
   });
 
   it('跑的时候显示日志和取消按钮', async () => {
