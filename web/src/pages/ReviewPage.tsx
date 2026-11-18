@@ -170,9 +170,9 @@ export default function ReviewPage() {
   // 那比误触评分更烦。焦点在按钮上时让按钮自己处理，别双触发。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (t?.tagName === 'BUTTON') return;
+      const target = e.target;
+      if (e.defaultPrevented || (target instanceof Element &&
+        target.closest('a[href], button, input, select, textarea, summary, [contenteditable]'))) return;
       // 只在**真判出结果**时给空格。判不出来那一档（模型没把握 / 没听出音）
       // 界面让人再念一遍，空格却会把这张没判过的卡翻过去——快捷键不能跟
       // 屏幕上写的话对着干。那一档要跳过，得明确去点「跳过这张」。
@@ -252,9 +252,9 @@ export default function ReviewPage() {
   const TONE = { ok: 'var(--black)', bad: 'var(--blue)', unknown: 'var(--amber)' } as const;
 
   return (
-    <div style={{ paddingBottom: 8 }}>
+    <div className="practice-page">
       {/* ── 进度 ── */}
-      <div style={{ marginBottom: 30 }}>
+      <div className="review-progress">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'baseline' }}>
           <span className="slug">复习 · 第 {done + 1} / {total} 张</span>
           {/* 这两个是并排的同一类小标签，答的是同一个问题：这张卡为什么在这儿。
@@ -269,48 +269,34 @@ export default function ReviewPage() {
             {card.starred ? '自己加进来的' : '之前念错过'}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
-          {Array.from({ length: total }, (_, i) => (
-            <span
-              key={i}
-              style={{
-                height: 3, flex: 1,
-                background: i < done ? 'var(--black)' : i === done ? 'var(--blue)' : 'var(--rule)',
-              }}
-            />
-          ))}
-        </div>
+        <progress className="review-progress-track" aria-label="本轮进度" value={done} max={total} />
       </div>
 
       {/* ── 题面 ── */}
-      <header className="word-head" style={{ marginBottom: 22 }}>
-        <span className="reg-mark" aria-hidden="true"><i /></span>
-        <div>
-          <span className="slug">先听标准音，再念给它听</span>
-          <h1 className="display" style={{ marginTop: 10 }}>{card.text}</h1>
-        </div>
+      <header className="practice-heading">
+        <h1 className="display" lang="en">{card.text}</h1>
       </header>
 
       {detail && (
-        <Space direction="vertical" size={26} style={{ width: '100%' }}>
+        <div className="practice-panel review-practice">
           {/* ── 要练的东西：一进卡就摆着（理由见文件顶上那段） ── */}
           {detail.words.map((w, i) => {
             const audio = detail.audio.find((a) => a.word === w.word);
             return (
               <section
-                key={w.word}
+                key={`${i}-${w.word}`}
                 style={{
                   borderTop: i > 0 ? '1px solid var(--rule)' : undefined,
                   paddingTop: i > 0 ? 20 : 0,
                 }}
               >
-                <Space wrap size={16} align="center" style={{ marginBottom: 14 }}>
+                <div className="practice-listen">
                   {detail.words.length > 1 && <span style={{ fontWeight: 600, fontSize: 17 }}>{w.word}</span>}
-                  <span className="ipa" style={{ fontSize: 24, letterSpacing: '.03em' }}>
+                  <span className="ipa practice-ipa">
                     {wordIpa(w)}
                   </span>
                   <AudioPlayer src={audio?.url ?? null} label={w.word} />
-                </Space>
+                </div>
                 {w.found && (
                   <PhonemeBar
                     word={w}
@@ -332,10 +318,7 @@ export default function ReviewPage() {
                  **整张卡录一次**，短语也一样——/api/pronounce 支持短语（按词查词典、
                  音素首尾相接后整串对齐）。拆成逐词各录一遍的话，几个分数怎么合成一个
                  说不清；而复习的单位本来就是这张卡。 ── */}
-          <div
-            id="review-recorder"
-            style={{ borderTop: '1px solid var(--rule)', paddingTop: 22 }}
-          >
+          <div id="review-recorder" className="review-recorder">
             <Recorder
               key={detail.text}
               target={detail.text}
@@ -352,18 +335,14 @@ export default function ReviewPage() {
             <AsrStatus />
           </div>
 
-          {detail.notes.length > 0 && <NoteHits notes={detail.notes} emptyHint={false} />}
-        </Space>
+        </div>
       )}
+
+      {detail && detail.notes.length > 0 && <NoteHits notes={detail.notes} emptyHint={false} />}
 
       {/* ── 判定 + 下一个：贴在视口底部，翻多少内容都在手边 ── */}
       {tried && (
-        <div
-          style={{
-            position: 'sticky', bottom: 0, marginTop: 32,
-            background: 'var(--paper)', borderTop: '2px solid var(--black)', padding: '14px 0 12px',
-          }}
-        >
+        <div className="review-verdict">
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
             <span style={{ fontSize: 15, color: TONE[verdict.tone] }}>{verdict.text}</span>
             {/* ── 说「再念一遍」就得给「再念一遍」 ──
@@ -403,7 +382,7 @@ export default function ReviewPage() {
              "忘了"记分。现在答案本来就摆着，"不会"无从谈起；而跳过是**没录音**，
              没录音就没有证据，不该有分数（跟"测不出来不打分"是同一条）。 */}
       {!tried && (
-        <div style={{ marginTop: 26 }}>
+        <div>
           <Space wrap size={10} align="center">
             <Button loading={busy} onClick={() => void submit(null)}>跳过这张</Button>
             <span className="slug">不计入进度</span>

@@ -75,8 +75,8 @@ export default function TodayPlan() {
   );
 
   return (
-    <section>
-      <span className="slug">卡住的地方</span>
+    <section aria-labelledby="practice-focus-title">
+      <h2 className="section-title" id="practice-focus-title">卡住的地方</h2>
       <div style={{ marginTop: 8 }}>
         {stuck.length > 0 && row(
           'stuck',

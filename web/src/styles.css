@@ -486,29 +486,64 @@ code { white-space: nowrap; }
 .user-switch:focus-visible b { color: var(--blue); }
 .user-switch .caret { margin-left: 4px; font-size: 9px; vertical-align: 1px; }
 
-/* ── 侧栏钉在视口上，不跟着页面长 ────────────────────────────────────────
-   antd 的 Layout 是一行 flex，侧栏默认被拉伸到**整个文档**那么高。
-   实测音素页：视口 1215、文档 1281，侧栏就是 1281——而长页面（一篇笔记正文、
-   数据多的统计页）能有好几千，于是版口那一块（在练的是谁、印次、源码）
-   掉到页面最底下，要滚到底才够得着。导航更是滚一屏就没了。
-
-   sticky + 100vh 让它钉在视口上。**align-self 必须写**：不写的话 flex 的
-   stretch 会盖过 height，等于没设。 */
-.ant-layout-sider {
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  height: 100vh;
+/* 宽屏把高频操作放在视线左缘；窄屏让这两个链接留在顶栏。 */
+.app-shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.57;
 }
-
-/* 侧栏内容要能把页脚推到底。antd 的直接子节点是 .ant-layout-sider-children，
-   flex 加在 Sider 元素本身不起作用。
-   **溢出滚动加在这一层、不加在 .ant-layout-sider 上**：窄屏那个重开导航的按钮
-   跟 `-children` 是**并列的两个子节点**（antd/lib/layout/Sider.js：aside 里先 children
-   再 triggerDom），而它定位在侧栏右侧 62px 之外。overflow 一加到 aside 上就会把它
-   裁掉——`overflow-y: auto` 会让 `overflow-x` 一起变成 auto，写 visible 也留不住。
-   加在 children 上则裁不到它，因为它根本不在 children 里面。 */
-.ant-layout-sider-children { display: flex; flex-direction: column; overflow-y: auto; }
+.page :where(a[href]) { color: var(--blue); }
+.page :where(a[href]:hover) { text-decoration: underline; }
+.app-rail {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  inset-block-start: 0;
+  align-self: start;
+  height: 100vh;
+  height: 100dvh;
+  overflow: auto;
+  background: var(--paper-deep);
+  border-inline-end: 1px solid var(--rule);
+}
+.app-nav, .nav-more-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.nav-primary, .nav-group { padding: 12px; }
+.nav-group { border-block-start: 1px solid var(--rule); }
+.nav-label {
+  color: var(--quiet);
+  font-size: 12px;
+  padding: 2px 10px 5px;
+}
+.app-nav :is(.nav-primary, .nav-group) a, .nav-more {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding-inline: 10px;
+  border-radius: 4px;
+  color: var(--black);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.app-nav :is(.nav-primary, .nav-group) a:hover, .nav-more:hover {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+.app-nav :is(.nav-primary, .nav-group) a[aria-current="page"] {
+  box-shadow: inset 3px 0 var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 700;
+}
+.app-nav a .due-count { margin-inline-start: auto; }
+.app-nav .nav-foot { margin-block-start: auto; }
+.nav-more { display: none; }
 
 /* 「跳到正文」。平时**不占位也不可见**，但仍在 tab 序里——Tab 一下就现身。
    不用 display:none / visibility:hidden：那两个会把它从 tab 序里摘掉，等于没做。
@@ -527,31 +562,66 @@ code { white-space: nowrap; }
 .skip-link:focus { left: 8px; top: 8px; }
 #main:focus { outline: none; }   /* 跳过去之后不给正文画一圈框，那不是个控件 */
 
-/* ── 窄屏（<lg）：侧栏收起后的重开按钮 ──────────────────────────────────
-   antd 把它绝对定位在内容之上（默认 top:68px）。实测 390px 下八个页面的标题
-   或副标题**全**被盖掉一角，所以这一档要给它让出一条横带。
-   断点跟 Sider 的 breakpoint="lg" 对齐（antd 的 lg = min-width:992px），
-   错开的话会出现"带子在、按钮不在"或者反过来。 */
 .page { padding: var(--gutter); padding-bottom: 72px; }
-@media (max-width: 991.98px) { .page { padding-top: 74px; } }
+.page-inner { max-width: 1000px; margin-inline: auto; }
 
-/* antd 那个默认样式是个圆角深色块，落在这套纸上像外来件。按钮本体在 layout.tsx，
-   这里只把 antd 的壳擦掉——它用 :where() 包过，普通类选择器就能盖住。 */
-.ant-layout-sider-zero-width-trigger,
-.ant-layout-sider-zero-width-trigger:hover {
-  background: transparent;
-  border-radius: 0;
+@media (max-width: 991.98px) {
+  :root { scroll-padding-top: 64px; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .app-rail {
+    z-index: 10;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding-inline: var(--gutter);
+    overflow: visible;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--rule);
+  }
+  .nav-brand { padding: 14px 0; border: 0; }
+  .nav-brand small { display: none; }
+  .app-nav { flex: none; flex-direction: row; align-items: center; gap: 3px; }
+  .nav-primary { display: flex; gap: 3px; padding: 0; }
+  .nav-more {
+    display: flex;
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+    font: inherit;
+  }
+  .nav-more[aria-expanded="true"] { background: var(--blue-soft); color: var(--blue); }
+  .nav-more-panel {
+    display: none;
+    position: absolute;
+    z-index: 10;
+    inset-block-start: 100%;
+    inset-inline-end: var(--gutter);
+    width: min(220px, calc(100% - 2 * var(--gutter)));
+    max-height: 72vh;
+    max-height: 72dvh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--black) 12%, transparent);
+  }
+  .nav-more-panel[data-open="true"] { display: block; }
+  .nav-group:first-child { border-block-start: 0; }
+  .app-nav a .due-count { margin-inline-start: 0; }
 }
-.nav-open {
-  width: 44px; height: 44px;          /* 44 是触摸目标的下限 */
-  display: inline-flex; align-items: center; justify-content: center;
-  font: 17px/1 var(--font-body);
-  color: var(--black);
-  background: var(--paper);
-  border: 1px solid var(--rule);
-  cursor: pointer;
+
+@media (max-width: 420px) {
+  .app-nav { gap: 0; }
+  .nav-primary { gap: 0; }
+  .app-nav .nav-primary a, .nav-more { gap: 5px; padding-inline: 7px; }
+  .nav-brand .reg-mark { display: none; }
 }
-.nav-open:hover { color: var(--blue); border-color: var(--blue); }
+
+@media (forced-colors: active) {
+  .app-nav a[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
 
 /* ── 单选圆点要跟它标记的那一行齐 ─────────────────────────────────────────
    这个应用里**每一个** Radio 的标签都是「一行加粗标题 + 一段说明」（备用模型两项、
@@ -569,13 +639,6 @@ code { white-space: nowrap; }
 .ant-input-password-icon {
   padding: 5px;
   margin: -5px;
-}
-
-/* 选中项左侧压一条蓝色版口线，替掉 antd 默认的整块高亮 */
-.ant-menu-inline .ant-menu-item { padding-left: 20px !important; position: relative; }
-.ant-menu-inline .ant-menu-item-selected::before {
-  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
-  width: 3px; background: var(--blue);
 }
 
 /* ── 词条页头 ─────────────────────────────────────────────────────────── */
@@ -600,6 +663,130 @@ code { white-space: nowrap; }
   .word-head .reg-mark { display: none; }
 }
 .word-head .display { font-size: clamp(44px, 8vw, 76px); }
+
+.home-page, .practice-page {
+  display: grid;
+  gap: clamp(24px, 4vw, 36px);
+  min-width: 0;
+}
+
+.lookup-panel {
+  position: relative;
+  isolation: isolate;
+  padding: clamp(20px, 4vw, 44px);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--paper-deep);
+}
+.lookup-content { max-width: 38rem; }
+.lookup-panel h1 { font-size: clamp(31px, 5vw, 56px); line-height: 1.15; }
+.lookup-panel p { margin: 10px 0 22px; color: var(--quiet); max-width: var(--measure); }
+.lookup-panel .lookup-feedback { margin: 10px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.lookup-field { width: 100%; }
+.lookup-field .ant-input-prefix { color: var(--quiet); }
+.lookup-field input::placeholder { color: var(--quiet); }
+.lookup-field .ant-btn { font-weight: 650; }
+.lookup-mark {
+  display: flex;
+  position: absolute;
+  align-items: center;
+  gap: clamp(4px, .75vw, 10px);
+  z-index: -1;
+  inset-inline-end: 32px;
+  inset-block-start: 30px;
+  height: 102px;
+  color: var(--blue);
+  opacity: .22;
+  pointer-events: none;
+}
+.lookup-mark span {
+  width: 3px;
+  border-radius: 3px;
+  background: currentColor;
+  box-shadow: 3px 3px var(--slot);
+}
+@media (max-width: 767px) { .lookup-mark { display: none; } }
+@media (max-width: 420px) {
+  .lookup-panel { padding: 14px; }
+  .lookup-field .ant-btn { padding-inline: 10px; }
+}
+
+.section-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.starter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block-start: 1px solid var(--rule);
+}
+@media (max-width: 650px) {
+  .starter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 440px) {
+  .starter-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.starter-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 12px 16px 14px;
+  border-block-end: 1px solid var(--rule);
+}
+.starter-item:hover, .starter-item:focus-within { background: var(--blue-soft); }
+.starter-item .starter-word {
+  position: static;
+  width: fit-content;
+  height: auto;
+  padding: 0;
+  font: 600 24px/1.2 var(--font-display);
+}
+.starter-word::after { content: ""; position: absolute; inset: 0; }
+.starter-item > .anticon { color: var(--blue); font-size: 13px; }
+.starter-description { grid-column: 1 / -1; color: var(--quiet); font-size: 13px; }
+.history-count { margin-inline-start: 12px; font-size: 13px; color: var(--quiet); font-weight: 400; }
+.history-word { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.history-section { min-width: 0; }
+.history-section .ant-table-tbody > tr > td { padding-block: 12px; }
+.history-section .ant-table-thead th { white-space: nowrap; }
+
+.practice-heading { display: grid; gap: 12px; justify-items: start; }
+.practice-back { font-weight: 600; }
+.practice-title { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; }
+.practice-heading .display { font-size: clamp(38px, 7vw, 72px); line-height: 1.05; }
+.practice-panel {
+  min-width: 0;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper-deep);
+}
+.practice-listen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.practice-ipa { font-size: clamp(19px, 4vw, 26px); overflow-wrap: anywhere; }
+.audio-source { color: var(--quiet); font-size: 12px; }
+.practice-phonemes { margin-block: 14px 18px; }
+.practice-panel .ant-btn { min-height: 40px; }
+.review-practice { display: grid; gap: 18px; }
+.review-recorder { padding-block-start: 18px; border-block-start: 1px solid var(--rule); }
+.review-progress-track {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-block-start: 8px;
+  accent-color: var(--blue);
+}
+.review-verdict {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 14px 0 12px;
+  background: var(--paper);
+  border-top: 2px solid var(--blue);
+}
 
 /* 词条表装的也是用户输进来的词。一个断不开的长词会把整张表撑到 501px，
    而 390px 视口下**整页**跟着横向滚动（实测）。

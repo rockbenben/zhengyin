@@ -84,7 +84,7 @@ async function draw() {
   // 而 cleanup 是每个用例之后才跑、不是每次 render 之后。同一个用例里画两次
   // （对照"这个字段变了，画面得跟着变"就得画两次），body 里就有两个页头，
   // getByText 撞见多个匹配直接抛——表现出来是全量跑的时候偶发红，单独跑又是绿的。
-  await waitFor(() => expect(within(container).getByText(/先查一个词|已经查过/)).toBeTruthy());
+  await waitFor(() => expect(within(container).getByText(/先查一个词|查词练发音/)).toBeTruthy());
   return container;
 }
 
@@ -110,12 +110,12 @@ beforeEach(() => {
  * ——见 layout.test.tsx。这里守的是**反过来的那一半**：首页别再抢一次。
  */
 describe('首页是查词页，不重复侧栏的复习入口', () => {
-  it('无论有没有到期，头版都是档案本身', async () => {
+  it('无论有没有到期，首页标题都指向查词', async () => {
     stub.entries = [entry('click'), entry('glass')];
     stub.due = 3;
-    expect((await draw()).querySelector('h1')?.textContent).toMatch(/已经查过/);
+    expect((await draw()).querySelector('h1')?.textContent).toBe('查词练发音');
     stub.due = 0;
-    expect((await draw()).querySelector('h1')?.textContent).toMatch(/已经查过/);
+    expect((await draw()).querySelector('h1')?.textContent).toBe('查词练发音');
   });
 
   // 恰好是被删掉那条的反面，用同一套机制：到期数变了，这一页一个像素都不该动。

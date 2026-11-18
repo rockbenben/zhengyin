@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,14 +92,6 @@ describe('侧栏是复习入口唯一的常驻位置', () => {
   });
 });
 
-/**
- * 窄到 lg 以下侧栏收成零宽，只剩 antd 甩出来的那个重开按钮。实测 390px 下它
- * 绝对定位在内容之上，把八个页面的标题或副标题**全**盖掉一角；而且它是个
- * `tabIndex: -1` 的 `<span>`，键盘按不到——那一档整个导航对键盘用户不可达。
- *
- * jsdom 的 matchMedia 一律返回 matches:false，也就是"不到 lg"，所以这个按钮
- * 在测试环境里本来就渲染得出来，能直接测行为。
- */
 describe('从一页走到另一页', () => {
   it('第一个能 Tab 到的东西是「跳到正文」，而且它指向 main', async () => {
     const c = draw();
@@ -120,7 +112,6 @@ describe('从一页走到另一页', () => {
     expect(css, '聚焦时没有把它挪回可见处').toMatch(/\.skip-link:focus\s*\{/);
   });
 
-  // antd 只给 .ant-menu-item-selected 这个类，那是画给眼睛看的。
   it('当前所在的那一页，导航里要说得出来', async () => {
     const c = draw();
     await waitFor(() => expect(c.textContent).toMatch(/复习/));
@@ -154,48 +145,26 @@ describe('长词不能把整页撑成横向滚动', () => {
   });
 });
 
-/** jsdom 的 matchMedia 一律 matches:false，等于"永远是宽屏"。窄屏要自己扮。 */
-function pretendNarrow() {
-  const real = window.matchMedia;
-  window.matchMedia = ((q: string) => ({
-    matches: /max-width/.test(q), media: q, onchange: null,
-    addListener: () => {}, removeListener: () => {},
-    addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
-  })) as typeof window.matchMedia;
-  return () => { window.matchMedia = real; };
-}
-
-describe('窄屏下导航还打得开', () => {
-  it('重开按钮是真按钮、有中文可访问名', async () => {
-    const restore = pretendNarrow();
-    try {
-      const c = draw();
-      await waitFor(() => expect(c.querySelector('.ant-layout-sider-zero-width-trigger')).not.toBeNull());
-      const btn = c.querySelector('.ant-layout-sider-zero-width-trigger button');
-      expect(btn, 'antd 那个零宽触发器里没有自己的按钮，会退回不可聚焦的 span').not.toBeNull();
-      expect(btn!.getAttribute('aria-label')).toMatch(/[一-鿿]/);
-    } finally { restore(); }
-  });
-
-  it('宽屏不该多出这么一个按钮——侧栏本来就摊着', async () => {
+describe('窄屏导航', () => {
+  it('查词和复习在「更多」外，更多可展开并用 Escape 收起', () => {
     const c = draw();
-    await waitFor(() => expect(c.textContent).toMatch(/复习/));
-    expect(c.querySelector('.ant-layout-sider-zero-width-trigger')).toBeNull();
-  });
+    const button = c.querySelector<HTMLButtonElement>('button.nav-more')!;
+    const panel = c.querySelector('#nav-more-panel')!;
+    expect(c.querySelector('.nav-primary a[href="/"]')).not.toBeNull();
+    expect(c.querySelector('.nav-primary a[href="/review"]')).not.toBeNull();
+    expect(button.getAttribute('aria-controls')).toBe(panel.id);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
 
-  // 让位的横带在 styles.css，触发它的断点在 layout.tsx，两处对不上就会出现
-  // "带子在、按钮不在"或者反过来。CSS 和 TSX 之间没有类型检查，只能让它会红。
-  it('横带和按钮必须在同一个宽度出现', () => {
-    const dir = import.meta.dirname;
-    const tsx = readFileSync(join(dir, 'layout.tsx'), 'utf8');
-    const css = readFileSync(join(dir, 'styles.css'), 'utf8');
-    // 宽度值从 antd 自己那份表里取，不在这儿抄一份——抄的那份会随 antd 升级悄悄过期
-    const sider = readFileSync(join(dir, '..', '..', 'node_modules', 'antd', 'lib', 'layout', 'Sider.js'), 'utf8');
-    const bp = tsx.match(/breakpoint="(\w+)"/)?.[1];
-    const width = sider.match(new RegExp(`\\b${bp}:\\s*[\`'"]([\\d.]+)px`))?.[1];
-    expect(width, `antd 的 dimensionMaxMap 里查不到 breakpoint="${bp}"（antd 换结构了？）`).toBeTruthy();
-    expect(css, `styles.css 里 .page 那条横带没跟 breakpoint="${bp}"（${width}px）对齐`)
-      .toMatch(new RegExp(`@media\\s*\\(max-width:\\s*${width!.replace('.', '\\.')}px\\)[^}]*\\.page`));
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.getAttribute('data-open')).toBe('true');
+
+    const settings = panel.querySelector<HTMLAnchorElement>('a[href="/settings"]')!;
+    settings.focus();
+    fireEvent.keyDown(settings, { key: 'Escape' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(panel.getAttribute('data-open')).toBe('false');
+    expect(document.activeElement).toBe(button);
   });
 });
 

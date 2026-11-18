@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
-import { APP_NAME } from '../lib/brand';
 import { STATS_CHANGED } from '../lib/events';
 import { Link, useNavigate } from 'react-router';
 import { Alert, Button, Input, Popconfirm, Space, Spin, Table, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
+import { ArrowRightOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, isOffline } from '../api';
 import Offline from '../components/Offline';
-import PageHead from '../components/PageHead';
 import { LoadFailed } from '../components/PageResult';
 import Notice from '../components/Notice';
 import HowItWorks from '../components/HowItWorks';
@@ -173,7 +172,7 @@ export default function HomePage() {
       title: '单词',
       dataIndex: 'text',
       key: 'text',
-      render: (text: string) => <Link to={`/word/${encodeURIComponent(text)}`}>{text}</Link>,
+      render: (text: string) => <Link className="history-word" to={`/word/${encodeURIComponent(text)}`}>{text}</Link>,
     },
     {
       // 表头说「音标」不说「IPA」：应用其余地方（README、词条页、设置页）
@@ -187,7 +186,7 @@ export default function HomePage() {
       // 正是上一轮想治的那个样子。
       // 收音标不收「操作」：音标点进词条页第一屏就有，而删词条在手机上收掉就没有别处能做了。
       responsive: ['sm'],
-      render: (ipa: string) => (ipa ? `/${ipa}/` : <Typography.Text type="secondary">—</Typography.Text>),
+      render: (ipa: string) => (ipa ? <span className="ipa">/{ipa}/</span> : <Typography.Text type="secondary">—</Typography.Text>),
     },
     {
       // 窄屏收起来：390px 下六列一起挤，这一列（最宽、也最不用看）被压到 55px、
@@ -269,103 +268,46 @@ export default function HomePage() {
     },
   ];
 
-  // 空库时的起步词。摆在查词框底下——见下面用到它的地方那段注释。
-  const starters = (
-    <section style={{ borderLeft: '3px solid var(--blue)', paddingLeft: 20 }}>
-      <span className="slug" style={{ color: 'var(--blue)' }}>不知道从哪个词开始？</span>
-      {/* 中文裹在 {'...'} 里：JSX 会把换行缩进折成一个空格，中文之间多个空格就是个豁口 */}
-      <Typography.Paragraph type="secondary" className="measure" style={{ margin: '8px 0 12px', fontSize: 13.5 }}>
-        {'这六个词一条对一条盖住中文母语者最容易错的六处，按'}
-        <strong>影响听懂的程度</strong>
-        {'排。点一下就加好了，直接能开录。'}
-      </Typography.Paragraph>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {STARTERS.map(({ word, why }) => (
-          <Space key={word} size={10} align="baseline" wrap>
-            <Button size="small" loading={addingWord === word} onClick={() => void lookUp(word)}>
-              {word}
-            </Button>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>{why}</Typography.Text>
-          </Space>
-        ))}
-      </Space>
-    </section>
-  );
-
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      {/* ── 这一页就是查词，复习归侧栏 ──
-             这里一度用大字写「有 7 个词要复习」并配一个「开始复习」按钮，于是同一件事
-             在一屏里说了三遍：侧栏的「复习 7」、这个标题、这个按钮。而侧栏那个角标
-             一直在，翻到哪一页都在——首页再抢一次，只是把查词框往下推。
-
-             当时留它的理由是"窗口一窄侧栏整个缩没"。那条理由是错的：Sider 的
-             collapsedWidth={0} 会让 antd 在越过断点时画出重新展开的浮动触发器
-             （antd/lib/layout/Sider.js 的 `collapsible || below && zeroWidthTrigger`），
-             导航一次都没丢过。 */}
-      {entries.length === 0 ? (
-        <PageHead slug={APP_NAME} title="先查一个词" />
-      ) : (
-        <PageHead
-          // 眉标跟侧栏同名。这里一度写「单词」，而**单个词的页面眉标也是「单词」**
-          // （WordPage 的 `短语 / 单词`），两个不同的页面顶着同一个名字，
-          // 于是别处说的「单词页」指哪个就说不清了——而那句话在三个地方出现。
-          slug="查词"
-          title={`已经查过 ${entries.length} 个词`}
-          meta="库里有的直接筛；没有的按「查这个词」查询。本机访问会保存词条，远程只查不存。"
-        />
-      )}
-
-      {/* ── 查词框紧跟标题 ──
-          这一页的活就是查词，那它就该是标题底下第一件够得着的东西。标题那句
-          「库里有的直接筛；没有的按「查这个词」查询。本机访问会保存词条，远程只查不存」
-          说的正是这个框，中间隔着别的东西，说明和被说明的对象就对不上了。
-
-          一个框兼两件事：库里有就筛，没有就直接查。原来只能筛——完全不懂的人
-          输进一个新词，只会得到"去问 AI"，然后就走不动了。而 /api/entries 本来
-          就能建词条（音标、真人录音、音素条、评测全都自动来），只有讲解那一层
-          需要 AI。把这条路堵住没有道理。 */}
-      {/* ── 这里**不能用 Space** ──
-          antd 的 Space 会给每个孩子套一层 `.ant-space-item`，那层是收缩到内容宽的
-          flex item。于是给框写的 `maxWidth: 100%` 没有参照物可算——百分比是相对
-          那层算的，而那层的宽度又正好等于框自己（340），一圈绕回去，等于没写。
-          换成一个普通的块级 flex 容器，百分比才落在**一行的实际宽度**上。 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <Input.Search
-          // placeholder 不是名字：一开始打字它就没了，读屏也未必拿它当名字。
-          // 这是整个应用的主控件，得说得出自己是什么。
-          // 占位按 340px 的框量着写：原来那句 22 字被截成「输入一个英文单词、短语，或一…」，
-          // 丢掉的「（如 θ）」恰恰是只有打音素的人才需要的那半句提示。
-          aria-label="要查的词、短语或音标"
-          placeholder="单词、短语，或一个音标（如 θ）"
-          // 默认那个 × 的可访问名是 antd 图标名「close-circle」——一句英文，
-          // 念给用中文界面的人听。自带一个说人话的。
-          allowClear={{ clearIcon: <span aria-label="清空">✕</span> }}
-          value={kw}
-          onChange={(e) => setKw(e.target.value)}
-          onSearch={() => void lookUp()}
-          enterButton="查这个词"
-          loading={!!addingWord}
-          // 340 是**上限不是宽度**。写死 340 时，360px 的机器（很多安卓机、
-          // iPhone SE 都是 375）算下来正文只剩 354－ 而这个框自己就 340，
-          // 一挤就把**整页**推成横向滚动（实测 320 和 360 两档都中）。
-          // 这一页最要紧的控件不该是把版面撑破的那一个。
-          style={{ width: 340, maxWidth: '100%' }}
-        />
-        {kw.trim() && filtered.length > 0 && (
-          <Typography.Text type="secondary" style={{ fontSize: 12.5, minWidth: 0, overflowWrap: 'anywhere' }}>
-            {exact
-              ? <>库里已有「{exact.text}」，按「查这个词」会打开它</>
-              : lookupFailed
-                /* 刚试过新建、失败了。再说「会新建」就跟下面那条「建不了」打架。 */
-                ? <>库里有 {filtered.length} 个匹配，点词名打开</>
-                : shortQuery
-                  /* 这几个字可能是音标；按钮会先去问音素页。中性说法，别许空诺。 */
-                  ? <>库里有 {filtered.length} 个匹配，点词名打开；按「查这个词」查「{kw.trim()}」</>
-                  : <>库里有 {filtered.length} 个匹配，点词名打开；本机访问时按「查这个词」会新建「{kw.trim()}」；远程只查不存</>}
-          </Typography.Text>
-        )}
-      </div>
+    <div className="home-page">
+      <section className="lookup-panel" aria-labelledby="lookup-title">
+        <div className="lookup-mark" aria-hidden="true">
+          {[18, 32, 52, 34, 72, 100, 62, 85, 42, 68, 33, 46, 23].map((height, index) => (
+            <span key={index} style={{ height: `${height}%` }} />
+          ))}
+        </div>
+        <div className="lookup-content">
+          <h1 className="display" id="lookup-title">{entries.length === 0 ? '先查一个词' : '查词练发音'}</h1>
+          <p>输入单词、短语或音标。查到单词后，先听示范，再录音练习。</p>
+          <Input.Search
+            className="lookup-field"
+            aria-label="要查的词、短语或音标"
+            placeholder="如 light、θ"
+            prefix={<SearchOutlined aria-hidden="true" />}
+            allowClear={{ clearIcon: <span aria-label="清空">✕</span> }}
+            autoCapitalize="none"
+            autoComplete="off"
+            spellCheck={false}
+            size="large"
+            value={kw}
+            onChange={(e) => setKw(e.target.value)}
+            onSearch={() => void lookUp()}
+            enterButton="查这个词"
+            loading={!!addingWord}
+          />
+          {q && filtered.length > 0 && (
+            <p className="lookup-feedback">
+              {exact
+                ? <>库里已有「{exact.text}」，按「查这个词」打开</>
+                : lookupFailed
+                  ? <>库里有 {filtered.length} 个匹配，点词名打开</>
+                  : shortQuery
+                    ? <>库里有 {filtered.length} 个匹配。按「查这个词」查「{kw.trim()}」。</>
+                    : <>库里有 {filtered.length} 个匹配。本机查词会新建「{kw.trim()}」，远程只查不存。</>}
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* ── 查词失败留在原地 ──
           上一版把它放在「没有匹配」那个分支里，而失败的那次输入恰恰常常**有**匹配
@@ -381,43 +323,30 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ── 起步词紧跟查词框，别排在最后 ──
-          标题是「先查一个词」，而新用户当场卡住的正是**查哪个**——他不知道自己
-          哪些音有问题，那恰恰是他来用这个工具的原因。这一排就是那个答案，
-          所以它得挨着问题。原来它排在整页最后：四步说明 + 一整段讲 AI 的话 +
-          一条配词典 key 的提示，全都挡在前面，两百多字之后才轮到它。
-          实测拉出全新用户的第一屏才看出来——本机有四十多个词条，平时根本走不到这条路。
-
-          输入框里有字的时候不摆：那时候该出场的是下面那个「库里还没有这个词」。 */}
-      {entries.length === 0 && !kw.trim() && starters}
-
-      {/* 首页只说侧栏说不了的：卡住的词、反复错却没讲解的音。这两样埋在统计页里，
-          不主动端出来就等于没有。到期数不在这儿——侧栏的角标已经够清楚了。 */}
-      {entries.length > 0 && <TodayPlan />}
-
-      {attempts !== null && <HowItWorks attempts={attempts} />}
-
-      {mwConfigured === false && !alertDismissed && (
-        <Alert
-          type="warning"
-          showIcon
-          closable
-          onClose={() => {
-            localStorage.setItem(MW_ALERT_DISMISSED, '1');
-            setAlertDismissed(true);
-          }}
-          message="现在放的是合成语音，不是真人发音"
-          description={
-            <Space direction="vertical" size={4}>
-              <span>
-                配一个 Merriam-Webster 词典 API key（免费，两三分钟）就能换成美音真人录音——
-                {'练发音时差别不小。'}
-              </span>
-              <Link to="/settings">去设置页配置 →</Link>
-            </Space>
-          }
-        />
+      {entries.length === 0 && !q && (
+        <section aria-labelledby="starter-title">
+          <h2 className="section-title" id="starter-title">不知道从哪个词开始？</h2>
+          <div className="starter-grid">
+            {STARTERS.map(({ word, why }) => (
+              <div className="starter-item" key={word}>
+                <Button
+                  type="link"
+                  className="starter-word"
+                  aria-describedby={`starter-${word}`}
+                  loading={addingWord === word}
+                  onClick={() => void lookUp(word)}
+                >
+                  {word}
+                </Button>
+                <ArrowRightOutlined aria-hidden="true" />
+                <span id={`starter-${word}`} className="starter-description">{why}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
+
+      {entries.length > 0 && !q && <TodayPlan />}
 
       {kw.trim() && filtered.length === 0 ? (
         /* 不用 antd 的 Empty：它不传 image 就会画自带的那张空盒子插画，
@@ -429,8 +358,6 @@ export default function HomePage() {
             {shortQuery
               ? <>按「查这个词」查一下「{kw.trim()}」：是音标就打开那个音的页面；否则本机访问会保存词条，远程只查不存。</>
               : <>按「查这个词」查询音标和发音。本机访问会保存词条并提供评测；远程只查不存。</>}
-            <br />
-            「为什么会错」那种讲解要去问 AI，它写完会自动出现在这个词的页面上。
           </Notice>
         )
       ) : entries.length === 0 ? (
@@ -438,16 +365,48 @@ export default function HomePage() {
         // 起步词已经摆在查词框底下了，这儿什么都不要。
         null
       ) : (
-        <div>
+        <section className="history-section" aria-labelledby="history-title">
+          <h2 className="section-title" id="history-title">
+            {q ? '匹配的词' : '查词记录'}
+            <span className="history-count">{filtered.length} 个词</span>
+          </h2>
           <Table<EntryListItem>
             size="small"
             rowKey="text"
             dataSource={filtered}
             columns={columns}
-            pagination={{ pageSize: 20, hideOnSinglePage: true }}
+            pagination={{ pageSize: 10, hideOnSinglePage: true }}
           />
-        </div>
+        </section>
       )}
-    </Space>
+
+      {!q && (
+        <>
+          {attempts !== null && <HowItWorks attempts={attempts} />}
+
+          {mwConfigured === false && !alertDismissed && (
+            <Alert
+              type="warning"
+              showIcon
+              closable
+              onClose={() => {
+                localStorage.setItem(MW_ALERT_DISMISSED, '1');
+                setAlertDismissed(true);
+              }}
+              message="现在放的是合成语音，不是真人发音"
+              description={
+                <Space direction="vertical" size={4}>
+                  <span>
+                    配一个 Merriam-Webster 词典 API key（免费，两三分钟）就能换成美音真人录音——
+                    {'练发音时差别不小。'}
+                  </span>
+                  <Link to="/settings">去设置页配置 →</Link>
+                </Space>
+              }
+            />
+          )}
+        </>
+      )}
+    </div>
   );
 }

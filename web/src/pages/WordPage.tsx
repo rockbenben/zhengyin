@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
 import { Link, useParams } from 'react-router';
-import { Button, Space, Spin, Typography } from 'antd';
+import { Button, Spin, Typography } from 'antd';
 import { api, isOffline } from '../api';
 import type { EntryDetail } from '../types';
 import AudioPlayer from '../components/AudioPlayer';
@@ -104,58 +104,44 @@ export default function WordPage() {
   const phrase = entry.words.length > 1;
 
   return (
-    <Space direction="vertical" size={40} style={{ width: '100%' }}>
-      <header className="word-head">
-        <span className="reg-mark" aria-hidden="true"><i /></span>
-        <div>
-          <span className="slug">{phrase ? '短语' : '单词'}</span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 16, marginTop: 8 }}>
-            <h1 className="display">{entry.text}</h1>
-            <div style={{ paddingBottom: 6 }}>
-              <StarButton text={entry.text} starred={starred} onChange={setStarred} />
-            </div>
-          </div>
-          {entry.phraseAudio && (
-            <div style={{ marginTop: 16 }}>
-              <AudioPlayer src={entry.phraseAudio.url} label={entry.text} />
-            </div>
-          )}
+    <div className="practice-page">
+      <header className="practice-heading">
+        <Link className="practice-back" to="/">返回查词</Link>
+        <div className="practice-title">
+          <h1 className="display" lang="en">{entry.text}</h1>
+          <StarButton text={entry.text} starred={starred} onChange={setStarred} />
         </div>
+        {entry.phraseAudio && (
+          <AudioPlayer src={entry.phraseAudio.url} label={entry.text} />
+        )}
       </header>
 
       {entry.words.map((w, i) => {
         const audio = entry.audio.find((a) => a.word === w.word);
         return (
-          <section
-            key={w.word}
-            style={{
-              borderTop: phrase ? '1px solid var(--rule)' : undefined,
-              paddingTop: phrase ? 26 : 0,
-            }}
-          >
+          <section className="practice-panel" aria-label={`练习 ${w.word}`} key={`${i}-${w.word}`}>
             {phrase && (
               <Typography.Title level={3} className="display" style={{ fontSize: 30, marginBottom: 10 }}>
                 {w.word}
               </Typography.Title>
             )}
 
-            <Space wrap size={16} align="center" style={{ marginBottom: 18 }}>
-              <span className="ipa" style={{ fontSize: 24, letterSpacing: '.03em' }}>
+            <div className="practice-listen">
+              <span className="ipa practice-ipa">
                 {wordIpa(w)}
               </span>
               <AudioPlayer src={audio?.url ?? null} label={w.word} />
               {audio && (
                 <span
-                  className="slug"
-                  style={{ border: '1px solid var(--rule)', padding: '4px 8px', letterSpacing: '.1em' }}
+                  className="audio-source"
                 >
                   {audio.source === 'mw' ? '真人录音 Merriam-Webster' : '合成语音'}
                 </span>
               )}
-            </Space>
+            </div>
 
             {w.found && (
-              <div style={{ marginBottom: 26 }}>
+              <div className="practice-phonemes">
                 <PhonemeBar
                   word={w}
                   hitTags={hitTags}
@@ -224,6 +210,6 @@ export default function WordPage() {
             .catch(() => {});
         }}
       />
-    </Space>
+    </div>
   );
 }

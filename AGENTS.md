@@ -931,14 +931,12 @@ aɪ 和 aʊ 完全同点，ɔ 和 ɔɪ 也完全同点。要画得清就得给�
 （`Typography.Paragraph` 是 `<div>`，不受这条影响；判断标签渲染成什么很容易漏，
 所以统一用类，不要再逐处想。）
 
-## 窄屏：拿 iframe 当视口量，别信眼睛
+## 窄屏：按实际视口量
 
-窗口最大化时 `resize_window` 不生效，而**同源 iframe 就是一个真视口**——里面的
-媒体查询按 iframe 宽度算，同源又能直接读它的 DOM。一次跑 6 档宽度 × 8 个页面，
-判据只有三条：`documentElement.scrollWidth > 视口宽`（页面被撑破）、
+用浏览器的设备模拟切换视口宽度，生产服务的 CSP 会阻止 iframe 嵌入。
+检查三件事：`documentElement.scrollWidth > 视口宽`（页面被撑破）、
 有元素的 `right` 越界（且不在 `.grid-wrap` / `.ant-table-content` 这两个**有意**
-横滚的容器里）、有表头被挤成竖排。断点顺手核一次：991px 侧栏该收起、992px 该展开
-（antd 的 `lg`）。
+横滚的容器里）、有表头被挤成竖排。断点顺手核一次：991px 是顶栏，992px 是侧栏。查词和复习在两种布局里都应直接可点。
 
 这么量出来的两条，肉眼在宽屏上一条都看不见：
 
@@ -952,12 +950,5 @@ aɪ 和 aʊ 完全同点，ɔ 和 ɔɪ 也完全同点。要画得清就得给�
   **必须配不透明底色**（否则底下滚过去的格子会透上来），右边那道线用 `box-shadow`
   补——`border-collapse: collapse` 下 sticky 元素的边框会被吃掉。
 
-侧栏那边还有一条**只在长页面上才现形**的：antd 的 `Layout` 是一行 flex，
-侧栏默认被拉到**整个文档**那么高（实测音素页视口 1215、文档 1281，侧栏就是 1281；
-一篇笔记正文 2211），于是导航滚一屏就没了、版口掉到页面最底下。
-`position: sticky; top: 0; height: 100vh` 之外**必须写 `align-self: flex-start`**，
-不然 flex 的 stretch 会盖过 height，等于没设。溢出滚动加在
-`.ant-layout-sider-children` 上而不是 `aside` 上：窄屏那个重开导航的按钮跟它是
-**并列的两个子节点**（见 `antd/lib/layout/Sider.js`）、且定位在侧栏右侧 62px 之外，
-`overflow` 加在 `aside` 上会把它裁掉（`overflow-y: auto` 会连带把 `overflow-x`
-变成 auto，写 `visible` 也留不住）。
+宽屏侧栏保持在视口内，内容过高时单独滚动。窄屏的「更多」面板挂在顶栏下方，
+面板有自己的高度上限和滚动区。检查长页时，向下滚动后查词和复习入口仍应可见。

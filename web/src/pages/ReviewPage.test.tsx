@@ -172,6 +172,17 @@ describe('判得出来的两档照旧', () => {
     await waitFor(() => expect(stub.graded).toEqual([{ text: 'thin', grade: 'remembered' }]));
   });
 
+  it('在导航链接上按回车时保留链接行为', async () => {
+    const c = await drawAndRecord(ALL_OK);
+    await waitFor(() => expect(buttons(c)).toContain('下一个'));
+    const navLink = document.createElement('a');
+    navLink.href = '/';
+    c.append(navLink);
+    navLink.focus();
+    expect(fireEvent.keyDown(navLink, { key: 'Enter' })).toBe(true);
+    expect(stub.graded).toEqual([]);
+  });
+
   it('有确凿的错 → forgot', async () => {
     const c = await drawAndRecord(WRONG);
     await waitFor(() => expect(c.textContent).toMatch(/发音不对/));
