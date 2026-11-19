@@ -948,6 +948,7 @@ export function createApp(deps: AppDeps) {
   //   ok=false, uv=false → 永远不会起来，别让人干等，直接给装法
   app.get('/api/pronounce/health', async (c) => {
     const s = deps.asr.status();
+    if (s.state === 'starting' && s.stage === null) return c.json({ ok: false });
     return c.json({ ok: s.state === 'ready', uv: s.uvFound });
   });
 
@@ -990,10 +991,19 @@ export function createApp(deps: AppDeps) {
     if (asrState.state === 'no-uv') {
       return c.json({ error: '这台机器没有可用的 uv，逐音素评测起不来。装一个 uv 再重启服务。' }, 503);
     }
-    const asr = await deps.recognizePhonemes(audio, fetch, 60_000, asrState.port ?? 30032);
+    if (asrState.state === 'error') {
+      return c.json({ error: asrState.error ?? '音素识别服务启动失败', reachable: false }, 503);
+    }
+    const asr = asrState.state === 'starting'
+      ? null
+      : await deps.recognizePhonemes(audio, fetch, 60_000, asrState.port ?? 30032);
     if (!sessionValid(c)) return c.json({ error: '用户已切换，请重新录音' }, 409);
+    const current = asr?.ipa === null ? deps.asr.status() : asrState;
+    if (!asr || (asr.ipa === null && current.state === 'starting')) {
+      return c.json({ error: '音素识别服务正在启动', code: 'ASR_STARTING' }, 503);
+    }
     if (asr.ipa === null) {
-      return c.json({ error: asr.reason ?? '音素识别失败', reachable: asr.reachable }, 503);
+      return c.json({ error: current.error ?? asr.reason ?? '音素识别失败', reachable: asr.reachable }, 503);
     }
 
     // 边车给了逐音素置信度就用带置信度的那条路；没给（旧版边车）就退化成纯 IPA，

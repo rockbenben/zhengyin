@@ -31,33 +31,33 @@ describe('ASR 命令', () => {
 });
 
 describe('probeUv', () => {
-  it('直接跑路径成功就用它', () => {
+  it('直接跑路径成功就用它', async () => {
     const calls: Array<[string, readonly string[] | null]> = [];
     const run = (command: string, args: readonly string[] | null) => {
       calls.push([command, args]);
       return 'uv 0.11.3 (x)';
     };
-    const r = probeUv('C:/Program Files/uv.exe', run);
+    const r = await probeUv('C:/Program Files/uv.exe', { run });
     expect(r).toEqual({ found: true, output: 'uv 0.11.3 (x)' });
     expect(calls).toHaveLength(1);
     expect(calls[0][0]).toBe('C:/Program Files/uv.exe');
     expect(calls[0][1]).toEqual(['--version']);
   });
 
-  it('直接跑失败时退回 shell 形式（照顾 .cmd shim）', () => {
+  it('直接跑失败时退回 shell 形式（照顾 .cmd shim）', async () => {
     const calls: Array<[string, readonly string[] | null]> = [];
     const run = (command: string, args: readonly string[] | null) => {
       calls.push([command, args]);
       return calls.length === 1 ? null : 'uv 0.11.3 (x)';
     };
-    const r = probeUv('uv', run);
+    const r = await probeUv('uv', { run });
     expect(r.found).toBe(true);
     expect(calls).toHaveLength(2);
     expect(calls[1][0]).toBe('"uv" --version');
     expect(calls[1][1]).toBeNull();
   });
 
-  it('两条路都失败 → found:false', () => {
-    expect(probeUv('uv', () => null)).toEqual({ found: false, output: '' });
+  it('两条路都失败 → found:false', async () => {
+    expect(await probeUv('uv', { run: () => null })).toEqual({ found: false, output: '' });
   });
 });

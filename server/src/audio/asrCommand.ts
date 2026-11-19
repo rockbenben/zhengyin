@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { join } from 'node:path';
 
 /** uv 低于这个版本就不认 `--project` / `--frozen` 的组合；升级比猜错误便宜 */
@@ -17,33 +17,30 @@ export function uvVersionProblem(output: string): string | null {
   return older ? `uv ${v.join('.')} 太旧了，识别服务要 ${MIN_UV_VERSION} 以上。升级 uv 再试。` : null;
 }
 
-export type ProbeRun = (command: string, args: readonly string[] | null) => string | null;
+export type ProbeRun = (command: string, args: readonly string[] | null, signal?: AbortSignal) => string | null | Promise<string | null>;
 
-// 单独提出来，别在 spawn 附近写数组字面量：spawnShell.test 会按 600 字符窗口扫
-// 「命令 + [参数] + shell:true」，同窗口里的无关调用会被它误伤。
 const VERSION_ARGS = ['--version'] as const;
-
-const text = (v: string | Buffer | null | undefined): string =>
-  typeof v === 'string' ? v : v ? v.toString() : '';
 
 /**
  * args 为 null 时走 shell（Windows 上 npm 装的 `.cmd` shim 需要）；
  * 有 args 时直接按参数数组跑，打包后的路径可能带空格，数组不会被拆开。
- * 两种写法分开，避免在同一处出现「参数数组 + shell:true」。
  */
-function defaultRun(command: string, args: readonly string[] | null): string | null {
-  const r = args === null
-    ? spawnSync(command, { encoding: 'utf8', shell: true, windowsHide: true })
-    : spawnSync(command, args, { encoding: 'utf8', windowsHide: true });
-  const out = `${text(r.stdout)}${text(r.stderr)}`.trim();
-  return r.status === 0 && out ? out : null;
+function defaultRun(command: string, args: readonly string[] | null, signal?: AbortSignal): Promise<string | null> {
+  const options = { encoding: 'utf8', windowsHide: true, timeout: 5000, signal } as const;
+  return new Promise((resolve) => {
+    const done = (error: Error | null, stdout: string, stderr: string) => {
+      resolve(error ? null : `${stdout}${stderr}`.trim() || null);
+    };
+    if (args === null) exec(command, options, done);
+    else execFile(command, args, options, done);
+  });
 }
 
-export function probeUv(uvPath: string, run: ProbeRun = defaultRun): { found: boolean; output: string } {
-  const direct = run(uvPath, VERSION_ARGS);
+export async function probeUv(uvPath: string, { run = defaultRun, signal }: { run?: ProbeRun; signal?: AbortSignal } = {}): Promise<{ found: boolean; output: string }> {
+  const direct = await run(uvPath, VERSION_ARGS, signal);
   if (direct) return { found: true, output: direct };
 
-  const shell = run(`"${uvPath}" --version`, null);
+  const shell = signal?.aborted ? null : await run(`"${uvPath}" --version`, null, signal);
   if (shell) return { found: true, output: shell };
 
   return { found: false, output: '' };

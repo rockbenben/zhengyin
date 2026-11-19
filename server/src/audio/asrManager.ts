@@ -1,4 +1,5 @@
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { stopChildTree } from '../processTree.js';
 import { buildAsrCommand, uvVersionProblem } from './asrCommand.js';
 import { isPortListening, pickFreePort } from '../net.js';
@@ -7,6 +8,8 @@ export type AsrState = 'off' | 'no-uv' | 'starting' | 'ready' | 'error';
 
 export interface AsrStatus {
   state: AsrState;
+  stage: 'dependencies' | 'model' | null;
+  stalled: boolean;
   port: number | null;
   uvFound: boolean;
   startedAt: number | null;
@@ -22,7 +25,7 @@ export interface AsrManagerOptions {
   autostart: boolean;
   /** .env 里的 MODEL_SOURCE / HF_ENDPOINT 等，由调用方合并进来 */
   baseEnv?: NodeJS.ProcessEnv;
-  probeUv: () => { found: boolean; output: string };
+  probeUv: (signal: AbortSignal) => { found: boolean; output: string } | Promise<{ found: boolean; output: string }>;
   pickPort?: () => Promise<number>;
   isListening?: (port: number, host: string) => Promise<boolean>;
   fetch?: typeof fetch;
@@ -34,14 +37,23 @@ export interface AsrManagerOptions {
 
 const MAX_LOG = 300;
 const ANSI = /\u001b\[[0-9;]*m/g;
+const MODEL_START = '[zhengyin-asr] model';
+const PARENT_PING = '[zhengyin-asr] parent-ping';
+const STALL_WARNING_MS = 2 * 60_000;
+const STALL_TIMEOUT_MS = 10 * 60_000;
+const STARTUP_TIMEOUT_MS = 45 * 60_000;
+const MODEL_READY_POLL_MS = 250;
 
 export class AsrManager {
   private state: AsrState = 'off';
   private portNo: number | null = null;
   private uvFound = false;
   private startedAt: number | null = null;
+  private stage: AsrStatus['stage'] = null;
+  private lastProgressAt = 0;
   private error: string | null = null;
   private log: string[] = [];
+  private probe: AbortController | null = null;
   private child: ChildProcess | null = null;
   private runId = 0;
   private stopping = false;
@@ -52,6 +64,8 @@ export class AsrManager {
   status(): AsrStatus {
     return {
       state: this.state,
+      stage: this.stage,
+      stalled: this.state === 'starting' && this.now() - this.lastProgressAt >= STALL_WARNING_MS,
       port: this.portNo,
       uvFound: this.uvFound,
       startedAt: this.startedAt,
@@ -62,32 +76,60 @@ export class AsrManager {
 
   port(): number | null { return this.portNo; }
 
+  private now(): number { return (this.o.now ?? Date.now)(); }
+
   private push(text: string): void {
-    for (const line of text.replace(ANSI, '').split(/[\r\n]+/)) {
-      const s = line.trimEnd();
-      if (!s) continue;
-      this.log.push(s);
-      if (this.log.length > MAX_LOG) this.log.splice(0, this.log.length - MAX_LOG);
-    }
+    const line = text.replace(ANSI, '').trimEnd();
+    if (!line || line === this.log.at(-1)) return;
+    this.lastProgressAt = this.now();
+    this.log.push(line);
+    if (this.log.length > MAX_LOG) this.log.shift();
+  }
+
+  private startupTask(): string {
+    return this.stage === 'dependencies' ? '安装识别依赖' : '加载识别模型';
+  }
+
+  private fail(error: string): void {
+    this.runId += 1;
+    this.state = 'error';
+    this.stage = null;
+    this.error = error;
+    this.push(error);
   }
 
   async start(): Promise<void> {
     const id = ++this.runId;
     this.stopping = false;
     this.error = null;
+    this.portNo = null;
+    this.startedAt = null;
+    this.stage = null;
+    this.log = [];
     if (!this.o.autostart) { this.state = 'off'; return; }
 
-    const uv = this.o.probeUv();
-    this.uvFound = uv.found;
-    if (!uv.found) { this.state = 'no-uv'; return; }
-    const bad = uvVersionProblem(uv.output);
-    if (bad) {
-      this.state = 'error';
-      this.error = bad;
-      this.push(bad);
-      return;
-    }
+    this.state = 'starting';
+    this.startedAt = this.lastProgressAt = this.now();
 
+    const probe = new AbortController();
+    this.probe = probe;
+    try {
+      const uv = await this.o.probeUv(probe.signal);
+      if (id !== this.runId) return;
+      this.uvFound = uv.found;
+      if (!uv.found) { this.state = 'no-uv'; return; }
+      const bad = uvVersionProblem(uv.output);
+      if (bad) { this.fail(bad); return; }
+      this.stage = 'dependencies';
+      await this.launch(id);
+    } catch (error) {
+      if (id === this.runId) this.fail(`无法启动识别服务：${(error as Error).message}`);
+    } finally {
+      if (this.probe === probe) this.probe = null;
+    }
+  }
+
+  private async launch(id: number): Promise<void> {
     const fetchFn = this.o.fetch ?? fetch;
     const listening = this.o.isListening ?? isPortListening;
     const explicit = this.o.explicitPort;
@@ -103,23 +145,20 @@ export class AsrManager {
         if (id !== this.runId) return;
         if (typeof body.ok === 'boolean') {
           this.portNo = explicit;
-          this.state = 'starting';
-          this.startedAt = (this.o.now ?? Date.now)();
+          this.stage = 'model';
+          this.lastProgressAt = this.now();
           void this.waitReady(explicit, id);
           return;
         }
       } catch { /* 不是我们的服务，落到下面报错 */ }
       if (id !== this.runId) return;
-      this.state = 'error';
-      this.error = `端口 ${explicit} 被别的程序占着。关掉它，或在 .env 里换一个 ASR_PORT。`;
-      this.push(this.error);
+      this.fail(`端口 ${explicit} 被别的程序占着。关掉它，或在 .env 里换一个 ASR_PORT。`);
       return;
     }
 
     const port = explicit ?? await (this.o.pickPort ?? pickFreePort)();
     if (id !== this.runId) return;
     this.portNo = port;
-    this.startedAt = (this.o.now ?? Date.now)();
     const cmd = buildAsrCommand({
       uvPath: this.o.uvPath,
       projectDir: this.o.projectDir,
@@ -128,38 +167,34 @@ export class AsrManager {
       baseEnv: this.o.baseEnv ?? process.env,
     });
 
-    let child: ChildProcess;
-    try {
-      child = (this.o.spawn ?? spawnChild)(cmd.command, cmd.args, {
-        env: cmd.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        detached: process.platform !== 'win32',
-      });
-    } catch (e) {
-      this.state = 'error';
-      this.error = `起不了识别服务：${(e as Error).message}`;
-      this.push(this.error);
-      return;
-    }
-
-    this.child = child;
-    this.state = 'starting';
-    child.stdout?.on('data', (b: Buffer) => this.push(b.toString()));
-    child.stderr?.on('data', (b: Buffer) => this.push(b.toString()));
-    child.on('error', (e: NodeJS.ErrnoException) => {
-      if (id !== this.runId || this.stopping) return;
-      this.runId += 1;
-      this.state = 'error';
-      this.error = `起不了识别服务：${e.message}`;
-      this.push(this.error);
+    const child = (this.o.spawn ?? spawnChild)(cmd.command, cmd.args, {
+      env: { ...cmd.env, ZHENGYIN_ASR_PARENT_PIPE: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
     });
-    child.on('exit', (code) => {
-      if (id !== this.runId || this.stopping) return;
-      this.runId += 1;
-      this.state = 'error';
-      this.error = `识别服务退出了（退出码 ${code ?? '未知'}）。日志里最后几行通常能看出原因。`;
-      this.push(this.error);
+    this.child = child;
+    for (const stream of [child.stdout, child.stderr]) {
+      if (!stream) continue;
+      createInterface({ input: stream, crlfDelay: Infinity }).on('line', (line: string) => {
+        if (id !== this.runId || line === PARENT_PING) return;
+        if (line === MODEL_START) {
+          this.stage = 'model';
+          this.lastProgressAt = this.now();
+        } else {
+          this.push(line);
+        }
+      });
+    }
+    child.on('error', (e: NodeJS.ErrnoException) => {
+      if (id !== this.runId) return;
+      this.fail(`无法启动识别服务：${e.message}`);
+    });
+    child.on('close', (code, signal) => {
+      if (id !== this.runId) return;
+      const task = this.state === 'starting' ? `${this.startupTask()}失败` : '识别服务已退出';
+      this.child = null;
+      this.fail(`${task}（${signal ?? `退出码 ${code ?? '未知'}`}）。请查看识别服务日志后重试。`);
     });
     void this.waitReady(port, id);
   }
@@ -172,22 +207,43 @@ export class AsrManager {
         const r = await fetchFn(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
         const body = await r.json() as { ok?: unknown };
         if (id !== this.runId) return;
-        if (body.ok === true) { this.state = 'ready'; return; }
+        if (r.ok && body.ok === true) {
+          this.state = 'ready';
+          this.stage = null;
+          return;
+        }
       } catch { /* 还没起来，继续等 */ }
-      await sleep(1000);
+      if (id !== this.runId) return;
+      const now = this.now();
+      const inactive = now - this.lastProgressAt >= STALL_TIMEOUT_MS;
+      if (inactive || (this.startedAt !== null && now - this.startedAt >= STARTUP_TIMEOUT_MS)) {
+        const duration = inactive ? '已 10 分钟没有进展' : '启动已超过 45 分钟';
+        const error = `${this.startupTask()}超时（${duration}）。请检查网络和磁盘空间，查看日志后重启识别服务。`;
+        this.fail(error);
+        this.stopOwnedChild();
+        return;
+      }
+      await sleep(this.stage === 'model' && now - this.lastProgressAt < STALL_WARNING_MS
+        ? MODEL_READY_POLL_MS
+        : 1000);
+    }
+  }
+
+  private stopOwnedChild(): void {
+    const child = this.child;
+    this.child = null;
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      (this.o.killTree ?? stopChildTree)(child.pid);
     }
   }
 
   stop(): void {
     this.restartInFlight = null;
-    if (this.stopping && this.child === null) { this.state = 'off'; return; }
     this.stopping = true;
     this.runId += 1;
-    const child = this.child;
-    if (child?.pid && child.exitCode === null && child.signalCode === null) {
-      (this.o.killTree ?? stopChildTree)(child.pid);
-    }
-    this.child = null;
+    this.probe?.abort();
+    this.stopOwnedChild();
+    this.stage = null;
     this.state = 'off';
   }
 

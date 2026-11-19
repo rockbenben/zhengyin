@@ -154,7 +154,7 @@ const asr = new AsrManager({
     ...(modelSource ? { MODEL_SOURCE: modelSource } : {}),
     ...(hfEndpoint ? { HF_ENDPOINT: hfEndpoint } : {}),
   },
-  probeUv: () => probeUv(runtime.uvPath),
+  probeUv: (signal) => probeUv(runtime.uvPath, { signal }),
 });
 
 const stop = () => process.exit(0);
@@ -162,6 +162,10 @@ process.on('exit', () => { asr.stop(); lock.release(); });
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 process.on('SIGHUP', stop);
+if (runtime.desktop && process.connected) {
+  process.on('message', (message) => { if (message === 'shutdown') stop(); });
+  process.once('disconnect', stop);
+}
 
 /**
  * 把评测统计同步进发音档案。

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTitle } from '../lib/useTitle';
+import { desktopBridge } from '../lib/desktop';
 import { STATS_CHANGED } from '../lib/events';
 import { Link, useNavigate } from 'react-router';
 import { Alert, Button, Input, Popconfirm, Space, Spin, Table, Typography, message } from 'antd';
@@ -8,6 +9,7 @@ import { ArrowRightOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, isOffline } from '../api';
 import Offline from '../components/Offline';
+import AsrStatus from '../components/AsrStatus';
 import { LoadFailed } from '../components/PageResult';
 import Notice from '../components/Notice';
 import HowItWorks from '../components/HowItWorks';
@@ -306,6 +308,7 @@ export default function HomePage() {
                     : <>库里有 {filtered.length} 个匹配。本机查词会新建「{kw.trim()}」，远程只查不存。</>}
             </p>
           )}
+          {desktopBridge() && <div className="lookup-asr"><AsrStatus compact /></div>}
         </div>
       </section>
 

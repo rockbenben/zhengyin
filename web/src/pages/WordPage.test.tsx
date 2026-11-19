@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import type { EntryDetail, EntryDetailNote } from '../types';
+import type { AsrStatusInfo, EntryDetail, EntryDetailNote } from '../types';
 
 const stub = vi.hoisted(() => ({
   offline: false,
@@ -9,11 +9,7 @@ const stub = vi.hoisted(() => ({
   entry: null as EntryDetail | null,
   // 边车健康：默认没就绪（状态条该出现，且**整页只出现一份**）
   health: { ok: false, uv: true } as { ok: boolean; uv?: boolean },
-  asr: null as null | {
-    state: 'starting' | 'ready' | 'no-uv' | 'error' | 'off';
-    port: number | null; uvFound: boolean; startedAt: number | null;
-    error: string | null; log: string[];
-  },
+  asr: null as AsrStatusInfo | null,
   // undefined = 服务端没给这个字段（旧服务）；true/false = 404 体里的 inDictionary
   inDictionary: undefined as boolean | undefined,
   http500: false,
@@ -185,14 +181,14 @@ describe('两音节短语页上，识别服务状态条恰好一份', () => {
     stub.offline = false;
     stub.entry = TWO_WORDS;
     stub.health = { ok: false, uv: true };
-    stub.asr = { state: 'starting', port: 30032, uvFound: true, startedAt: 0, error: null, log: [] };
+    stub.asr = { state: 'starting', stage: 'model', stalled: false, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] };
     const { unmount } = render(
       <MemoryRouter initialEntries={['/word/dopamine%20detox']}>
         <Routes><Route path="/word/:text" element={<WordPage />} /></Routes>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(document.body.textContent).toContain('音素识别服务正在准备'));
-    const count = (document.body.textContent?.match(/音素识别服务正在准备/g) ?? []).length;
+    await waitFor(() => expect(document.body.textContent).toContain('正在加载模型'));
+    const count = (document.body.textContent?.match(/正在加载模型/g) ?? []).length;
     unmount();
     expect(count, `状态条重复了 ${count} 份`).toBe(1);
   });

@@ -87,8 +87,8 @@ let remoteReadOnly = false;
 export const api = {
   health: () => j<{ ok: boolean; mwConfigured: boolean }>(fetch('/api/health')),
   runtime: () => j<T.RuntimeInfo>(fetch('/api/runtime')),
-  asrStatus: () => j<T.AsrStatusInfo>(fetch('/api/asr/status')),
-  asrRestart: () => j<T.AsrStatusInfo>(fetch('/api/asr/restart', { method: 'POST' })),
+  asrStatus: () => j<T.AsrStatusInfo>(fetch('/api/asr/status', { signal: AbortSignal.timeout(5000) })),
+  asrRestart: () => j<T.AsrStatusInfo>(fetch('/api/asr/restart', { method: 'POST', signal: AbortSignal.timeout(15_000) })),
 
   addEntry: async (text: string) => {
     const response = await fetch('/api/entries', {
@@ -189,7 +189,7 @@ export const api = {
    *   复习队列里还会多出一张永远打不开的卡。
    */
   pronounce: async (target: string, wav: Blob, entry?: string, snrDb?: number): Promise<
-    { ok: true; data: T.PronounceResult } | { ok: false; sidecarDown: boolean; error: string }
+    { ok: true; data: T.PronounceResult } | { ok: false; sidecarDown: boolean; asrStarting: boolean; error: string }
   > => {
     const q = new URLSearchParams({ target });
     if (entry) q.set('entry', entry);
@@ -205,7 +205,8 @@ export const api = {
     if (r.ok) return { ok: true, data: body as T.PronounceResult };
     const error = body && typeof body === 'object' && 'error' in body
       ? String((body as { error: unknown }).error) : `API ${r.status}`;
-    return { ok: false, sidecarDown: r.status === 503, error };
+    const asrStarting = r.status === 503 && !!body && typeof body === 'object' && 'code' in body && body.code === 'ASR_STARTING';
+    return { ok: false, sidecarDown: r.status === 503 && !asrStarting, asrStarting, error };
   },
 
   // 搬家。导出走 j（失败只需要一句话），导入走 jx——服务端会说清"格式不对"还是

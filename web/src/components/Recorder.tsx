@@ -17,7 +17,8 @@ import OverprintStrip from './OverprintStrip';
 import Notice from './Notice';
 import PlaceRuler from './PlaceRuler';
 import Verdicts from './Verdicts';
-import { checkModelAvailability, contrastAll, type ModelAvailability, type ContrastVerdict } from '../lib/asr';
+import { checkModelAvailability, contrastAll, type ContrastVerdict } from '../lib/asr';
+import { asrStartupLabel, asrStartupPollMs } from '../lib/asrStartup';
 
 interface Props {
   /** 这次录音要比对的目标文本：单词页是那个词，复习页是整张卡（可能是短语） */
@@ -155,8 +156,9 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   const [preparing, setPreparing] = useState(false);
   // 解码+剪静音后的样本。评测直接吃它，A/B 播它编出来的 WAV——两边是同一段音频。
   const [clip, setClip] = useState<Clip | null>(null);
-  const [modelState, setModelState] = useState<ModelAvailability>('checking');
-  const [busy, setBusy] = useState(false);
+  const [assessment, setAssessment] = useState<'idle' | 'running' | { message: string }>('idle');
+  const busy = assessment !== 'idle';
+  const waitingMessage = typeof assessment === 'object' ? assessment.message : null;
   const [listened, setListened] = useState<Listened | null>(null);
   const [asrError, setAsrError] = useState<string | null>(null);
   /**
@@ -194,7 +196,6 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   }, [recording]);
 
   useEffect(() => {
-    checkModelAvailability().then(setModelState);
     api.getMwKey()
       .then((r) => setMwKey(r.configured))
       .catch(() => setMwKey(null));   // 问不到就不给建议，别猜
@@ -351,7 +352,6 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
             if (rec.current !== recorder) return;
             setClip(c);
             // 录完直接评测，不用再点一次——录音的目的本来就是为了看判定结果。
-            // 模型没装/没检测好时静默跳过：那种情况下 UI 上已经有一条明确的提示了。
             void listen(c);
           })
           .catch(() => message.error('这段录音处理不了，再录一次试试'))
@@ -377,7 +377,6 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       setClip(null);
       setListened(null);
       setAsrError(null);
-      setBusy(false);
     } catch (e) {
       // getUserMedia 的失败原因决定了该做什么，糊成一句话等于什么都没说。
       // 名字取自 W3C 规范，旧版 Chrome 还会用带 Devices/Track 前缀的老名字。
@@ -436,11 +435,33 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
   async function listen(c: Clip) {
     const seq = ++listenSeq.current;
     const fresh = () => listenSeq.current === seq;
-    setBusy(true);
+    setAssessment('running');
     setAsrError(null);
     try {
       // 主路径：本地音素识别边车。它不受词表约束，能说出你实际发的是什么音。
-      const res = await api.pronounce(target, clipToWavBlob(c), entry, c.snrDb);
+      const wav = clipToWavBlob(c);
+      let res = await api.pronounce(target, wav, entry, c.snrDb);
+      while (fresh() && !res.ok && res.asrStarting) {
+        setAssessment({ message: '正在查询识别服务启动进度。' });
+        // 首次下载可能超过页面提示的轮询上限。只要服务仍在启动，就保留这段录音。
+        let status = await api.asrStatus();
+        while (fresh() && status.state === 'starting') {
+          const label = asrStartupLabel(status);
+          setAssessment({ message: status.stalled
+            ? `${label}。录音仍保留，可查看日志或重启识别服务。`
+            : `${label}，服务就绪后自动评测这段录音。` });
+          await new Promise<void>((resolve) => setTimeout(resolve, asrStartupPollMs(status)));
+          if (!fresh()) return;
+          status = await api.asrStatus();
+        }
+        if (!fresh()) return;
+        setAssessment('running');
+        if (status.state === 'error') {
+          res = { ok: false, asrStarting: false, sidecarDown: true, error: status.error ?? '音素识别服务启动失败' };
+          break;
+        }
+        res = await api.pronounce(target, wav, entry, c.snrDb);
+      }
       if (!fresh()) return;
       if (res.ok) {
         setListened({ engine: 'phoneme', result: res.data });
@@ -456,8 +477,11 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
         return;
       }
       // 边车没起 → 往下走 vosk 降级路径
-      if (modelState !== 'available') {
-        setAsrError(`${res.error}（备用模型也没装，这次测不了）`);
+      const backup = await checkModelAvailability();
+      if (!fresh()) return;
+      if (backup !== 'available') {
+        const detail = backup === 'missing' ? '备用模型未安装' : '无法确认备用模型可用';
+        setAsrError(`${res.error}（${detail}）`);
         onResult?.(null);
         return;
       }
@@ -471,7 +495,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       message.error('评测失败');
       onResult?.(null);
     } finally {
-      if (fresh()) setBusy(false);
+      if (fresh()) setAssessment('idle');
     }
   }
 
@@ -516,9 +540,10 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
       <span className="sr-only" role="status">
         {asking ? '正在等浏览器允许麦克风'
           : recording ? '在听着，念出来'
-            : busy ? '在评测'
-              : listened?.engine === 'phoneme' ? headline(listened.result)
-                : ''}
+            : waitingMessage ? waitingMessage
+              : busy ? '在评测'
+                : listened?.engine === 'phoneme' ? headline(listened.result)
+                  : ''}
       </span>
       <Space wrap>
         {/* ── 自动停之后那一小段，这个按钮**不能是活的** ──
@@ -579,7 +604,7 @@ export default function Recorder({ target, entry, referenceUrl, onResult, hint =
             这一句同时解释了「为什么现在点不了」——仓库对禁用控件的一贯要求。 */}
         {working && (
           <Typography.Text style={{ fontSize: 12.5, color: 'var(--blue)' }}>
-            {busy ? '在评测 —— 结果马上出来，这会儿先别动' : '在处理这段录音…'}
+            {waitingMessage ?? (busy ? '在评测 —— 结果马上出来，这会儿先别动' : '在处理这段录音…')}
           </Typography.Text>
         )}
         {!recording && !working && clip && (

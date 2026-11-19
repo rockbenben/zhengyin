@@ -91,7 +91,9 @@ severity: confirmed
     verifyMw: vi.fn().mockResolvedValue({ ok: true }),
     recognizePhonemes: vi.fn().mockResolvedValue({ reachable: true, ipa: 'n aɪ t', phones: null, reason: null }),
     asr: {
-      status: () => ({ state: 'ready' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] }),
+      status: (): import('./audio/asrManager.js').AsrStatus => ({
+        state: 'ready', stage: null, stalled: false, port: 30032, uvFound: true, startedAt: 0, error: null, log: [],
+      }),
       restart: vi.fn().mockResolvedValue(undefined),
     },
     runtime: { desktop: false, version: '', appRoot: '/repo', userNotes: '/repo/data/notes' },
@@ -2303,6 +2305,23 @@ severity: confirmed
     expect(await res.json()).toEqual({ error: '音素识别服务没启动', reachable: false });
   });
 
+  it('边车加载期间返回可重试的状态，就绪后才执行识别', async () => {
+    const deps = testDeps();
+    const initial = deps.asr.status();
+    const status = vi.spyOn(deps.asr, 'status').mockReturnValue({ ...initial, state: 'starting' });
+    const app = createApp(deps);
+    const assess = () => app.request('/api/pronounce?target=night', { method: 'POST', body: wav });
+
+    const pending = await assess();
+    expect(pending.status).toBe(503);
+    expect(await pending.json()).toEqual({ error: '音素识别服务正在启动', code: 'ASR_STARTING' });
+    expect(deps.recognizePhonemes).not.toHaveBeenCalled();
+
+    status.mockReturnValue(initial);
+    expect((await assess()).status).toBe(200);
+    expect(deps.recognizePhonemes).toHaveBeenCalledTimes(1);
+  });
+
   it('短语按词拆开查词典，音素首尾相接后整串对齐', async () => {
     // black cat = B L AE1 K + K AE1 T。模型对短语是连着吐的（spike 实测
     // black-cat → `b l æ k k æ t`），所以对齐也按一整串来。
@@ -2350,10 +2369,12 @@ severity: confirmed
     const down = testDeps();
     const downBase = down.asr;
     down.asr = {
-      status: () => ({ ...downBase.status(), state: 'starting' as const }),
+      status: () => ({ ...downBase.status(), state: 'starting' as const, stage: 'model' as const }),
       restart: downBase.restart,
     };
     expect(await (await createApp(down).request('/api/pronounce/health')).json()).toEqual({ ok: false, uv: true });
+    down.asr.status = () => ({ ...downBase.status(), state: 'starting', stage: null, uvFound: false });
+    expect(await (await createApp(down).request('/api/pronounce/health')).json()).toEqual({ ok: false });
 
     // 没装 uv：边车永远起不来，这一档界面要直接给装法
     const noUv = testDeps();

@@ -24,6 +24,8 @@ export interface RuntimeInfo {
 export type AsrState = 'off' | 'no-uv' | 'starting' | 'ready' | 'error';
 export interface AsrStatusInfo {
   state: AsrState;
+  stage: 'dependencies' | 'model' | null;
+  stalled: boolean;
   port: number | null;
   uvFound: boolean;
   startedAt: number | null;

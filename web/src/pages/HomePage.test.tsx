@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { STATS_CHANGED } from '../lib/events';
-import type { EntryListItem } from '../types';
+import type { AsrStatusInfo, EntryListItem } from '../types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -32,6 +32,7 @@ const stub = vi.hoisted(() => ({
   /** 服务端保住的手工音标（notInDict 时才有意义） */
   manualIpa: '',
   deleted: [] as string[],
+  asrStatus: vi.fn<() => Promise<AsrStatusInfo>>(),
 }));
 
 vi.mock('../api', () => ({
@@ -39,6 +40,7 @@ vi.mock('../api', () => ({
   api: {
     listEntries: () => Promise.resolve({ entries: stub.entries }),
     health: () => Promise.resolve({ mwConfigured: true }),
+    asrStatus: stub.asrStatus,
     reviewDue: () => Promise.resolve({ cards: Array.from({ length: stub.due }, () => ({})) }),
     // TodayPlan 也挂在首页上，它要 stats。桩里漏一个函数的话，
     // 整页在 useEffect 里抛 TypeError——首页几条用例就是这么一起红的。
@@ -58,6 +60,8 @@ vi.mock('../api', () => ({
       : Promise.reject(new Error('404'))),
   },
 }));
+
+vi.mock('../lib/asr', () => ({ checkModelAvailability: async () => 'available' }));
 
 // 记下跳去了哪儿——"跳到音素页"这件事没法从渲染结果看出来
 vi.mock('react-router', async () => {
@@ -110,6 +114,32 @@ beforeEach(() => {
  * ——见 layout.test.tsx。这里守的是**反过来的那一半**：首页别再抢一次。
  */
 describe('首页是查词页，不重复侧栏的复习入口', () => {
+  it('桌面首页在查词框下显示准备阶段，就绪后收起提示', async () => {
+    const base = { port: 30123, uvFound: true, startedAt: 1, stalled: false, error: null, log: [] };
+    let releaseReady: () => void = () => {};
+    const readyGate = new Promise<void>((resolve) => { releaseReady = resolve; });
+    stub.asrStatus
+      .mockResolvedValueOnce({ ...base, state: 'starting', stage: 'model' })
+      .mockImplementation(async () => {
+        await readyGate;
+        return { ...base, state: 'ready', stage: null };
+      });
+    vi.stubGlobal('zhengyinDesktop', {});
+    try {
+      const container = await draw();
+      const page = within(container);
+      const status = await page.findByRole('status');
+      const lookup = page.getByRole<HTMLInputElement>('searchbox', { name: /要查的词/ });
+      expect(lookup.disabled).toBe(false);
+      expect(status.textContent).toBe('正在加载模型');
+      expect(status.closest('section')).toBe(lookup.closest('section'));
+      releaseReady();
+      await waitFor(() => expect(container.querySelector('.lookup-asr')?.childElementCount).toBe(0));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('无论有没有到期，首页标题都指向查词', async () => {
     stub.entries = [entry('click'), entry('glass')];
     stub.due = 3;

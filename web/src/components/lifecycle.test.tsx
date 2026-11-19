@@ -37,9 +37,10 @@ let gumCalls = 0;
  * vi.hoisted 是必须的——vi.mock 会被提到文件顶部，普通的 let 在工厂求值时还在 TDZ 里。
  */
 const healthStub = vi.hoisted(() => ({ impl: () => Promise.resolve({ ok: false, uv: true }) }));
-const asrStub = vi.hoisted(() => ({
-  impl: (): Promise<AsrStatusInfo> => Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] }),
-}));
+const asrStub = vi.hoisted(() => {
+  const starting: AsrStatusInfo = { state: 'starting', stage: 'model', stalled: false, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] };
+  return { starting, impl: async () => starting };
+});
 
 // getUserMedia 的桩：验"连点两下"要能把它挂住，制造 await 期间那个窗口。
 const gumStub = vi.hoisted(() => ({ impl: (() => Promise.reject(new Error('未设置'))) as () => Promise<MediaStream> }));
@@ -49,7 +50,7 @@ const clipStub = vi.hoisted(() => ({ hold: false, release: null as null | (() =>
 
 // pronounce 的桩也要可换：验"评测在途时误点录音"必须能把它挂住不 resolve。
 const pronounceStub = vi.hoisted(() => ({
-  impl: () => Promise.reject(new Error('本测试不评测')) as Promise<unknown>,
+  impl: (_target: string, _wav: Blob) => Promise.reject(new Error('本测试不评测')) as Promise<unknown>,
 }));
 
 /** getUserMedia 给出的假流。轨道的 stop 要能数——卸载不停它就是麦克风泄漏 */
@@ -90,7 +91,7 @@ vi.mock('../api', () => ({
     getMwKey: () => Promise.resolve({ configured: true, masked: '••••1234' }),
     confusions: () => Promise.resolve({ contrasts: [] }),
     articulation: () => Promise.resolve({ places: [], manners: {}, phones: [] }),
-    pronounce: () => pronounceStub.impl(),
+    pronounce: (target: string, wav: Blob) => pronounceStub.impl(target, wav),
   },
 }));
 vi.mock('../lib/asr', () => ({
@@ -108,7 +109,7 @@ beforeEach(() => {
   speechCancels = 0; seq = 0; asrCalls = 0; gumCalls = 0;
   gumStub.impl = () => Promise.resolve(fakeStream());
   healthStub.impl = () => Promise.resolve({ ok: false, uv: true });
-  asrStub.impl = () => Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
+  asrStub.impl = async () => asrStub.starting;
   pronounceStub.impl = () => Promise.reject(new Error('本测试不评测'));
   clipStub.hold = false; clipStub.release = null;
 
@@ -219,6 +220,55 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
     await act(async () => { b.click(); });
     await waitFor(() => expect(btn('停止录音')).toBeTruthy());
   }
+
+  it.each(['ready', 'error', 'unmount'] as const)('加载期间保留录音，等待结果为 %s', async (outcome) => {
+    const loading = await asrStub.impl();
+    let status: AsrStatusInfo = { ...loading, stage: 'dependencies' };
+    asrStub.impl = async () => status;
+    const pronounce = vi.fn()
+      .mockResolvedValueOnce({ ok: false, asrStarting: true, error: '音素识别服务正在加载' })
+      .mockResolvedValue({ ok: true, data: OK_RESULT });
+    pronounceStub.impl = pronounce;
+    healthStub.impl = async () => ({ ok: true, uv: true });
+
+    const { unmount } = mount();
+    await startRecording();
+    vi.useFakeTimers();
+    try {
+      await act(async () => { btn('停止录音').click(); });
+      expect(screen.getByRole('status').textContent).toContain('正在安装依赖');
+      expect(screen.queryByText('评测出错')).toBeNull();
+      expect(btn('评测').disabled).toBe(true);
+
+      status = { ...loading, stalled: true };
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(screen.getByRole('status').textContent).toContain('模型加载暂时没有进展');
+      status = loading;
+      await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+      expect(screen.getByRole('status').textContent).toContain('自动评测这段录音');
+      expect(pronounce).toHaveBeenCalledTimes(1);
+
+      if (outcome === 'unmount') unmount();
+      status = outcome === 'error'
+        ? { ...loading, state: 'error', error: '模型加载失败' }
+        : { ...loading, state: 'ready' };
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      if (outcome === 'ready') {
+        expect(pronounce).toHaveBeenCalledTimes(2);
+        expect(pronounce.mock.calls[1][1]).toBe(pronounce.mock.calls[0][1]);
+        expect(btn('重新评测').disabled).toBe(false);
+      } else {
+        expect(pronounce).toHaveBeenCalledTimes(1);
+        if (outcome === 'error') {
+          expect(screen.getByText(/模型加载失败/)).toBeTruthy();
+          expect(btn('评测').disabled).toBe(false);
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 15000);
 
   /**
    * 自动停之后那一小段，录音按钮不能是活的。
@@ -427,18 +477,18 @@ describe('Recorder 卸载时必须把占住的东西都放掉', () => {
  * 现在归 AsrStatus，一页一份，测试也跟着搬到这里。
  */
 describe('边车没就绪时要接着问，页面自己会好', () => {
-  it('先没就绪、后就绪 → 提示自己从「正在启动」变成不再出现，不用刷新', async () => {
+  it('先没就绪、后就绪 → 提示自己从「正在加载」变成不再出现，不用刷新', async () => {
     let ready = false;
     asrStub.impl = () => Promise.resolve(ready
-      ? { state: 'ready' as const, port: 30032, uvFound: true, startedAt: 1, error: null, log: [] }
-      : { state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
+      ? { ...asrStub.starting, state: 'ready', stage: null }
+      : asrStub.starting);
 
     render(<AsrStatus pollMs={20} />);
-    await waitFor(() => expect(document.body.textContent).toContain('正在启动'));
+    await waitFor(() => expect(document.body.textContent).toContain('正在加载'));
 
     ready = true;
     await waitFor(
-      () => expect(document.body.textContent).not.toContain('正在启动'),
+      () => expect(document.body.textContent).not.toContain('正在加载'),
       { timeout: 8000 },
     );
   }, 15000);
@@ -446,7 +496,7 @@ describe('边车没就绪时要接着问，页面自己会好', () => {
   it('卸载后不许再问 —— 否则换了页面它还在轮询，还会对已卸载的组件 setState', async () => {
     asrStub.impl = () => {
       asrCalls += 1;
-      return Promise.resolve({ state: 'starting' as const, port: 30032, uvFound: true, startedAt: 0, error: null, log: [] });
+      return Promise.resolve(asrStub.starting);
     };
 
     const { unmount } = render(<AsrStatus pollMs={20} />);
@@ -559,7 +609,7 @@ describe('这台机器没有可用的 uv 时', () => {
   async function withAsr() {
     asrStub.impl = () => {
       asrCalls += 1;
-      return Promise.resolve({ state: 'no-uv' as const, port: null, uvFound: false, startedAt: null, error: null, log: [] });
+      return Promise.resolve({ ...asrStub.starting, state: 'no-uv', stage: null, port: null, uvFound: false, startedAt: null });
     };
     render(<AsrStatus pollMs={20} />);
     await waitFor(() => expect(document.body.textContent).toMatch(/uv/));

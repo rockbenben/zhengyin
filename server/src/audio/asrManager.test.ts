@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { AsrManager } from './asrManager.js';
 
@@ -11,10 +12,10 @@ function deferred<T>() {
 
 function fakeChild() {
   const c = new EventEmitter() as EventEmitter & {
-    stdout: EventEmitter; stderr: EventEmitter; pid: number; exitCode: number | null; signalCode: NodeJS.Signals | null;
+    stdout: PassThrough; stderr: PassThrough; pid: number; exitCode: number | null; signalCode: NodeJS.Signals | null;
   };
-  c.stdout = new EventEmitter();
-  c.stderr = new EventEmitter();
+  c.stdout = new PassThrough();
+  c.stderr = new PassThrough();
   c.pid = 4242;
   c.exitCode = null;
   c.signalCode = null;
@@ -43,12 +44,27 @@ describe('AsrManager', () => {
     const m = new AsrManager(o);
     const first = m.restart();
     const second = m.restart();
-    expect(o.pickPort).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(o.pickPort).toHaveBeenCalledOnce());
     port.resolve(30123);
     await Promise.all([first, second]);
     expect(o.spawn).toHaveBeenCalledOnce();
     m.stop();
     expect(o.killTree).toHaveBeenCalledExactlyOnceWith(4242);
+  });
+
+  it('探测 uv 时立即报告启动中，退出时取消探测且不会再启动进程', async () => {
+    const probe = deferred<{ found: boolean; output: string }>();
+    const o = { ...base(), probeUv: vi.fn((_signal: AbortSignal) => probe.promise) };
+    const m = new AsrManager(o);
+    const pending = m.start();
+    expect(m.status()).toMatchObject({ state: 'starting', stage: null });
+    expect(o.spawn).not.toHaveBeenCalled();
+    m.stop();
+    expect(o.probeUv.mock.calls[0][0].aborted).toBe(true);
+    probe.resolve({ found: true, output: 'uv 0.11.3' });
+    await pending;
+    expect(o.spawn).not.toHaveBeenCalled();
+    expect(m.status().state).toBe('off');
   });
 
   it('discards port and health results from a stopped generation', async () => {
@@ -57,6 +73,7 @@ describe('AsrManager', () => {
     const o = { ...base(), pickPort: vi.fn(() => port.promise), fetch: vi.fn(() => health.promise) };
     const m = new AsrManager(o);
     const starting = m.start();
+    await vi.waitFor(() => expect(o.pickPort).toHaveBeenCalledOnce());
     m.stop();
     port.resolve(30123);
     await starting;
@@ -97,13 +114,62 @@ describe('AsrManager', () => {
     const m = new AsrManager(o);
     await m.start();
     expect(o.spawn).toHaveBeenCalledOnce();
+    expect(o.spawn).toHaveBeenCalledWith('uv', expect.any(Array), expect.objectContaining({
+      env: expect.objectContaining({ ZHENGYIN_ASR_PARENT_PIPE: '1' }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
     const child = (o.spawn as unknown as { mock: { results: Array<{ value: ReturnType<typeof fakeChild> }> } })
       .mock.results[0].value;
-    child.stderr.emit('data', Buffer.from('\u001b[31m模型加载中\u001b[0m\n'));
+    child.stderr.write('\u001b[31m模型加载中\u001b[0m\n');
     expect(m.status().log.join('')).toContain('模型加载中');
     await new Promise((r) => setTimeout(r, 0));
     expect(m.status().state).toBe('ready');
     expect(m.status().port).toBe(30123);
+  });
+
+  it('从依赖安装切到模型加载，进度消除停滞提示，无进展超时关闭本次进程', async () => {
+    let now = 0;
+    let tick = deferred<void>();
+    const o = {
+      ...base(), now: () => now,
+      fetch: vi.fn(async () => Response.json({ ok: false })) as unknown as typeof fetch,
+      sleep: vi.fn(() => tick.promise),
+    };
+    const m = new AsrManager(o);
+    await m.start();
+    const child = vi.mocked(o.spawn).mock.results[0].value as unknown as ReturnType<typeof fakeChild>;
+    expect(m.status()).toMatchObject({ state: 'starting', stage: 'dependencies', stalled: false });
+    await vi.waitFor(() => expect(o.sleep).toHaveBeenLastCalledWith(1000));
+    now = 120_000;
+    child.stdout.write('[zhengyin-asr] parent-ping\n');
+    expect(m.status().stalled).toBe(true);
+    child.stdout.write('[zhengyin-asr] mo');
+    child.stdout.write('del\n');
+    expect(m.status()).toMatchObject({ state: 'starting', stage: 'model', stalled: false });
+    const checkModel = tick.resolve;
+    tick = deferred<void>();
+    checkModel();
+    await vi.waitFor(() => expect(o.sleep).toHaveBeenLastCalledWith(250));
+    now += 120_000;
+    child.stderr.write('正在下载模型 25%\r正在下载模型 26%\r\n');
+    expect(m.status()).toMatchObject({ stalled: false, log: ['正在下载模型 25%', '正在下载模型 26%'] });
+    now += 600_000;
+    const resume = tick.resolve;
+    tick = deferred<void>();
+    resume();
+    await vi.waitFor(() => expect(m.status()).toMatchObject({ state: 'error', error: expect.stringContaining('加载识别模型超时') }));
+    expect(o.killTree).toHaveBeenCalledExactlyOnceWith(4242);
+  });
+
+  it('依赖安装失败保留退出码与 stderr', async () => {
+    const o = { ...base(), fetch: vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch };
+    const m = new AsrManager(o);
+    await m.start();
+    const child = vi.mocked(o.spawn).mock.results[0].value as unknown as ReturnType<typeof fakeChild>;
+    child.stderr.write('error: Failed to download torch\n');
+    child.emit('close', 1, null);
+    expect(m.status()).toMatchObject({ state: 'error', error: expect.stringContaining('安装识别依赖失败（退出码 1）') });
+    expect(m.status().log).toContain('error: Failed to download torch');
   });
 
   it('显式端口有人在听 → 接管，不 spawn', async () => {

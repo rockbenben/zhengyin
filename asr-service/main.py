@@ -15,6 +15,28 @@ uvicorn 在仓库根找不到 main.py）。
 import io
 import logging
 import os
+import sys
+from threading import Thread
+from time import sleep
+
+
+def exit_when_parent_disconnects() -> None:
+    # 进程树清理是正常退出路径。主服务被强制终止时，stdout 管道失去读端。
+    # 直接写文件描述符，避免干扰日志，主服务会丢弃这行内部探测消息。
+    try:
+        while True:
+            os.write(sys.stdout.fileno(), b"[zhengyin-asr] parent-ping\n")
+            sleep(1)
+    except OSError:
+        pass
+    os._exit(0)
+
+
+if os.environ.get("ZHENGYIN_ASR_PARENT_PIPE") == "1":
+    Thread(target=exit_when_parent_disconnects, daemon=True).start()
+
+# uv 已经交给 Python，后续耗时属于模型初始化。主服务用这一行切换启动阶段。
+print("[zhengyin-asr] model", flush=True)
 
 import numpy as np
 import soundfile as sf
