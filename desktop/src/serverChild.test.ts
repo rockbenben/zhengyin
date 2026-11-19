@@ -53,6 +53,19 @@ describe('启动接线', () => {
     expect(result).toEqual([1, false, { code: 'DATA_LOCK_BUSY', message }]);
     await handle.stop();
   });
+  it('通过 IPC 让真实 Node 子进程自行清理并正常退出', async () => {
+    const write = vi.fn();
+    const spawnFn = ((_file: string, _args: readonly string[], opts: SpawnOptions) => spawn(process.execPath,
+      ['-e', `process.on('message', (msg) => {
+        if (msg === 'shutdown') process.stdout.write('cleaned', () => process.exit(0));
+      });`], opts)) as unknown as typeof spawn;
+    const handle = await startServer({ paths, port: 1, log: { write } as unknown as LogSink, spawnFn });
+    const onExit = vi.fn();
+    handle.onExit(onExit);
+    await handle.stop();
+    expect(write).toHaveBeenCalledWith('cleaned');
+    expect(onExit).toHaveBeenCalledExactlyOnceWith(0, true, null);
+  });
   it('锁失败不再等健康超时', async () => {
     const fetchFn = vi.fn();
     expect(await waitUntilHealthy(1, { shouldStop: () => true, fetchFn })).toBe(false);

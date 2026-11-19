@@ -7,7 +7,9 @@ export interface DesktopSettings {
   preferences?: RendererPreferences;
 }
 
-const PREFERENCE_KEYS = ['overprint.hue', 'overprint.paper', 'pron:noise-suppression'] as const;
+const PREFERENCE_KEYS = [
+  'overprint.hue', 'overprint.paper', 'pron:noise-suppression', 'pron:ai-show-subscription-plans',
+] as const;
 type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
 export type RendererPreferences = Partial<Record<PreferenceKey, string>>;
 
@@ -16,7 +18,8 @@ export function isPreference(key: unknown, value: unknown): key is PreferenceKey
   switch (key) {
     case 'overprint.hue': return /^\d{1,3}$/.test(value) && Number(value) < 360;
     case 'overprint.paper': return ['"light"', '"dark"', '"system"'].includes(value);
-    case 'pron:noise-suppression': return value === 'on' || value === 'off';
+    case 'pron:noise-suppression':
+    case 'pron:ai-show-subscription-plans': return value === 'on' || value === 'off';
     default: return false;
   }
 }
