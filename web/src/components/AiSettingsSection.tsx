@@ -6,8 +6,9 @@ import { api } from '../api';
 import type {
   AiCliKind, AiEndpointRecord, AiMode, AiProtocol, AiSettings, AiStatusInfo, AiTestResult,
 } from '../types';
-import { AI_PRESETS, modelSuggestionsFor, visibleAiPresets, type AiPreset } from '../lib/aiPresets';
+import { AI_PRESETS, visibleAiPresets } from '../lib/aiPresets';
 import { clearAiDraft, getAiDraft, setAiDraft } from '../lib/aiDraft';
+import { getPreference, setPreference, SHOW_PLANS_KEY } from '../lib/preferences';
 
 const CLI_LABELS: Record<AiCliKind, string> = {
   claude: 'Claude Code',
@@ -37,8 +38,8 @@ const CLI_EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'max', label: '最大' },
 ];
 
-/** 超过这个数就先折叠——目录里几十家平铺出来比选不出来更难受（家数跟着目录变，不写死） */
-const CHIP_LIMIT = 8;
+const HAS_SUBSCRIPTION_PLANS = AI_PRESETS.some((p) => p.hidden);
+const PRESETS_BY_KEY = new Map(AI_PRESETS.map((preset) => [preset.providerKey, preset]));
 
 const hostOf = (url: string): string => {
   try { return new URL(url).host; } catch { return ''; }
@@ -53,21 +54,25 @@ const hostOf = (url: string): string => {
  */
 export default function AiSettingsSection() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
+  const [savedEndpointId, setSavedEndpointId] = useState('');
   const [status, setStatus] = useState<AiStatusInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
-  const [showAll, setShowAll] = useState(false);
+  const [manualModel, setManualModel] = useState(false);
+  const [showPlans, setShowPlans] = useState(() => getPreference(SHOW_PLANS_KEY) === 'on');
   const originalHosts = useRef<Record<string, string>>({});
-  const modelListId = useId();
+  const providerId = useId();
+  const modelId = useId();
 
   useEffect(() => {
     Promise.all([api.aiSettings(), api.aiStatus()])
       .then(([s, st]) => {
         // 有草稿就用草稿——那是用户自己刚改的、还没保存的那一份。
         setSettings(getAiDraft() ?? s);
+        setSavedEndpointId(s.endpointId);
         setStatus(st);
         originalHosts.current = Object.fromEntries(
           Object.entries(s.endpoints).map(([k, v]) => [k, hostOf(v.baseUrl)]),
@@ -98,6 +103,7 @@ export default function AiSettingsSection() {
 
   const setMode = (mode: AiMode) => {
     edit((s) => ({ ...s, mode }));
+    setManualModel(false);
     setErr(null);
     setTestResult(null);
   };
@@ -117,31 +123,20 @@ export default function AiSettingsSection() {
   };
 
   /** 切过去时保留各家自己的地址/模型/密钥；第一次点某家才按预置填一份。 */
-  const selectProvider = (p: AiPreset) => {
+  const selectProvider = (endpointId: string) => {
+    const p = PRESETS_BY_KEY.get(endpointId);
     edit((s) => {
-      if (s.endpoints[p.providerKey]) return { ...s, endpointId: p.providerKey };
+      if (s.endpoints[endpointId]) return { ...s, endpointId };
+      const endpoint: AiEndpointRecord = p
+        ? { protocol: p.protocol, baseUrl: p.base, key: '', model: p.model }
+        : { protocol: 'openai', baseUrl: '', key: '', model: '' };
       return {
         ...s,
-        endpointId: p.providerKey,
-        endpoints: {
-          ...s.endpoints,
-          [p.providerKey]: { protocol: p.protocol, baseUrl: p.base, key: '', model: p.model },
-        },
+        endpointId,
+        endpoints: { ...s.endpoints, [endpointId]: endpoint },
       };
     });
-    setErr(null);
-    setTestResult(null);
-  };
-
-  const selectCustom = () => {
-    edit((s) => {
-      if (s.endpoints.custom) return { ...s, endpointId: 'custom' };
-      return {
-        ...s,
-        endpointId: 'custom',
-        endpoints: { ...s.endpoints, custom: { protocol: 'openai', baseUrl: '', key: '', model: '' } },
-      };
-    });
+    setManualModel(false);
     setErr(null);
     setTestResult(null);
   };
@@ -150,6 +145,7 @@ export default function AiSettingsSection() {
     if (!settings) throw new Error('还没加载完');
     const next = await api.saveAiSettings(settings);
     setSettings(next);
+    setSavedEndpointId(next.endpointId);
     // 保存过了，草稿就作废——服务端那份才是真的。
     clearAiDraft();
     originalHosts.current = Object.fromEntries(
@@ -192,17 +188,22 @@ export default function AiSettingsSection() {
   }
 
   const active = settings.endpoints[settings.endpointId];
-  const preset = AI_PRESETS.find((p) => p.providerKey === settings.endpointId);
+  const preset = PRESETS_BY_KEY.get(settings.endpointId);
   const isCustom = settings.endpointId !== '' && !preset;
   const ready = Boolean(status?.configured && status.consent);
+  const switchedMode = status.mode !== settings.mode;
+  const switchedProvider = settings.mode === 'api' && settings.endpointId !== savedEndpointId;
 
-  const candidates = visibleAiPresets(showAll, active?.baseUrl);
-  let chips = candidates;
-  if (!showAll && candidates.length > CHIP_LIMIT) {
-    chips = candidates.slice(0, CHIP_LIMIT);
-    const current = candidates.find((p) => p.providerKey === settings.endpointId);
-    if (current && !chips.includes(current)) chips = [...chips, current];
+  const providerOptions = visibleAiPresets(showPlans, settings.endpointId)
+    .map((p) => ({ value: p.providerKey, label: p.label }));
+  providerOptions.push({ value: 'custom', label: '自定义' });
+  for (const [id, endpoint] of Object.entries(settings.endpoints)) {
+    if (id !== 'custom' && !PRESETS_BY_KEY.has(id)) {
+      providerOptions.push({ value: id, label: `自定义 · ${hostOf(endpoint.baseUrl) || id}` });
+    }
   }
+  const modelOptions = preset?.models.map((model) => ({ value: model.id, label: model.name })) ?? [];
+  const hasModelOptions = modelOptions.length > 0;
 
   const originalHost = originalHosts.current[settings.endpointId];
   const hostMoved = Boolean(active?.key && originalHost && hostOf(active.baseUrl) !== originalHost);
@@ -239,40 +240,45 @@ export default function AiSettingsSection() {
           <Radio value="cli">用本机命令行</Radio>
         </Radio.Group>
 
-        {status.mode !== settings.mode && (
+        {(switchedMode || switchedProvider) && (
           <Typography.Text type="warning" className="measure" style={{ fontSize: 13 }}>
-            你切换了模式：上面的状态说的还是已经保存的那一套，按「保存」之后才生效。
+            {switchedMode ? '模式' : '服务商'}已切换，按「保存」之后才生效。
           </Typography.Text>
         )}
 
         {settings.mode === 'api' ? (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <div>
-              <Typography.Text strong>服务商</Typography.Text>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                {chips.map((p) => (
-                  <Button
-                    key={p.providerKey}
-                    size="small"
-                    aria-pressed={settings.endpointId === p.providerKey}
-                    onClick={() => selectProvider(p)}
+              <Typography.Text strong><label htmlFor={providerId}>服务商</label></Typography.Text>
+              <Select
+                id={providerId}
+                value={settings.endpointId || undefined}
+                onChange={selectProvider}
+                options={providerOptions}
+                showSearch={{ optionFilterProp: ['label', 'value'] }}
+                virtual={false}
+                placeholder="选择或搜索服务商"
+                notFoundContent="没有匹配的服务商"
+                size="large"
+                style={{ width: '100%', marginTop: 8 }}
+              />
+              {HAS_SUBSCRIPTION_PLANS && (
+                <details style={{ marginTop: 8 }}>
+                  <summary>高级选项</summary>
+                  <Checkbox
+                    checked={showPlans}
+                    onChange={(e) => {
+                      setShowPlans(e.target.checked);
+                      setPreference(SHOW_PLANS_KEY, e.target.checked ? 'on' : 'off');
+                    }}
                   >
-                    {p.label}
-                  </Button>
-                ))}
-                <Button
-                  size="small"
-                  aria-pressed={isCustom}
-                  onClick={selectCustom}
-                >
-                  自定义
-                </Button>
-                {candidates.length > CHIP_LIMIT && (
-                  <Button type="link" size="small" onClick={() => setShowAll((v) => !v)}>
-                    {showAll ? '收起' : '更多厂商'}
-                  </Button>
-                )}
-              </div>
+                    显示订阅套餐接口
+                  </Checkbox>
+                  <Typography.Text type="secondary" className="measure" style={{ fontSize: 13 }}>
+                    套餐接口仅限在允许的 AI 编程工具中交互式使用。超出使用范围可能导致订阅停用，或账号、密钥被封禁。
+                  </Typography.Text>
+                </details>
+              )}
             </div>
 
             {!active ? (
@@ -308,17 +314,47 @@ export default function AiSettingsSection() {
                 </div>
 
                 <div>
-                  <Typography.Text strong>模型</Typography.Text>
-                  <Input
-                    aria-label="模型"
-                    list={modelListId}
-                    value={active.model}
-                    placeholder={preset ? '从下面的候选里选，或自己填' : '模型名，如 gpt-6-luna'}
-                    onChange={(e) => patchActive({ model: e.target.value })}
-                  />
-                  <datalist id={modelListId}>
-                    {modelSuggestionsFor(preset).map((m) => <option key={m} value={m} />)}
-                  </datalist>
+                  <Typography.Text strong><label htmlFor={modelId}>模型</label></Typography.Text>
+                  <Space.Compact block size="large" style={{ marginTop: 8 }}>
+                    {manualModel || !hasModelOptions ? (
+                      <Input
+                        id={modelId}
+                        value={active.model}
+                        placeholder="输入模型 ID"
+                        autoComplete="off"
+                        spellCheck={false}
+                        style={{ flex: 1, minWidth: 0 }}
+                        onChange={(e) => patchActive({ model: e.target.value })}
+                      />
+                    ) : (
+                      <Select
+                        id={modelId}
+                        value={active.model || undefined}
+                        placeholder="选择或搜索模型"
+                        notFoundContent="没有匹配的模型"
+                        showSearch={{ optionFilterProp: ['label', 'value'] }}
+                        virtual={false}
+                        style={{ flex: 1, minWidth: 0 }}
+                        options={modelOptions}
+                        onChange={(model) => patchActive({ model })}
+                        optionRender={({ data }) => (
+                          <div style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+                            <span>{data.label}{data.value === preset?.model && ' · 默认'}</span>
+                            {data.label !== data.value && (
+                              <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                                {data.value}
+                              </Typography.Text>
+                            )}
+                          </div>
+                        )}
+                      />
+                    )}
+                    {hasModelOptions && (
+                      <Button onClick={() => setManualModel((v) => !v)}>
+                        {manualModel ? '选模型' : '手填 ID'}
+                      </Button>
+                    )}
+                  </Space.Compact>
                 </div>
 
                 <div>

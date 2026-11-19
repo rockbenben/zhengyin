@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AI_PRESETS, findPresetByUrl, modelSuggestionsFor, visibleAiPresets, WEB_AI_PROTOCOLS } from './aiPresets.js';
+import { AI_PRESETS, findPresetByUrl, visibleAiPresets, WEB_AI_PROTOCOLS } from './aiPresets.js';
 import { findProvider } from '../vendor/providerCatalog.generated.js';
 
 describe('AI 预置', () => {
@@ -18,11 +18,11 @@ describe('AI 预置', () => {
     expect(AI_PRESETS.some((p) => p.catalogKey === 'gemini-openai')).toBe(false);
   });
 
-  it('hidden 的订阅套餐默认藏起来，当前地址命中时留住', () => {
+  it('hidden 的订阅套餐默认藏起来，当前仍选中该服务商时留住', () => {
     const hidden = AI_PRESETS.find((p) => p.hidden);
     expect(hidden, '目录里没有 hidden 预置，这条断言失去意义').toBeTruthy();
     expect(visibleAiPresets(false)).not.toContain(hidden);
-    expect(visibleAiPresets(false, hidden!.url)).toContain(hidden);
+    expect(visibleAiPresets(false, hidden!.providerKey)).toContain(hidden);
   });
 
   it('按完整地址或 base 能找到同一个预置', () => {
@@ -33,8 +33,8 @@ describe('AI 预置', () => {
 
   it('模型候选来自目录；自定义地址没有候选', () => {
     const claude = AI_PRESETS.find((p) => p.catalogKey === 'claude')!;
-    expect(modelSuggestionsFor(claude).length).toBeGreaterThan(0);
+    expect(claude.models.length).toBeGreaterThan(0);
     const custom = AI_PRESETS.find((p) => p.catalogKey === 'llm');
-    if (custom) expect(modelSuggestionsFor(custom)).toEqual([]);
+    if (custom) expect(custom.models).toEqual([]);
   });
 });

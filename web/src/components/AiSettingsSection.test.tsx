@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AiSettingsSection from './AiSettingsSection';
 import { api } from '../api';
 import { clearAiDraft } from '../lib/aiDraft';
+import { AI_PRESETS } from '../lib/aiPresets';
+import { SHOW_PLANS_KEY } from '../lib/preferences';
 import type { AiSettings, AiStatusInfo } from '../types';
 
 const settingsOf = (over: Partial<AiSettings> = {}): AiSettings => ({
@@ -26,11 +28,19 @@ const maskedDeepSeek = {
   model: 'deepseek-flash',
 };
 
+async function chooseProvider(name: string, search?: string) {
+  const provider = await screen.findByRole('combobox', { name: '服务商' });
+  fireEvent.mouseDown(provider);
+  if (search) fireEvent.change(provider, { target: { value: search } });
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   // 草稿是模块级的（要跨卸载保留），所以每条用例都得从头开始——
   // 不清的话，上一条留下的草稿会漏进这一条，测的就不是这条用例了。
   clearAiDraft();
+  localStorage.removeItem(SHOW_PLANS_KEY);
 });
 
 describe('AI 设置：接口模式', () => {
@@ -40,10 +50,10 @@ describe('AI 设置：接口模式', () => {
     render(<AiSettingsSection />);
 
     expect(await screen.findByText('调接口')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: 'DeepSeek' }));
+    await chooseProvider('DeepSeek', 'deep');
 
     expect((screen.getByLabelText('接口地址') as HTMLInputElement).value).toBe('https://api.deepseek.com');
-    expect((screen.getByLabelText('模型') as HTMLInputElement).value).toBe('deepseek-flash');
+    expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
   });
 
   it('已保存的密钥只显示打码', async () => {
@@ -62,15 +72,73 @@ describe('AI 设置：接口模式', () => {
     vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
     render(<AiSettingsSection />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'DeepSeek' }));
+    await chooseProvider('DeepSeek');
     fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'sk-test-1234' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+    await chooseProvider('OpenAI');
     expect((screen.getByLabelText('接口地址') as HTMLInputElement).value).toContain('openai.com');
 
-    fireEvent.click(screen.getByRole('button', { name: 'DeepSeek' }));
+    await chooseProvider('DeepSeek');
     expect((screen.getByLabelText('密钥') as HTMLInputElement).value).toBe('sk-test-1234');
-    expect((screen.getByLabelText('模型') as HTMLInputElement).value).toBe('deepseek-flash');
+    expect(screen.getByText('DeepSeek Flash')).toBeTruthy();
+  });
+
+  it('展开已预填模型的列表时可按 ID 搜索，手填值会随服务商保留', async () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      endpointId: 'deepseek',
+      endpoints: { deepseek: maskedDeepSeek },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
+    render(<AiSettingsSection />);
+
+    const model = await screen.findByRole('combobox', { name: '模型' });
+    fireEvent.mouseDown(model);
+    expect(await screen.findByRole('option', { name: /DeepSeek Flash.*默认/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /DeepSeek V4 Pro/ })).toBeTruthy();
+    fireEvent.change(model, { target: { value: 'deepseek-v4-pro' } });
+    expect(screen.queryByRole('option', { name: /DeepSeek Flash/ })).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: /DeepSeek V4 Pro/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: '手填 ID' }));
+    const input = screen.getByRole('textbox', { name: '模型' });
+    expect(input).toHaveProperty('value', 'deepseek-v4-pro');
+    fireEvent.change(input, { target: { value: 'my-model' } });
+    await chooseProvider('OpenAI');
+    await chooseProvider('DeepSeek');
+    expect(screen.getByText('my-model')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '手填 ID' }));
+    expect(screen.getByRole('textbox', { name: '模型' })).toHaveProperty('value', 'my-model');
+  });
+
+  it('订阅套餐默认从选择器隐藏，开启高级选项后可以选择', async () => {
+    const plan = AI_PRESETS.find((p) => p.hidden)!;
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf());
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
+    render(<AiSettingsSection />);
+
+    const provider = await screen.findByRole('combobox', { name: '服务商' });
+    fireEvent.mouseDown(provider);
+    expect(screen.queryByRole('option', { name: plan.label })).toBeNull();
+    fireEvent.keyDown(provider, { key: 'Escape' });
+    fireEvent.click(screen.getByText('高级选项'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '显示订阅套餐接口' }));
+    await chooseProvider(plan.label);
+    expect(screen.getByRole('textbox', { name: '接口地址' })).toHaveProperty('value', plan.base);
+  });
+
+  it('上游移除的服务商仍可作为已保存的自定义接口选回', async () => {
+    vi.spyOn(api, 'aiSettings').mockResolvedValue(settingsOf({
+      endpointId: 'removed-provider',
+      endpoints: {
+        'removed-provider': { ...maskedDeepSeek, baseUrl: 'https://example.test/v1', model: 'legacy-model' },
+      },
+    }));
+    vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
+    render(<AiSettingsSection />);
+
+    await chooseProvider('DeepSeek');
+    await chooseProvider('自定义 · example.test', 'example.test');
+    expect(screen.getByRole('textbox', { name: '模型' })).toHaveProperty('value', 'legacy-model');
   });
 
   it('保存时把打码密钥原样带回，服务端才知道没动它', async () => {
@@ -82,7 +150,7 @@ describe('AI 设置：接口模式', () => {
     vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
 
     render(<AiSettingsSection />);
-    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /我同意把发音档案/ }));
     fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
 
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
@@ -132,7 +200,7 @@ describe('AI 设置：接口模式', () => {
     vi.spyOn(api, 'aiStatus').mockResolvedValue(statusOf());
     render(<AiSettingsSection />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '自定义' }));
+    await chooseProvider('自定义', '自定义');
     expect(screen.getByText('协议')).toBeTruthy();
     expect((screen.getByLabelText('接口地址') as HTMLInputElement).value).toBe('');
   });
@@ -228,12 +296,12 @@ describe('切组不丢草稿', () => {
     withDeepSeek();
     const first = render(<AiSettingsSection />);
     fireEvent.change(await screen.findByLabelText('密钥'), { target: { value: 'sk-new-value' } });
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /我同意把发音档案/ }));
     first.unmount();
 
     render(<AiSettingsSection />);
     expect((await screen.findByLabelText('密钥') as HTMLInputElement).value).toBe('sk-new-value');
-    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole('checkbox', { name: /我同意把发音档案/ })).toHaveProperty('checked', true);
   });
 
   it('保存过之后草稿作废——重新进来是服务端那份，不是旧草稿', async () => {

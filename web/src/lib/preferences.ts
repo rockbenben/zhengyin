@@ -3,6 +3,7 @@ import { desktopBridge } from './desktop';
 export const HUE_KEY = 'overprint.hue';
 export const PAPER_KEY = 'overprint.paper';
 export const NS_KEY = 'pron:noise-suppression';
+export const SHOW_PLANS_KEY = 'pron:ai-show-subscription-plans';
 
 let desktopPreferences: Record<string, string> = {};
 
@@ -11,7 +12,7 @@ export async function loadDesktopPreferences(): Promise<void> {
   if (!bridge) return;
   try {
     desktopPreferences = { ...await bridge.preferences() };
-    for (const key of [HUE_KEY, PAPER_KEY, NS_KEY]) {
+    for (const key of [HUE_KEY, PAPER_KEY, NS_KEY, SHOW_PLANS_KEY]) {
       const legacy = localStorage.getItem(key);
       if (legacy !== null && !Object.hasOwn(desktopPreferences, key)) setPreference(key, legacy);
     }

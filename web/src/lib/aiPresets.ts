@@ -1,4 +1,4 @@
-import { PROVIDER_CATALOG, type CatalogProvider } from '../vendor/providerCatalog.generated.js';
+import { PROVIDER_CATALOG, type CatalogModel, type CatalogProvider } from '../vendor/providerCatalog.generated.js';
 
 export const WEB_AI_PROTOCOLS = ['openai', 'anthropic', 'gemini'] as const;
 export type WebAiProtocol = typeof WEB_AI_PROTOCOLS[number];
@@ -15,7 +15,7 @@ export interface AiPreset {
   catalogKey: string;
   protocol: WebAiProtocol;
   model: string;
-  models: readonly string[];
+  models: readonly Pick<CatalogModel, 'id' | 'name'>[];
   hidden?: true;
 }
 
@@ -41,7 +41,7 @@ function preset(label: string, provider: CatalogProvider, endpoint: CatalogProvi
     catalogKey: provider.key,
     protocol: provider.protocol as WebAiProtocol,
     model: provider.models.length === 0 ? '' : (provider.defaultModel ?? ''),
-    models: provider.models.map((m) => m.id),
+    models: provider.models,
     ...(provider.hidden ? { hidden: true as const } : {}),
   };
 }
@@ -60,9 +60,9 @@ export const AI_PRESETS: readonly AiPreset[] = PROVIDER_CATALOG
     return [preset(DISPLAY[p.key] ?? p.label, p, p.endpoints[0]!, p.key)];
   });
 
-export function visibleAiPresets(showHidden: boolean, currentUrl?: string): readonly AiPreset[] {
+export function visibleAiPresets(showHidden: boolean, currentProviderKey?: string): readonly AiPreset[] {
   if (showHidden) return AI_PRESETS;
-  return AI_PRESETS.filter((p) => !p.hidden || (currentUrl !== undefined && p.url === currentUrl));
+  return AI_PRESETS.filter((p) => !p.hidden || p.providerKey === currentProviderKey);
 }
 
 const norm = (url: string) => url.trim().replace(/\/+$/, '').replace(/\/(chat\/completions|messages)$/i, '');
@@ -71,8 +71,4 @@ export function findPresetByUrl(url: string): AiPreset | undefined {
   const u = norm(url);
   if (!u) return undefined;
   return AI_PRESETS.find((p) => norm(p.url) === u || norm(p.base) === u);
-}
-
-export function modelSuggestionsFor(preset: AiPreset | undefined): readonly string[] {
-  return preset ? preset.models : [];
 }
