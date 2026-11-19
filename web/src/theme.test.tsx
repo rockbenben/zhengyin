@@ -49,6 +49,14 @@ describe.each([['浅色', LIGHT], ['深色', DARK]] as Array<[string, Palette]>)
   (_theme, p) => {
     const components = makeTheme(p).components as Record<string, Record<string, string>>;
 
+    it('下拉选中项及其模型 ID 在悬停时仍然可读', () => {
+      const select = components.Select;
+      for (const bg of [select.optionSelectedBg, select.controlItemBgActiveHover]) {
+        expect(contrast(select.optionSelectedColor, bg)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(p.quiet, bg)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
     describe.each(COMPONENTS)('%s', (name) => {
       const tokens = components[name];
 

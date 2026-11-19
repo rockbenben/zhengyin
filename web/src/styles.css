@@ -12,6 +12,40 @@
      36 落在中文舒适行长 25–40 字之间。 */
   --measure: 36em;
   --gutter: clamp(18px, 4vw, 40px);
+  --surface-radius: 8px;
+  color-scheme: light dark;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Electron 的主页面、侧栏和内嵌横滚区共用滚动条，保留系统高对比度样式。 */
+@media (forced-colors: none) {
+  :root[data-runtime="desktop"] {
+    scrollbar-gutter: stable;
+    --scroll-thumb: color-mix(in srgb, var(--quiet) 76%, transparent);
+  }
+
+  :root[data-runtime="desktop"]::-webkit-scrollbar,
+  :root[data-runtime="desktop"] ::-webkit-scrollbar { width: 12px; height: 12px; }
+
+  :root[data-runtime="desktop"]::-webkit-scrollbar-thumb,
+  :root[data-runtime="desktop"] ::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 6px;
+  }
+
+  :root[data-runtime="desktop"]::-webkit-scrollbar-thumb:hover,
+  :root[data-runtime="desktop"]::-webkit-scrollbar-thumb:active,
+  :root[data-runtime="desktop"] ::-webkit-scrollbar-thumb:hover,
+  :root[data-runtime="desktop"] ::-webkit-scrollbar-thumb:active {
+    background-color: var(--blue);
+  }
+
+  :root[data-runtime="desktop"]::-webkit-scrollbar-corner,
+  :root[data-runtime="desktop"] ::-webkit-scrollbar-corner { background: transparent; }
 }
 
 html, body, #root { height: 100%; }
@@ -28,6 +62,15 @@ body {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
+
+/* 搜索为空时保留当前值的可读性。输入搜索词后仍由 Select 隐藏当前值。 */
+:root[data-theme] .ant-select-single.ant-select-open
+  .ant-select-content-has-value:not(.ant-select-content-has-search-value) {
+  opacity: 1;
+  color: var(--quiet);
+}
+
+.ant-select-dropdown { border: 1px solid var(--rule); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
@@ -545,6 +588,19 @@ code { white-space: nowrap; }
 .app-nav .nav-foot { margin-block-start: auto; }
 .nav-more { display: none; }
 
+@media (min-width: 992px) and (min-height: 280px) {
+  .app-rail { overflow: clip; }
+  .nav-brand, .nav-primary { flex: none; }
+  .app-nav, .nav-more-panel { min-height: 0; }
+  .nav-more-panel { overflow-y: auto; overscroll-behavior-y: contain; }
+}
+
+@media (min-width: 992px) and (max-height: 640px) {
+  .nav-brand { padding-block: 12px; }
+  .nav-primary, .nav-group { padding-block: 8px; }
+  .nav-foot { padding-block: 10px; }
+}
+
 /* 「跳到正文」。平时**不占位也不可见**，但仍在 tab 序里——Tab 一下就现身。
    不用 display:none / visibility:hidden：那两个会把它从 tab 序里摘掉，等于没做。
    落到 #main 上（Content 带 tabIndex="-1"，好让焦点真的停在那儿，
@@ -604,7 +660,7 @@ code { white-space: nowrap; }
     overscroll-behavior: contain;
     background: var(--paper);
     border: 1px solid var(--rule);
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 var(--surface-radius) var(--surface-radius);
     box-shadow: 0 10px 24px color-mix(in srgb, var(--black) 12%, transparent);
   }
   .nav-more-panel[data-open="true"] { display: block; }
@@ -675,13 +731,15 @@ code { white-space: nowrap; }
   isolation: isolate;
   padding: clamp(20px, 4vw, 44px);
   border: 1px solid var(--rule);
-  border-radius: 12px;
+  border-radius: var(--surface-radius);
   background: var(--paper-deep);
 }
 .lookup-content { max-width: 38rem; }
 .lookup-panel h1 { font-size: clamp(31px, 5vw, 56px); line-height: 1.15; }
 .lookup-panel p { margin: 10px 0 22px; color: var(--quiet); max-width: var(--measure); }
 .lookup-panel .lookup-feedback { margin: 10px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.lookup-asr:not(:empty) { margin-block-start: 12px; }
+.lookup-asr > [role="status"] { font-size: 13px; }
 .lookup-field { width: 100%; }
 .lookup-field .ant-input-prefix { color: var(--quiet); }
 .lookup-field input::placeholder { color: var(--quiet); }
@@ -762,7 +820,7 @@ code { white-space: nowrap; }
   min-width: 0;
   padding: clamp(16px, 3vw, 28px);
   border: 1px solid var(--rule);
-  border-radius: 10px;
+  border-radius: var(--surface-radius);
   background: var(--paper-deep);
 }
 .practice-listen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }

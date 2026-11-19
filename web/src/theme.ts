@@ -119,9 +119,10 @@ const FONT = {
   mono: 'Consolas, "Cascadia Mono", monospace',
 } as const;
 
-/** 把调色板写成 CSS variables，供 styles.css 使用——保证 antd 与手写样式同源，不会漂移 */
-export function applyPalette(p: Palette): void {
+/** 同步 CSS 调色板与明暗模式，供原生控件和套印混色使用。 */
+export function applyPalette(p: Palette, dark: boolean): void {
   const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
   for (const [k, v] of Object.entries(p)) {
     root.style.setProperty(`--${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`, v);
   }
@@ -247,6 +248,14 @@ export function makeTheme(p: Palette): ThemeConfig {
       },
       Progress: { defaultColor: p.blue, remainingColor: p.rule },
       Input: { activeShadow: 'none' },
+      Select: {
+        optionSelectedColor: p.black,
+        optionSelectedBg: p.blueSoft,
+        controlItemBgActiveHover: p.blueSoft,
+        optionActiveBg: p.paperDeep,
+        colorTextPlaceholder: p.quiet,
+        colorTextQuaternary: p.quiet,
+      },
       Collapse: { headerBg: 'transparent', contentPadding: '14px 0 4px' },
       Tooltip: { colorBgSpotlight: p.black, colorTextLightSolid: p.paper },
       Empty: { colorTextDescription: p.quiet },

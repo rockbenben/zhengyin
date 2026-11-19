@@ -57,12 +57,7 @@ export default function AppLayout() {
   const palette = paletteFor(dark, hue);
   const changeInk = (h: number) => { setHue(h); saveHue(h); };
   const changePaper = (p: PaperPref) => { setPaper(p); savePaper(p); };
-  useEffect(() => {
-    applyPalette(palette);
-    // styles.css 里有几处要按主题改混色模式（深底上 multiply 会把蓝版吃掉），
-    // 靠这个属性切换，跟 prefers-color-scheme 的媒体查询双保险。
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  }, [palette, dark]);
+  useEffect(() => { applyPalette(palette, dark); }, [palette, dark]);
 
   const refreshCounts = useCallback(() => {
     api.reviewDue().then((d) => setDueCount(d.cards.length)).catch(() => {});
